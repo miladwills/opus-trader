@@ -436,12 +436,26 @@ class MarginMonitorService:
             # Never add more than needed, and respect free-balance reserve
             amount = min(amount, needed_amount, available_for_margin)
 
-            # Final check - in emergency allow any amount >= $0.01
+            # Final check - in emergency allow any amount >= $0.01.
+            # If the calculated amount fell below the minimum due to severity/needed
+            # clamps, retry by clamping up to effective_min (if balance permits).
             if amount < effective_min:
                 if is_emergency and amount >= 0.01:
                     pass  # Allow it
+                elif available_for_margin >= effective_min:
+                    # Calculated amount is too small but we have balance — use the
+                    # minimum instead of silently skipping. Log so the operator can
+                    # see the clamp happened.
+                    logger.warning(
+                        "[%s] MarginMonitor: calculated amount %.4f < min %.4f; "
+                        "clamping to minimum for retry",
+                        symbol,
+                        amount,
+                        effective_min,
+                    )
+                    amount = effective_min
                 else:
-                    sym_state["last_add_error"] = "Amount below minimum"
+                    sym_state["last_add_error"] = "Amount below minimum, insufficient balance for min retry"
                     self.state[symbol] = sym_state
                     continue
 
