@@ -813,13 +813,33 @@ def test_bridge_diagnostics_exposes_last_bootstrap_request_trace(
     payload = diagnostics_response.get_json()
 
     assert payload["request_diagnostics"]["last_bootstrap"]["route"] == "dashboard_bootstrap"
+    assert payload["request_diagnostics"]["last_bootstrap"]["snapshot_reuse_used"] is True
+    assert (
+        payload["request_diagnostics"]["last_bootstrap"]["bridge_reads"]["operation_counts"]["read_snapshot"]
+        == 1
+    )
+    assert (
+        payload["request_diagnostics"]["last_bootstrap"]["bridge_reads"]["operation_counts"]["read_snapshot:shared_reference"]
+        == 1
+    )
     assert (
         payload["request_diagnostics"]["last_bootstrap"]["bridge_reads"]["section_call_counts"]["summary"]
         >= 1
     )
     assert (
+        payload["request_diagnostics"]["bridge_diagnostics"]["snapshot_reuse_used"] is True
+    )
+    assert (
         payload["request_diagnostics"]["bridge_diagnostics"]["bridge_reads"]["operation_counts"]["read_snapshot"]
-        >= 1
+        == 1
+    )
+    assert (
+        payload["request_diagnostics"]["bridge_diagnostics"]["bridge_reads"]["operation_counts"]["read_snapshot:shared_reference"]
+        == 1
+    )
+    assert (
+        payload["request_diagnostics"]["bridge_diagnostics"]["bridge_reads"]["phase_ms"].get("snapshot_payload_copy_ms")
+        is None
     )
     assert payload["sections"]["bots_runtime_light"]["light_runtime_diagnostics"]["total_ms"] == 7.5
 

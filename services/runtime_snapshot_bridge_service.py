@@ -325,7 +325,11 @@ class RuntimeSnapshotBridgeService:
             return
         self._publish(reason=reason, event_types=event_types, force=True)
 
-    def read_snapshot(self) -> Optional[Dict[str, Any]]:
+    def read_snapshot(
+        self,
+        *,
+        copy_payload: bool = True,
+    ) -> Optional[Dict[str, Any]]:
         self._record_read_diagnostic(operation="read_snapshot")
         stat_started = time.monotonic()
         try:
@@ -346,6 +350,11 @@ class RuntimeSnapshotBridgeService:
                 and self._read_cache_mtime_ns == getattr(stat, "st_mtime_ns", None)
             ):
                 self._record_read_diagnostic(operation="read_snapshot:cache_hit")
+                if not copy_payload:
+                    self._record_read_diagnostic(
+                        operation="read_snapshot:shared_reference",
+                    )
+                    return self._read_cache
                 copy_started = time.monotonic()
                 payload = self._copy(self._read_cache)
                 self._record_read_diagnostic(
@@ -379,8 +388,13 @@ class RuntimeSnapshotBridgeService:
             return None
 
         with self._state_lock:
-            self._read_cache = self._copy(payload)
+            self._read_cache = payload
             self._read_cache_mtime_ns = getattr(stat, "st_mtime_ns", None)
+            if not copy_payload:
+                self._record_read_diagnostic(
+                    operation="read_snapshot:shared_reference",
+                )
+                return self._read_cache
         copy_started = time.monotonic()
         copied = self._copy(payload)
         self._record_read_diagnostic(
@@ -398,10 +412,27 @@ class RuntimeSnapshotBridgeService:
         normalized_section_name = str(section_name or "").strip()
         self._record_read_diagnostic(
             operation="read_section",
+        )
+        snapshot = self.read_snapshot()
+        return self.extract_section_from_snapshot(
+            snapshot,
+            normalized_section_name,
+            max_age_sec=max_age_sec,
+        )
+
+    def extract_section_from_snapshot(
+        self,
+        snapshot: Optional[Dict[str, Any]],
+        section_name: str,
+        *,
+        max_age_sec: Optional[float] = None,
+    ) -> Optional[Dict[str, Any]]:
+        normalized_section_name = str(section_name or "").strip()
+        self._record_read_diagnostic(
+            operation="extract_section_from_snapshot",
             section_name=normalized_section_name,
         )
         section_started = time.monotonic()
-        snapshot = self.read_snapshot()
         if not snapshot:
             return None
         sections = snapshot.get("sections") or {}
@@ -421,7 +452,7 @@ class RuntimeSnapshotBridgeService:
             return None
 
         shape_started = time.monotonic()
-        payload_valid = self._payload_shape_valid(section_name, payload)
+        payload_valid = self._payload_shape_valid(normalized_section_name, payload)
         self._record_read_diagnostic(
             metric_name="section_shape_validation_ms",
             metric_ms=(time.monotonic() - shape_started) * 1000.0,
@@ -430,7 +461,7 @@ class RuntimeSnapshotBridgeService:
             payload.setdefault("stale_data", True)
             payload["error"] = (
                 str(payload.get("error") or "").strip()
-                or f"{section_name}_payload_invalid"
+                or f"{normalized_section_name}_payload_invalid"
             )
             payload["integrity_shape_valid"] = False
 
@@ -439,17 +470,17 @@ class RuntimeSnapshotBridgeService:
         age_limit = (
             self._safe_float(max_age_sec, 0.0)
             if max_age_sec is not None
-            else self.READ_STALE_AGE_SEC.get(section_name, 10.0)
+            else self.READ_STALE_AGE_SEC.get(normalized_section_name, 10.0)
         )
         if age_limit <= 0:
-            age_limit = self.READ_STALE_AGE_SEC.get(section_name, 10.0)
+            age_limit = self.READ_STALE_AGE_SEC.get(normalized_section_name, 10.0)
         age_sec = now_ts - published_at if published_at > 0 else float("inf")
         meta = snapshot.get("meta", {}) if isinstance(snapshot.get("meta"), dict) else {}
         snapshot_fresh = age_sec <= age_limit
         if age_sec > age_limit:
             payload["stale_data"] = True
             if payload.get("error") in (None, "", 0):
-                payload["error"] = f"{section_name}_stale"
+                payload["error"] = f"{normalized_section_name}_stale"
         payload.setdefault("snapshot_published_at", published_at or None)
         payload.setdefault("snapshot_produced_at", meta.get("produced_at"))
         payload.setdefault("snapshot_producer", meta.get("producer"))

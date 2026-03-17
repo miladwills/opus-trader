@@ -324,6 +324,43 @@ def _bot_storage_read_diagnostics_context(label: str):
     return nullcontext({})
 
 
+def _runtime_snapshot_bridge_request_snapshot():
+    bridge = runtime_snapshot_bridge
+    if bridge is None or not hasattr(bridge, "read_snapshot"):
+        return None
+    try:
+        return bridge.read_snapshot(copy_payload=False)
+    except TypeError:
+        return bridge.read_snapshot()
+
+
+def _runtime_snapshot_bridge_extract_section(
+    snapshot: Dict[str, Any] | None,
+    section_name: str,
+    *,
+    max_age_sec: float | None = None,
+) -> Dict[str, Any] | None:
+    bridge = runtime_snapshot_bridge
+    if bridge is not None and hasattr(bridge, "extract_section_from_snapshot"):
+        return bridge.extract_section_from_snapshot(
+            snapshot,
+            section_name,
+            max_age_sec=max_age_sec,
+        )
+    if bridge is not None and hasattr(bridge, "read_section"):
+        return bridge.read_section(section_name, max_age_sec=max_age_sec)
+    return None
+
+
+def _runtime_snapshot_bridge_snapshot_reuse_supported() -> bool:
+    bridge = runtime_snapshot_bridge
+    return bool(
+        bridge is not None
+        and hasattr(bridge, "read_snapshot")
+        and hasattr(bridge, "extract_section_from_snapshot")
+    )
+
+
 def _dashboard_future_done(key: str, future) -> None:
     try:
         value = future.result()
@@ -647,11 +684,13 @@ def _is_bridge_producer_alive() -> bool:
     return alive
 
 
-def _bridge_section_usable(bridged) -> bool:
+def _bridge_section_usable(bridged, *, producer_alive: bool | None = None) -> bool:
     """Return True only when bridged section is present, producer alive, AND fresh."""
     if bridged is None:
         return False
-    if not _is_bridge_producer_alive():
+    if producer_alive is None:
+        producer_alive = _is_bridge_producer_alive()
+    if not producer_alive:
         return False
     if bridged.get("stale_data"):
         return False
@@ -2754,9 +2793,15 @@ def _build_summary_payload(
     }
 
 
-def _compute_bridge_status(summary, positions, bots_snapshot) -> Dict[str, Any]:
+def _compute_bridge_status(
+    summary,
+    positions,
+    bots_snapshot,
+    *,
+    producer_alive: bool | None = None,
+) -> Dict[str, Any]:
     """Per-section health: healthy only when producer alive AND all sections fresh."""
-    alive = _is_bridge_producer_alive()
+    alive = _is_bridge_producer_alive() if producer_alive is None else producer_alive
     sum_degraded = bool((summary or {}).get("stale_data"))
     pos_degraded = bool((positions or {}).get("stale_data"))
     bots_degraded = bool((bots_snapshot or {}).get("stale_data"))
@@ -2780,6 +2825,7 @@ def _build_dashboard_payload_from_snapshots(
     bots_snapshot: Dict[str, Any],
     market_snapshot: Dict[str, Any] | None = None,
     fast: bool = False,
+    producer_alive: bool | None = None,
 ) -> Dict[str, Any]:
     result = {
         "reason": reason,
@@ -2812,6 +2858,7 @@ def _build_dashboard_payload_from_snapshots(
         summary_snapshot,
         positions_snapshot,
         bots_snapshot,
+        producer_alive=producer_alive,
     )
     return result
 
@@ -2926,26 +2973,55 @@ def api_dashboard_bootstrap():
     """Single fast payload for first page load — critical data only."""
     request_started = time.monotonic()
     phase_ms: Dict[str, float] = {}
+    snapshot_reuse_used = _runtime_snapshot_bridge_snapshot_reuse_supported()
     with _runtime_snapshot_bridge_read_diagnostics_context(
         "api_dashboard_bootstrap"
     ) as bridge_reads, _bot_storage_read_diagnostics_context(
         "api_dashboard_bootstrap"
     ) as storage_reads:
         phase_started = time.monotonic()
+        bridge_snapshot = _runtime_snapshot_bridge_request_snapshot()
+        bridge_meta = (
+            bridge_snapshot.get("meta") or {}
+            if isinstance(bridge_snapshot, dict)
+            else {}
+        )
+        producer_alive = _pid_is_alive(
+            bridge_meta.get("producer_pid"),
+            expected_substring="runner.py",
+        )
         # Check if ALL critical bridge sections are usable (alive + fresh)
         # Prefer bots_runtime_light (fast cadence) over bots_runtime (slow).
-        summary_bridged = runtime_snapshot_bridge.read_section("summary")
-        positions_bridged = runtime_snapshot_bridge.read_section("positions")
-        bots_light_bridged = runtime_snapshot_bridge.read_section("bots_runtime_light")
+        summary_bridged = _runtime_snapshot_bridge_extract_section(
+            bridge_snapshot,
+            "summary",
+        )
+        positions_bridged = _runtime_snapshot_bridge_extract_section(
+            bridge_snapshot,
+            "positions",
+        )
+        bots_light_bridged = _runtime_snapshot_bridge_extract_section(
+            bridge_snapshot,
+            "bots_runtime_light",
+        )
         bots_bridged = (
             bots_light_bridged
-            if _bridge_section_usable(bots_light_bridged)
-            else runtime_snapshot_bridge.read_section("bots_runtime")
+            if _bridge_section_usable(
+                bots_light_bridged,
+                producer_alive=producer_alive,
+            )
+            else _runtime_snapshot_bridge_extract_section(
+                bridge_snapshot,
+                "bots_runtime",
+            )
         )
         all_fresh = (
-            _bridge_section_usable(summary_bridged)
-            and _bridge_section_usable(positions_bridged)
-            and _bridge_section_usable(bots_bridged)
+            _bridge_section_usable(summary_bridged, producer_alive=producer_alive)
+            and _bridge_section_usable(
+                positions_bridged,
+                producer_alive=producer_alive,
+            )
+            and _bridge_section_usable(bots_bridged, producer_alive=producer_alive)
         )
         phase_ms["initial_bridge_probe_ms"] = round(
             max(time.monotonic() - phase_started, 0.0) * 1000.0,
@@ -2954,7 +3030,18 @@ def api_dashboard_bootstrap():
 
         if all_fresh:
             phase_started = time.monotonic()
-            payload = _build_dashboard_stream_payload("bootstrap", fast=True)
+            payload = _build_dashboard_payload_from_snapshots(
+                "bootstrap",
+                summary_snapshot=summary_bridged or _build_summary_fallback_payload("bootstrap_fresh_missing"),
+                positions_snapshot=positions_bridged or _build_positions_fallback_payload("bootstrap_fresh_missing"),
+                bots_snapshot=bots_bridged or _build_runtime_bots_light_fallback("bootstrap_fresh_missing"),
+                market_snapshot=_runtime_snapshot_bridge_extract_section(
+                    bridge_snapshot,
+                    "market",
+                ),
+                fast=True,
+                producer_alive=producer_alive,
+            )
             phase_ms["fresh_payload_build_ms"] = round(
                 max(time.monotonic() - phase_started, 0.0) * 1000.0,
                 3,
@@ -2982,8 +3069,12 @@ def api_dashboard_bootstrap():
                 summary_snapshot=results["summary"],
                 positions_snapshot=results["positions"],
                 bots_snapshot=bots_snapshot,
-                market_snapshot=runtime_snapshot_bridge.read_market_snapshot(),
+                market_snapshot=_runtime_snapshot_bridge_extract_section(
+                    bridge_snapshot,
+                    "market",
+                ),
                 fast=True,
+                producer_alive=producer_alive,
             )
             phase_ms["recovery_payload_shape_ms"] = round(
                 max(time.monotonic() - phase_started, 0.0) * 1000.0,
@@ -3017,6 +3108,7 @@ def api_dashboard_bootstrap():
                 3,
             ),
             "phase_ms": phase_ms,
+            "snapshot_reuse_used": snapshot_reuse_used,
             "bridge_reads": dict(bridge_reads),
             "storage_reads": dict(storage_reads),
             "recovery_section_elapsed_ms": recovery_elapsed_ms,
@@ -3033,13 +3125,14 @@ def api_bridge_diagnostics():
     """Read-only diagnostics for runtime snapshot bridge health."""
     request_started = time.monotonic()
     phase_ms: Dict[str, float] = {}
+    snapshot_reuse_used = _runtime_snapshot_bridge_snapshot_reuse_supported()
     with _runtime_snapshot_bridge_read_diagnostics_context(
         "api_bridge_diagnostics"
     ) as bridge_reads, _bot_storage_read_diagnostics_context(
         "api_bridge_diagnostics"
     ) as storage_reads:
         phase_started = time.monotonic()
-        snapshot = runtime_snapshot_bridge.read_snapshot()
+        snapshot = _runtime_snapshot_bridge_request_snapshot()
         phase_ms["bridge_snapshot_read_ms"] = round(
             max(time.monotonic() - phase_started, 0.0) * 1000.0,
             3,
@@ -3122,6 +3215,7 @@ def api_bridge_diagnostics():
                 3,
             ),
             "phase_ms": phase_ms,
+            "snapshot_reuse_used": snapshot_reuse_used,
             "bridge_reads": dict(bridge_reads),
             "storage_reads": dict(storage_reads),
         }

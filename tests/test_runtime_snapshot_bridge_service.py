@@ -176,6 +176,52 @@ def test_capture_read_diagnostics_tracks_repeated_section_reads(tmp_path):
     assert diag["phase_ms"]["snapshot_json_parse_ms"] >= 0.0
 
 
+def test_extract_section_from_shared_snapshot_reads_file_once(tmp_path):
+    bridge_path = tmp_path / "runtime_snapshot_bridge.json"
+    bridge_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "meta": {
+                    "producer": "runner",
+                    "producer_pid": 1234,
+                    "produced_at": time.time(),
+                    "stream_owner": "runner",
+                    "snapshot_epoch": 2,
+                },
+                "sections": {
+                    "summary": {
+                        "payload": {"account": {}, "positions_summary": {}},
+                        "published_at": time.time(),
+                        "source": "runner_runtime_snapshot",
+                        "reason": "timer",
+                    },
+                    "positions": {
+                        "payload": {"positions": []},
+                        "published_at": time.time(),
+                        "source": "runner_runtime_snapshot",
+                        "reason": "timer",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    bridge = RuntimeSnapshotBridgeService(file_path=str(bridge_path))
+
+    with bridge.capture_read_diagnostics("shared") as diag:
+        snapshot = bridge.read_snapshot(copy_payload=False)
+        bridge.extract_section_from_snapshot(snapshot, "summary")
+        bridge.extract_section_from_snapshot(snapshot, "positions")
+
+    assert diag["operation_counts"]["read_snapshot"] == 1
+    assert diag["operation_counts"]["read_snapshot:shared_reference"] == 1
+    assert diag["operation_counts"]["extract_section_from_snapshot"] == 2
+    assert diag["phase_ms"]["snapshot_file_read_ms"] >= 0.0
+    assert "snapshot_payload_copy_ms" not in diag["phase_ms"]
+
+
 def test_bots_runtime_rebuild_interval_is_tightened_for_ticker_events(tmp_path):
     bridge = RuntimeSnapshotBridgeService(file_path=str(tmp_path / "runtime_snapshot_bridge.json"))
 
