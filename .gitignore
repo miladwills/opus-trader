@@ -36,3 +36,7 @@ storage/*.lock
 *.tar.gz
 *.bak
 *.backup
+neutralscanner/cache/
+storage/bots.json
+storage/*.json
+logs/

@@ -5,7 +5,7 @@ After=network.target opus_trader.service opus_runner.service
 [Service]
 User=root
 Group=root
-WorkingDirectory=/var/www/opus_platform_watchdog
+WorkingDirectory=/var/www
 EnvironmentFile=/var/www/opus_platform_watchdog/.env
 ExecStart=/var/www/venv/bin/uvicorn opus_platform_watchdog.main:app --host 127.0.0.1 --port 9000 --workers 1
 Restart=always

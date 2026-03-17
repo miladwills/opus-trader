@@ -3,13 +3,14 @@
 import asyncio
 import time
 import pytest
+import pytest_asyncio
 import aiosqlite
 from opus_platform_watchdog.classifiers.incident_classifier import IncidentClassifier
 from opus_platform_watchdog.storage.repo import Repository
 from opus_platform_watchdog import db
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def repo(tmp_path):
     db_path = str(tmp_path / "test.db")
     conn = await aiosqlite.connect(db_path)

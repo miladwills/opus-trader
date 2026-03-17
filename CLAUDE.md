@@ -62,8 +62,8 @@
 - Favor truthful state badges/fields over explanatory prose.
 
 ## Delivery Rules
-- After any meaningful patch: restart `app.py` and `runner.py`, verify final PIDs, and create a full-project zip in `/var/www/`.
-- Exclude `venv`, existing zip files, logs, temp files, and other heavy/generated artifacts.
+- After any meaningful patch: restart `app.py` and `runner.py`, verify final PIDs, and push changes to GitHub (`git add -A && git commit && git push origin main`).
+- Never push `.env`, `venv`, logs, or other sensitive/heavy artifacts (covered by `.gitignore`).
 
 ## Do Not Break
 - Reduce-only exits and cleanup truth

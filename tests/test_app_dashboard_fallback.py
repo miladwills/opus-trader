@@ -40,17 +40,19 @@ def _load_app_module(monkeypatch, tmp_path):
     return app_module
 
 
-def test_api_summary_returns_stale_fallback_when_snapshot_times_out(
+def test_api_summary_returns_local_fallback_when_bridge_unavailable(
     monkeypatch,
     tmp_path,
 ):
     app_module = _load_app_module(monkeypatch, tmp_path)
 
-    def slow_summary():
-        time.sleep(0.05)
-        return {"account": {"equity": 10.0}}
-
-    app_module._build_summary_payload = slow_summary
+    # Bridge returns nothing usable — summary must NOT call _build_summary_payload (Bybit)
+    app_module.runtime_snapshot_bridge = SimpleNamespace(
+        read_section=lambda section_name, max_age_sec=None: None,
+    )
+    app_module._build_summary_payload = lambda: (_ for _ in ()).throw(
+        AssertionError("must not call _build_summary_payload from critical path")
+    )
 
     flask_app = app_module.app
     flask_app.config["TESTING"] = True
@@ -61,7 +63,7 @@ def test_api_summary_returns_stale_fallback_when_snapshot_times_out(
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["stale_data"] is True
-    assert payload["error"] == "summary_timeout"
+    assert payload["error"] == "summary_bridge_unavailable"
     assert payload["account"]["equity"] == 0.0
 
 
@@ -577,7 +579,7 @@ def test_build_dashboard_stream_payload_does_not_use_raw_dashboard_bridge_bundle
     assert payload["bots"][0]["id"] == "bot-1"
 
 
-def test_api_dashboard_bootstrap_recovery_uses_direct_builders_not_snapshot_wrappers(
+def test_api_dashboard_bootstrap_recovery_never_calls_bybit_builders(
     monkeypatch,
     tmp_path,
 ):
@@ -591,100 +593,61 @@ def test_api_dashboard_bootstrap_recovery_uses_direct_builders_not_snapshot_wrap
         read_section=lambda section_name, max_age_sec=None: dict(stale_section),
         read_market_snapshot=lambda: None,
     )
-    app_module._get_summary_snapshot = lambda: (_ for _ in ()).throw(
-        AssertionError("bootstrap should not use summary snapshot wrapper")
+    # Bybit-calling builders must NEVER be invoked from bootstrap recovery
+    app_module._build_summary_payload = lambda: (_ for _ in ()).throw(
+        AssertionError("bootstrap must not call _build_summary_payload")
     )
-    app_module._get_positions_snapshot = lambda: (_ for _ in ()).throw(
-        AssertionError("bootstrap should not use positions snapshot wrapper")
+    app_module._build_positions_payload = lambda account=None: (_ for _ in ()).throw(
+        AssertionError("bootstrap must not call _build_positions_payload")
     )
-    app_module._get_runtime_bots_snapshot = lambda: (_ for _ in ()).throw(
-        AssertionError("bootstrap should not use runtime bots snapshot wrapper")
+    app_module._build_runtime_bots_light_payload = lambda: (_ for _ in ()).throw(
+        AssertionError("bootstrap must not call _build_runtime_bots_light_payload")
     )
-
-    def build_summary():
-        time.sleep(0.02)
-        return {
-            "account": {"equity": 123.0},
-            "positions_summary": {"total_positions": 1},
-            "today_pnl": {"net": 5.0},
-            "daily_loss_pct": 0.0,
-            "kill_switch_triggered": False,
-            "kill_switch_triggered_at": None,
-        }
-
-    def build_positions(account=None):
-        time.sleep(0.02)
-        return {
-            "positions": [{"symbol": "BTCUSDT", "side": "Buy"}],
-            "summary": {"total_positions": 1},
-            "wallet_balance": 123.0,
-            "available_balance": 100.0,
-            "realized_pnl": 0.0,
-            "unrealized_pnl": 5.0,
-            "stale_data": False,
-            "error": None,
-        }
-
-    def build_bots():
-        time.sleep(0.02)
-        return {
-            "bots": [{"id": "bot-1", "setup_ready_status": "ready"}],
-            "stale_data": False,
-            "error": None,
-            "runtime_integrity": {"status": "healthy"},
-        }
-
-    app_module._build_summary_payload = build_summary
-    app_module._build_positions_payload = build_positions
-    app_module._build_runtime_bots_light_payload = build_bots
 
     client = app_module.app.test_client()
     response = client.get("/api/dashboard/bootstrap", headers=_basic_auth_headers())
 
     assert response.status_code == 200
     payload = response.get_json()
-    assert payload["summary"]["account"]["equity"] == 123.0
-    assert payload["positions"]["positions"][0]["symbol"] == "BTCUSDT"
-    assert payload["bots"][0]["id"] == "bot-1"
-    with app_module.DASHBOARD_SNAPSHOT_LOCK:
-        assert app_module.DASHBOARD_SNAPSHOT_CACHE["summary"]["value"]["account"]["equity"] == 123.0
-        assert app_module.DASHBOARD_SNAPSHOT_CACHE["positions"]["value"]["positions"][0]["symbol"] == "BTCUSDT"
-        assert app_module.DASHBOARD_SNAPSHOT_CACHE["bots_runtime_light"]["value"]["bots"][0]["id"] == "bot-1"
+    # Recovery returns degraded fallback data (local only, no Bybit)
+    assert payload["summary"]["stale_data"] is True
+    assert payload["positions"]["stale_data"] is True
+    assert payload["summary"]["error"] == "bootstrap_recovery"
+    assert payload["positions"]["error"] == "bootstrap_recovery"
 
 
-def test_recover_bootstrap_dashboard_sections_uses_single_outer_timeout_budget(
+def test_recover_bootstrap_uses_local_only_fallbacks_and_completes_fast(
     monkeypatch,
     tmp_path,
 ):
     app_module = _load_app_module(monkeypatch, tmp_path)
 
-    def slow_summary():
-        time.sleep(0.08)
-        return {"account": {"equity": 1.0}}
-
-    def slow_positions(account=None):
-        time.sleep(0.08)
-        return {"positions": []}
-
-    def slow_bots():
-        time.sleep(0.08)
-        return {"bots": []}
-
-    app_module._build_summary_payload = slow_summary
-    app_module._build_positions_payload = slow_positions
-    app_module._build_runtime_bots_light_payload = slow_bots
+    # Bybit-calling builders must not be invoked — recovery uses local fallbacks
+    app_module._build_summary_payload = lambda: (_ for _ in ()).throw(
+        AssertionError("must not call _build_summary_payload")
+    )
+    app_module._build_positions_payload = lambda account=None: (_ for _ in ()).throw(
+        AssertionError("must not call _build_positions_payload")
+    )
+    app_module._build_runtime_bots_light_payload = lambda: (_ for _ in ()).throw(
+        AssertionError("must not call _build_runtime_bots_light_payload")
+    )
 
     started_at = time.monotonic()
-    results = app_module._recover_bootstrap_dashboard_sections(timeout_sec=0.02)
+    results = app_module._recover_bootstrap_dashboard_sections(timeout_sec=3.0)
     elapsed = time.monotonic() - started_at
 
-    assert elapsed < 0.05
-    assert results["summary"]["error"] == "bootstrap_timeout"
-    assert results["positions"]["error"] == "bootstrap_timeout"
-    assert results["bots"]["error"] == "bootstrap_timeout"
+    # Local-only fallbacks complete near-instantly
+    assert elapsed < 0.5
+    assert results["summary"]["error"] == "bootstrap_recovery"
+    assert results["positions"]["error"] == "bootstrap_recovery"
+    assert results["bots"]["error"] == "bootstrap_recovery"
+    assert results["summary"]["stale_data"] is True
+    assert results["positions"]["stale_data"] is True
+    assert results["bots"]["stale_data"] is True
 
 
-def test_bootstrap_recovery_primes_cache_for_following_stream_timeout(
+def test_bootstrap_recovery_returns_degraded_when_bridge_stale_and_cache_empty(
     monkeypatch,
     tmp_path,
 ):
@@ -692,7 +655,7 @@ def test_bootstrap_recovery_primes_cache_for_following_stream_timeout(
     app_module._is_bridge_producer_alive = lambda: True
 
     def stale_bridge(section_name, max_age_sec=None):
-        if section_name in {"summary", "positions", "bots_runtime"}:
+        if section_name in {"summary", "positions", "bots_runtime", "bots_runtime_light"}:
             return {
                 "snapshot_fresh": False,
                 "stale_data": True,
@@ -705,57 +668,28 @@ def test_bootstrap_recovery_primes_cache_for_following_stream_timeout(
         read_market_snapshot=lambda: None,
     )
 
-    summary_payload = {
-        "account": {"equity": 77.0},
-        "positions_summary": {"total_positions": 1},
-        "today_pnl": {"net": 1.0},
-        "daily_loss_pct": 0.0,
-        "kill_switch_triggered": False,
-        "kill_switch_triggered_at": None,
-    }
-    positions_payload = {
-        "positions": [{"symbol": "ETHUSDT", "side": "Sell"}],
-        "summary": {"total_positions": 1},
-        "wallet_balance": 77.0,
-        "available_balance": 55.0,
-        "realized_pnl": 0.0,
-        "unrealized_pnl": 1.0,
-        "stale_data": False,
-        "error": None,
-    }
-    bots_payload = {
-        "bots": [{"id": "bot-77", "setup_ready_status": "armed"}],
-        "stale_data": False,
-        "error": None,
-        "runtime_integrity": {"status": "healthy"},
-    }
+    # Ensure dashboard cache is empty
+    with app_module.DASHBOARD_SNAPSHOT_LOCK:
+        app_module.DASHBOARD_SNAPSHOT_CACHE.clear()
 
-    app_module._build_summary_payload = lambda: dict(summary_payload)
-    app_module._build_positions_payload = lambda account=None: dict(positions_payload)
-    app_module._build_runtime_bots_light_payload = lambda: dict(bots_payload)
+    # Bybit-calling builders must not be invoked
+    app_module._build_summary_payload = lambda: (_ for _ in ()).throw(
+        AssertionError("must not call _build_summary_payload")
+    )
+    app_module._build_positions_payload = lambda account=None: (_ for _ in ()).throw(
+        AssertionError("must not call _build_positions_payload")
+    )
 
     client = app_module.app.test_client()
     response = client.get("/api/dashboard/bootstrap", headers=_basic_auth_headers())
     assert response.status_code == 200
 
-    def slow_summary():
-        time.sleep(0.05)
-        return dict(summary_payload)
-
-    def slow_positions(account=None):
-        time.sleep(0.05)
-        return dict(positions_payload)
-
-    app_module._build_summary_payload = slow_summary
-    app_module._build_positions_payload = slow_positions
-    app_module._get_runtime_bots_snapshot = lambda: dict(bots_payload)
-
-    payload = app_module._build_dashboard_stream_payload("snapshot_poll")
-
-    assert payload["summary"]["account"]["equity"] == 77.0
-    assert payload["positions"]["positions"][0]["symbol"] == "ETHUSDT"
-    assert payload["summary_meta"]["stale_data"] is True
-    assert payload["positions_meta"]["stale_data"] is True
+    payload = response.get_json()
+    # All sections return degraded fallback (local only)
+    assert payload["summary"]["stale_data"] is True
+    assert payload["positions"]["stale_data"] is True
+    assert payload["summary"]["error"] == "bootstrap_recovery"
+    assert payload["positions"]["error"] == "bootstrap_recovery"
 
 
 def test_api_bots_runtime_exposes_response_and_integrity_latency_fields(

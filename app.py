@@ -569,22 +569,24 @@ def _get_positions_snapshot() -> Dict[str, Any]:
     bridged = runtime_snapshot_bridge.read_section("positions")
     if _bridge_section_usable(bridged):
         return bridged
-    return _dashboard_snapshot(
-        "positions",
-        _build_positions_payload,
-        _build_positions_fallback_payload,
-    )
+    # Stale bridge data is better than hitting Bybit
+    if isinstance(bridged, dict) and isinstance(bridged.get("positions"), list):
+        bridged.setdefault("stale_data", True)
+        return bridged
+    # No bridge at all — cached or empty fallback (local only, no Bybit)
+    return _build_positions_fallback_payload("positions_bridge_unavailable")
 
 
 def _get_summary_snapshot() -> Dict[str, Any]:
     bridged = runtime_snapshot_bridge.read_section("summary")
     if _bridge_section_usable(bridged):
         return bridged
-    return _dashboard_snapshot(
-        "summary",
-        _build_summary_payload,
-        _build_summary_fallback_payload,
-    )
+    # Stale bridge data is better than hitting Bybit
+    if isinstance(bridged, dict) and bridged.get("account"):
+        bridged.setdefault("stale_data", True)
+        return bridged
+    # No bridge — cached or empty fallback (local only, no Bybit)
+    return _build_summary_fallback_payload("summary_bridge_unavailable")
 
 
 def _get_runtime_bots_snapshot() -> Dict[str, Any]:
@@ -636,8 +638,8 @@ def _get_runtime_bots_light_snapshot() -> Dict[str, Any]:
         bridged_light.setdefault("bots_scope", "light")
         bridged_light.setdefault("stale_data", True)
         return bridged_light
-    # 3. Direct lightweight rebuild (no heavy enrichment)
-    return _build_runtime_bots_light_payload()
+    # 3. No bridge at all — cached or storage fallback (local only, no Bybit)
+    return _build_runtime_bots_light_fallback("light_bridge_unavailable")
 
 
 def _bridge_hot_path_fresh_payload(section_name: str) -> Dict[str, Any] | None:
@@ -1685,16 +1687,9 @@ def _collect_stream_symbols() -> List[str]:
         logging.debug("Failed to collect bot symbols for stream sync: %s", exc)
 
     if not symbols:
-        try:
-            positions_resp = client.get_positions()
-            if positions_resp.get("success"):
-                position_list = (positions_resp.get("data") or {}).get("list") or []
-                for pos in position_list:
-                    symbol = str(pos.get("symbol") or "").strip().upper()
-                    if symbol:
-                        symbols.add(symbol)
-        except Exception as exc:
-            logging.debug("Failed to collect position symbols for stream sync: %s", exc)
+        # No running bots — return empty. Position-based symbol discovery
+        # is the runner's responsibility, not the web request path.
+        pass
 
     return sorted(symbols)
 
@@ -2752,17 +2747,17 @@ def _recover_bootstrap_dashboard_sections(
     section_specs = {
         "summary": {
             "cache_key": "summary",
-            "builder": _build_summary_payload,
+            "builder": lambda: _build_summary_fallback_payload("bootstrap_recovery"),
             "fallback": _build_summary_fallback_payload,
         },
         "positions": {
             "cache_key": "positions",
-            "builder": _build_positions_payload,
+            "builder": lambda: _build_positions_fallback_payload("bootstrap_recovery"),
             "fallback": _build_positions_fallback_payload,
         },
         "bots": {
             "cache_key": "bots_runtime_light",
-            "builder": _build_runtime_bots_light_payload,
+            "builder": lambda: _build_runtime_bots_light_fallback("bootstrap_recovery"),
             "fallback": _build_runtime_bots_light_fallback,
         },
     }
@@ -2846,7 +2841,7 @@ def api_dashboard_bootstrap():
         )
 
     try:
-        _maybe_sync_closed_pnl_for_api()
+        # PnL sync is runner's responsibility — dashboard serves from local logs only
         logs = pnl_service.get_log(use_global_baseline=True)
         today = pnl_service.get_today_stats(use_global_baseline=True)
         payload["pnl"] = {

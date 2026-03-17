@@ -583,8 +583,8 @@ class TestDashboardFallback:
         assert result["bots_scope"] == "light"
         assert result["stale_data"] is True
 
-    def test_light_snapshot_uses_direct_light_rebuild(self):
-        """When light section is missing entirely, calls _build_runtime_bots_light_payload."""
+    def test_light_snapshot_uses_local_fallback_when_bridge_missing(self):
+        """When light section is missing entirely, calls _build_runtime_bots_light_fallback (no Bybit)."""
         import app as app_module
 
         with patch.object(app_module, "_bridge_section_usable", return_value=False):
@@ -595,35 +595,37 @@ class TestDashboardFallback:
             ):
                 with patch.object(
                     app_module,
-                    "_build_runtime_bots_light_payload",
-                    return_value={"bots": [{"id": "bot-rebuilt"}], "bots_scope": "light"},
-                ) as mock_light_build:
+                    "_build_runtime_bots_light_fallback",
+                    return_value={"bots": [{"id": "bot-fallback"}], "bots_scope": "light", "stale_data": True},
+                ) as mock_light_fallback:
                     result = app_module._get_runtime_bots_light_snapshot()
-                mock_light_build.assert_called_once()
-        assert result["bots"] == [{"id": "bot-rebuilt"}]
+                mock_light_fallback.assert_called_once_with("light_bridge_unavailable")
+        assert result["bots"] == [{"id": "bot-fallback"}]
         assert result["bots_scope"] == "light"
 
-    def test_bootstrap_recovery_uses_light_builder(self):
-        """_recover_bootstrap_dashboard_sections bots spec uses light builder."""
+    def test_bootstrap_recovery_uses_local_only_fallbacks(self):
+        """_recover_bootstrap_dashboard_sections uses local-only fallbacks, not Bybit builders."""
         import app as app_module
 
         with patch.object(
             app_module,
-            "_build_runtime_bots_light_payload",
-            return_value={"bots": [], "bots_scope": "light", "stale_data": False},
-        ) as mock_light:
+            "_build_runtime_bots_light_fallback",
+            return_value={"bots": [], "bots_scope": "light", "stale_data": True, "error": "bootstrap_recovery"},
+        ) as mock_light_fallback:
             with patch.object(
                 app_module,
-                "_build_summary_payload",
-                return_value={"stale_data": False},
-            ):
+                "_build_summary_fallback_payload",
+                return_value={"stale_data": True, "error": "bootstrap_recovery"},
+            ) as mock_summary_fallback:
                 with patch.object(
                     app_module,
-                    "_build_positions_payload",
-                    return_value={"stale_data": False},
-                ):
+                    "_build_positions_fallback_payload",
+                    return_value={"stale_data": True, "error": "bootstrap_recovery"},
+                ) as mock_positions_fallback:
                     result = app_module._recover_bootstrap_dashboard_sections(timeout_sec=5.0)
-        mock_light.assert_called_once()
+        mock_light_fallback.assert_called_once_with("bootstrap_recovery")
+        mock_summary_fallback.assert_called_once_with("bootstrap_recovery")
+        mock_positions_fallback.assert_called_once_with("bootstrap_recovery")
         assert result["bots"]["bots_scope"] == "light"
 
     def test_bootstrap_recovery_never_calls_full_get_runtime_bots(self):
