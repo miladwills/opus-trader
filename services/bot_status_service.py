@@ -171,6 +171,7 @@ class BotStatusService:
         self._scanner_cache: Dict[str, Dict[str, Any]] = {}
         self._live_open_orders_cache: Dict[str, Dict[str, Any]] = {}
         self._live_open_orders_cache_ttl_seconds = 5
+        self._last_live_open_orders_diagnostics: Dict[str, Any] = {}
         self._runtime_positions_cache: Dict[str, Any] = {}
         self._stopped_preview_cache: Dict[str, Dict[str, Any]] = {}
         self._readiness_stability_cache: Dict[str, Dict[str, Any]] = {}
@@ -1526,6 +1527,168 @@ class BotStatusService:
         return self._build_live_open_orders_by_symbol(
             list(bots) if bots is not None else self.bot_storage.list_bots()
         )
+
+    def get_live_open_order_summary_by_symbol(
+        self,
+        bots: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Dict[str, int]]:
+        started_mono = time.monotonic()
+        bot_rows = list(bots) if bots is not None else self.bot_storage.list_bots()
+        symbols = self._collect_live_order_symbols(bot_rows)
+        diagnostics: Dict[str, Any] = {
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "symbol_count": len(symbols),
+            "path": None,
+            "client_query_ms": 0.0,
+            "fallback_build_ms": 0.0,
+            "shaping_ms": 0.0,
+            "order_row_count": 0,
+            "cache_hit_count": 0,
+            "stream_hit_count": 0,
+            "rest_call_count": 0,
+            "rest_success_count": 0,
+            "stream_query_ms": 0.0,
+            "rest_query_ms": 0.0,
+            "fallback_reason": None,
+        }
+        if not symbols:
+            diagnostics["path"] = "empty"
+            diagnostics["total_ms"] = round(
+                max(time.monotonic() - started_mono, 0.0) * 1000.0,
+                3,
+            )
+            self._last_live_open_orders_diagnostics = diagnostics
+            return {}
+
+        client = getattr(self.position_service, "client", None)
+        if client is not None and hasattr(client, "get_open_orders"):
+            query_started = time.monotonic()
+            try:
+                response = client.get_open_orders(
+                    limit=200,
+                    skip_cache=False,
+                )
+            except Exception as exc:
+                response = None
+                diagnostics["fallback_reason"] = f"client_query_exception:{type(exc).__name__}"
+            diagnostics["client_query_ms"] = round(
+                max(time.monotonic() - query_started, 0.0) * 1000.0,
+                3,
+            )
+            if response and response.get("success"):
+                data = response.get("data", {}) or {}
+                order_rows = data.get("list", []) if isinstance(data, dict) else data
+                if isinstance(order_rows, list):
+                    diagnostics["order_row_count"] = len(order_rows)
+                    if len(order_rows) < 200:
+                        shaping_started = time.monotonic()
+                        summary = self._summarize_order_rows_by_symbol(
+                            symbols=symbols,
+                            order_rows=order_rows,
+                        )
+                        diagnostics["shaping_ms"] = round(
+                            max(time.monotonic() - shaping_started, 0.0) * 1000.0,
+                            3,
+                        )
+                        diagnostics["path"] = (
+                            "all_orders_stream"
+                            if bool(response.get("from_stream"))
+                            else "all_orders_client"
+                        )
+                        diagnostics["total_ms"] = round(
+                            max(time.monotonic() - started_mono, 0.0) * 1000.0,
+                            3,
+                        )
+                        self._last_live_open_orders_diagnostics = diagnostics
+                        return summary
+                    diagnostics["fallback_reason"] = "all_orders_limit_reached"
+                else:
+                    diagnostics["fallback_reason"] = "all_orders_invalid_payload"
+            elif response is not None and not diagnostics.get("fallback_reason"):
+                diagnostics["fallback_reason"] = str(response.get("error") or "client_query_failed")
+        elif diagnostics.get("fallback_reason") is None:
+            diagnostics["fallback_reason"] = "client_unavailable"
+
+        fallback_started = time.monotonic()
+        order_map = self._build_live_open_orders_by_symbol(
+            bot_rows,
+            diagnostics=diagnostics,
+        )
+        diagnostics["fallback_build_ms"] = round(
+            max(time.monotonic() - fallback_started, 0.0) * 1000.0,
+            3,
+        )
+        shaping_started = time.monotonic()
+        summary = self._summarize_order_rows_by_symbol(
+            symbols=symbols,
+            order_rows_by_symbol=order_map,
+        )
+        diagnostics["shaping_ms"] = round(
+            float(diagnostics.get("shaping_ms") or 0.0)
+            + max(time.monotonic() - shaping_started, 0.0) * 1000.0,
+            3,
+        )
+        diagnostics["path"] = "per_symbol_fallback"
+        diagnostics["total_ms"] = round(
+            max(time.monotonic() - started_mono, 0.0) * 1000.0,
+            3,
+        )
+        self._last_live_open_orders_diagnostics = diagnostics
+        return summary
+
+    def get_last_live_open_orders_diagnostics(self) -> Dict[str, Any]:
+        return dict(self._last_live_open_orders_diagnostics)
+
+    @staticmethod
+    def _collect_live_order_symbols(bots: List[Dict[str, Any]]) -> List[str]:
+        return sorted(
+            {
+                str(bot.get("symbol") or "").strip().upper()
+                for bot in (bots or [])
+                if str(bot.get("symbol") or "").strip()
+                and bot.get("status") in LIVE_ORDER_OWNER_STATUSES
+                and str(bot.get("symbol") or "").strip().lower() != "auto-pilot"
+            }
+        )
+
+    @staticmethod
+    def _summarize_order_rows_by_symbol(
+        *,
+        symbols: List[str],
+        order_rows: Optional[List[Dict[str, Any]]] = None,
+        order_rows_by_symbol: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+    ) -> Dict[str, Dict[str, int]]:
+        summary = {
+            symbol: {
+                "open_order_count": 0,
+                "reduce_only_count": 0,
+                "entry_order_count": 0,
+            }
+            for symbol in (symbols or [])
+        }
+        if order_rows_by_symbol is not None:
+            for symbol in symbols or []:
+                for order in list((order_rows_by_symbol.get(symbol) or [])):
+                    summary_row = summary[symbol]
+                    summary_row["open_order_count"] += 1
+                    if bool(order.get("reduceOnly")):
+                        summary_row["reduce_only_count"] += 1
+                    else:
+                        summary_row["entry_order_count"] += 1
+            return summary
+
+        tracked_symbols = set(symbols or [])
+        for order in list(order_rows or []):
+            symbol = str((order or {}).get("symbol") or "").strip().upper()
+            if symbol not in tracked_symbols:
+                continue
+            summary_row = summary[symbol]
+            summary_row["open_order_count"] += 1
+            if bool((order or {}).get("reduceOnly")):
+                summary_row["reduce_only_count"] += 1
+            else:
+                summary_row["entry_order_count"] += 1
+        return summary
 
     def get_last_runtime_cache_status(self) -> Dict[str, Any]:
         return dict(self._last_runtime_cache_status)
@@ -4558,25 +4721,17 @@ class BotStatusService:
         self,
         bots: List[Dict[str, Any]],
         cache_only: bool = False,
+        diagnostics: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, List[Dict[str, Any]]]:
         client = getattr(self.position_service, "client", None)
         if client is None:
             return {}
 
-        symbols = sorted(
-            {
-                str(bot.get("symbol") or "").strip().upper()
-                for bot in bots
-                if str(bot.get("symbol") or "").strip()
-                and bot.get("status") in LIVE_ORDER_OWNER_STATUSES
-                and str(bot.get("symbol") or "").strip().lower() != "auto-pilot"
-            }
-        )
+        symbols = self._collect_live_order_symbols(bots)
         if not symbols:
             return {}
 
         live_orders_by_symbol: Dict[str, List[Dict[str, Any]]] = {}
-        stale_data = False
         now = time.monotonic()
         stream_service = getattr(client, "stream_service", None)
         for symbol in symbols:
@@ -4584,14 +4739,19 @@ class BotStatusService:
             cached_at = self._safe_float(cached.get("cached_at"), 0.0)
             if cached and (now - cached_at) < self._live_open_orders_cache_ttl_seconds:
                 live_orders_by_symbol[symbol] = list(cached.get("orders") or [])
+                if diagnostics is not None:
+                    diagnostics["cache_hit_count"] = int(diagnostics.get("cache_hit_count") or 0) + 1
                 continue
 
             if cache_only:
                 if cached:
                     live_orders_by_symbol[symbol] = list(cached.get("orders") or [])
+                    if diagnostics is not None:
+                        diagnostics["cache_hit_count"] = int(diagnostics.get("cache_hit_count") or 0) + 1
                 continue
 
             if stream_service is not None and hasattr(stream_service, "get_open_orders_fresh"):
+                stream_started = time.monotonic()
                 try:
                     response = stream_service.get_open_orders_fresh(
                         symbol=symbol,
@@ -4599,6 +4759,12 @@ class BotStatusService:
                     )
                 except Exception:
                     response = None
+                if diagnostics is not None:
+                    diagnostics["stream_query_ms"] = round(
+                        float(diagnostics.get("stream_query_ms") or 0.0)
+                        + max(time.monotonic() - stream_started, 0.0) * 1000.0,
+                        3,
+                    )
                 if response and response.get("success"):
                     data = response.get("data", {}) or {}
                     order_list = data.get("list", []) if isinstance(data, dict) else data
@@ -4609,9 +4775,14 @@ class BotStatusService:
                             "cached_at": now,
                             "orders": normalized_orders,
                         }
+                        if diagnostics is not None:
+                            diagnostics["stream_hit_count"] = int(
+                                diagnostics.get("stream_hit_count") or 0
+                            ) + 1
                         continue
                 # Stream empty or failed — fall through to REST for ground truth
 
+            rest_started = time.monotonic()
             try:
                 response = client.get_open_orders(
                     symbol=symbol,
@@ -4621,10 +4792,21 @@ class BotStatusService:
             except Exception:
                 if cached:
                     live_orders_by_symbol[symbol] = list(cached.get("orders") or [])
+                    if diagnostics is not None:
+                        diagnostics["cache_hit_count"] = int(diagnostics.get("cache_hit_count") or 0) + 1
                 continue
+            if diagnostics is not None:
+                diagnostics["rest_call_count"] = int(diagnostics.get("rest_call_count") or 0) + 1
+                diagnostics["rest_query_ms"] = round(
+                    float(diagnostics.get("rest_query_ms") or 0.0)
+                    + max(time.monotonic() - rest_started, 0.0) * 1000.0,
+                    3,
+                )
             if not response.get("success"):
                 if cached:
                     live_orders_by_symbol[symbol] = list(cached.get("orders") or [])
+                    if diagnostics is not None:
+                        diagnostics["cache_hit_count"] = int(diagnostics.get("cache_hit_count") or 0) + 1
                 continue
             data = response.get("data", {}) or {}
             order_list = data.get("list", []) if isinstance(data, dict) else data
@@ -4635,10 +4817,10 @@ class BotStatusService:
                     "cached_at": now,
                     "orders": normalized_orders,
                 }
-        if stale_data:
-            self._last_runtime_cache_status["stale_data"] = True
-            if not self._last_runtime_cache_status.get("error"):
-                self._last_runtime_cache_status["error"] = "private_orders_stale"
+                if diagnostics is not None:
+                    diagnostics["rest_success_count"] = int(
+                        diagnostics.get("rest_success_count") or 0
+                    ) + 1
         return live_orders_by_symbol
 
     @staticmethod

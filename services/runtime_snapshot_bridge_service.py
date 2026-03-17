@@ -1727,32 +1727,49 @@ class RuntimeSnapshotBridgeService:
     def _build_open_orders_payload(self) -> Dict[str, Any]:
         bots = self._get_bots_cached()
 
-        order_map = {}
+        symbols_summary = {}
+        open_orders_runtime_diagnostics = None
         if self.bot_status_service and hasattr(
+            self.bot_status_service,
+            "get_live_open_order_summary_by_symbol",
+        ):
+            try:
+                symbols_summary = self.bot_status_service.get_live_open_order_summary_by_symbol(bots)
+                if hasattr(self.bot_status_service, "get_last_live_open_orders_diagnostics"):
+                    open_orders_runtime_diagnostics = (
+                        self.bot_status_service.get_last_live_open_orders_diagnostics()
+                    )
+            except Exception as exc:
+                logger.debug("Runtime snapshot bridge open order summary failed: %s", exc)
+        elif self.bot_status_service and hasattr(
             self.bot_status_service,
             "get_live_open_orders_by_symbol",
         ):
+            order_map = {}
             try:
                 order_map = self.bot_status_service.get_live_open_orders_by_symbol(bots)
             except Exception as exc:
                 logger.debug("Runtime snapshot bridge open order summary failed: %s", exc)
-
-        symbols_summary = {}
-        for symbol, orders in (order_map or {}).items():
-            order_list = list(orders or [])
-            symbols_summary[symbol] = {
-                "open_order_count": len(order_list),
-                "reduce_only_count": sum(
-                    1 for order in order_list if bool(order.get("reduceOnly"))
-                ),
-                "entry_order_count": sum(
-                    1 for order in order_list if not bool(order.get("reduceOnly"))
-                ),
-            }
+            for symbol, orders in (order_map or {}).items():
+                order_list = list(orders or [])
+                symbols_summary[symbol] = {
+                    "open_order_count": len(order_list),
+                    "reduce_only_count": sum(
+                        1 for order in order_list if bool(order.get("reduceOnly"))
+                    ),
+                    "entry_order_count": sum(
+                        1 for order in order_list if not bool(order.get("reduceOnly"))
+                    ),
+                }
         return {
             "symbols": symbols_summary,
             "stale_data": False,
             "error": None,
+            "open_orders_runtime_diagnostics": (
+                dict(open_orders_runtime_diagnostics)
+                if isinstance(open_orders_runtime_diagnostics, dict)
+                else None
+            ),
         }
 
     @staticmethod

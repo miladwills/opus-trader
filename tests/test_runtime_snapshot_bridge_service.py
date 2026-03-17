@@ -564,3 +564,33 @@ def test_publish_persists_finalized_publish_pass_fields_to_snapshot_file(tmp_pat
         "bots_runtime",
     ):
         assert "elapsed_ms" in ((publish_pass.get("sections") or {}).get(name) or {})
+
+
+def test_open_orders_payload_includes_runtime_diagnostics_when_available(tmp_path):
+    bridge = RuntimeSnapshotBridgeService(file_path=str(tmp_path / "runtime_snapshot_bridge.json"))
+
+    class FakeBotStatusService:
+        def get_live_open_order_summary_by_symbol(self, bots=None):
+            return {
+                "BTCUSDT": {
+                    "open_order_count": 2,
+                    "reduce_only_count": 1,
+                    "entry_order_count": 1,
+                }
+            }
+
+        def get_last_live_open_orders_diagnostics(self):
+            return {
+                "path": "all_orders_stream",
+                "symbol_count": 1,
+                "client_query_ms": 0.5,
+            }
+
+    bridge.bot_status_service = FakeBotStatusService()
+    payload = bridge._build_open_orders_payload()
+
+    assert payload["symbols"]["BTCUSDT"]["open_order_count"] == 2
+    assert payload["symbols"]["BTCUSDT"]["reduce_only_count"] == 1
+    assert payload["symbols"]["BTCUSDT"]["entry_order_count"] == 1
+    assert payload["open_orders_runtime_diagnostics"]["path"] == "all_orders_stream"
+    assert payload["open_orders_runtime_diagnostics"]["symbol_count"] == 1
