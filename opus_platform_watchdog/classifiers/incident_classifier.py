@@ -13,6 +13,17 @@ logger = logging.getLogger("watchdog.classifier")
 
 
 class IncidentClassifier:
+    _SYNTHETIC_CONTEXT_WINDOW = 250
+    _SYNTHETIC_BOT_ID_RE = re.compile(r"\[[^:\]]+:(bot-\d+)\]", re.IGNORECASE)
+    _EXPLICIT_SYNTHETIC_MARKERS = (
+        "[test]",
+        "testusdt",
+        "simulated_failure",
+        "disk full",
+        "forensics boom",
+        "nlp:testbot123",
+    )
+
     def __init__(self, repo: Repository):
         self._repo = repo
         self._compiled: list[tuple[LogPattern, re.Pattern]] = [
@@ -23,10 +34,12 @@ class IncidentClassifier:
     async def scan_lines(self, lines: list[str], source: str) -> list[Incident]:
         new_incidents: list[Incident] = []
         now = time.time()
-        for line in lines:
+        for line_index, line in enumerate(lines):
             for pattern, compiled in self._compiled:
                 match = compiled.search(line)
                 if not match:
+                    continue
+                if self._should_suppress_match(pattern, lines, line_index, source):
                     continue
                 last = self._last_fired.get(pattern.key, 0)
                 if now - last < pattern.cooldown_sec:
@@ -37,6 +50,27 @@ class IncidentClassifier:
                 new_incidents.append(incident)
                 break  # one pattern match per line is enough
         return new_incidents
+
+    @classmethod
+    def _should_suppress_match(
+        cls,
+        pattern: LogPattern,
+        lines: list[str],
+        line_index: int,
+        source: str,
+    ) -> bool:
+        if pattern.key != "bot_error_state" or str(source or "").strip().lower() != "runner":
+            return False
+        line = str(lines[line_index] if 0 <= line_index < len(lines) else "")
+        if not cls._SYNTHETIC_BOT_ID_RE.search(line):
+            return False
+        start = max(0, line_index - cls._SYNTHETIC_CONTEXT_WINDOW)
+        end = min(len(lines), line_index + cls._SYNTHETIC_CONTEXT_WINDOW + 1)
+        for context_line in lines[start:end]:
+            normalized = str(context_line or "").strip().lower()
+            if any(marker in normalized for marker in cls._EXPLICIT_SYNTHETIC_MARKERS):
+                return True
+        return False
 
     async def auto_resolve_stale(self):
         for pattern, _ in self._compiled:
