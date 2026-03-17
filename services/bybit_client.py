@@ -259,6 +259,7 @@ class BybitClient:
 
     # Error codes that should only be logged once per interval (rate-limited logging)
     RATE_LIMITED_ERROR_CODES = {
+        10002: 60,  # Timestamp / recv_window drift - log once per minute
         100028: 300,  # Unified account forbidden - log once per 5 minutes
         110017: 60,  # Zero position - log once per minute
     }
@@ -843,6 +844,70 @@ class BybitClient:
             return int(response.get("data", {}).get("timeSecond", time.time()))
         return int(time.time())
 
+    @staticmethod
+    def _extract_recv_window_skew_ms(error_msg: Any) -> Optional[int]:
+        text = str(error_msg or "")
+
+        def _extract_value(field: str) -> Optional[int]:
+            marker = f"{field}["
+            start = text.find(marker)
+            if start < 0:
+                return None
+            start += len(marker)
+            end = text.find("]", start)
+            if end < 0:
+                return None
+            try:
+                return int(text[start:end])
+            except (TypeError, ValueError):
+                return None
+
+        req_ts = _extract_value("req_timestamp")
+        server_ts = _extract_value("server_timestamp")
+        if req_ts is None or server_ts is None:
+            return None
+        return req_ts - server_ts
+
+    def _retry_after_recv_window_error(
+        self,
+        *,
+        method: str,
+        path: str,
+        error_msg: Any,
+        attempt: int,
+    ) -> bool:
+        if attempt >= self.MAX_RETRIES - 1:
+            return False
+        previous_offset_ms = int(self._time_offset_ms or 0)
+        sync = self.health_check()
+        if not sync.get("healthy"):
+            if self._should_log_error(10002):
+                logger.warning(
+                    "BYBIT_TIME_RESYNC reason=recv_window method=%s path=%s result=sync_failed "
+                    "attempt=%d/%d skew_ms=%s old_offset_ms=%s error=%s",
+                    method,
+                    path,
+                    attempt + 1,
+                    self.MAX_RETRIES,
+                    self._extract_recv_window_skew_ms(error_msg),
+                    previous_offset_ms,
+                    sync.get("error"),
+                )
+            return False
+        if self._should_log_error(10002):
+            logger.info(
+                "BYBIT_TIME_RESYNC reason=recv_window method=%s path=%s result=retrying "
+                "attempt=%d/%d skew_ms=%s old_offset_ms=%s new_offset_ms=%s",
+                method,
+                path,
+                attempt + 1,
+                self.MAX_RETRIES,
+                self._extract_recv_window_skew_ms(error_msg),
+                previous_offset_ms,
+                int(self._time_offset_ms or 0),
+            )
+        return True
+
     def create_internal_transfer(
         self,
         transfer_id: str,
@@ -1155,6 +1220,14 @@ class BybitClient:
                         "retCode": ret_code,
                         "status_code": status_code,
                     }
+
+                    if ret_code == 10002 and self._retry_after_recv_window_error(
+                        method=method,
+                        path=path,
+                        error_msg=error_msg,
+                        attempt=attempt,
+                    ):
+                        continue
 
                     # Check if we should retry
                     if self._should_retry(ret_code, attempt):

@@ -269,6 +269,74 @@ class TestBybitClientCache:
         )
         assert "ORDER_STATE_INVALIDATED symbol=BTCUSDT action=create_order" in caplog.text
 
+    def test_request_resyncs_and_retries_recv_window_error(self, client, mock_session):
+        error_response = Mock()
+        error_response.status_code = 200
+        error_response.text = (
+            '{"retCode":10002,"retMsg":"invalid request, please check your server '
+            'timestamp or recv_window param: '
+            'req_timestamp[1773773230612],server_timestamp[1773773229002],recv_window[5000]"}'
+        )
+        error_response.json.return_value = {
+            "retCode": 10002,
+            "retMsg": (
+                "invalid request, please check your server timestamp or recv_window param: "
+                "req_timestamp[1773773230612],server_timestamp[1773773229002],recv_window[5000]"
+            ),
+        }
+        success_response = Mock()
+        success_response.status_code = 200
+        success_response.text = '{"retCode":0,"result":{"list":[]}}'
+        success_response.json.return_value = {"retCode": 0, "result": {"list": []}}
+        mock_session.get.side_effect = [error_response, success_response]
+
+        def _health_check():
+            client._time_offset_ms = -1700
+            return {"healthy": True, "offset_ms": -1700}
+
+        client.health_check = Mock(side_effect=_health_check)
+
+        result = client._request(
+            "GET",
+            "/v5/position/list",
+            params={"category": "linear", "settleCoin": "USDT"},
+            skip_cache=True,
+        )
+
+        assert result["success"] is True
+        client.health_check.assert_called_once()
+        assert mock_session.get.call_count == 2
+
+    def test_request_does_not_retry_recv_window_error_when_resync_fails(self, client, mock_session):
+        error_response = Mock()
+        error_response.status_code = 200
+        error_response.text = (
+            '{"retCode":10002,"retMsg":"invalid request, please check your server '
+            'timestamp or recv_window param: '
+            'req_timestamp[1773773230612],server_timestamp[1773773229002],recv_window[5000]"}'
+        )
+        error_response.json.return_value = {
+            "retCode": 10002,
+            "retMsg": (
+                "invalid request, please check your server timestamp or recv_window param: "
+                "req_timestamp[1773773230612],server_timestamp[1773773229002],recv_window[5000]"
+            ),
+        }
+        mock_session.get.return_value = error_response
+        client.health_check = Mock(return_value={"healthy": False, "error": "sync_failed"})
+
+        result = client._request(
+            "GET",
+            "/v5/position/list",
+            params={"category": "linear", "settleCoin": "USDT"},
+            skip_cache=True,
+        )
+
+        assert result["success"] is False
+        assert result["retCode"] == 10002
+        client.health_check.assert_called_once()
+        assert mock_session.get.call_count == 1
+
     def test_ambiguous_cancel_all_orders_invalidates_caches_and_clears_hints(self, client):
         client._run_order_command = Mock(
             return_value={
