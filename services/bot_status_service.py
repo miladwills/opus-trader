@@ -1356,6 +1356,7 @@ class BotStatusService:
             bots = self.bot_storage.list_bots(
                 source="bot_status_runtime_light",
                 projector=extract_light_bot,
+                read_only_projected_cache=True,
             )
             record_phase("source_bot_load_ms", phase_started)
 

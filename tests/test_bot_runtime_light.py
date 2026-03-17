@@ -405,6 +405,7 @@ class TestLightPathIsolation:
         svc.bot_storage.list_bots.assert_called_once()
         assert svc.bot_storage.list_bots.call_args.kwargs["source"] == "bot_status_runtime_light"
         assert svc.bot_storage.list_bots.call_args.kwargs["projector"] is extract_light_bot
+        assert svc.bot_storage.list_bots.call_args.kwargs["read_only_projected_cache"] is True
 
     def test_light_path_never_calls_scanner_scan(self):
         """The scanner's scan() method must never be invoked from light path."""

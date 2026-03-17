@@ -604,6 +604,55 @@ def test_list_bots_projector_returns_light_shape_without_mutating_cache(tmp_path
     assert cached_again[0]["direction_signals"]["rsi"] == "long"
 
 
+def test_list_bots_projector_reuses_read_only_projection_cache(tmp_path):
+    storage_path = tmp_path / "bots.json"
+    storage = BotStorageService(str(storage_path))
+    storage.save_bot(
+        {
+            "id": "bot-1",
+            "symbol": "SOLUSDT",
+            "mode": "long",
+            "status": "running",
+            "direction_signals": {"rsi": "long"},
+            "mode_readiness_matrix": [{"mode": "long", "status": "armed"}],
+        }
+    )
+    storage._cached_bots = None
+    storage._cached_mtime_ns = None
+
+    projector_calls = {"count": 0}
+
+    def counting_projector(bot):
+        projector_calls["count"] += 1
+        return extract_light_bot(bot)
+
+    with storage.capture_read_diagnostics("first_projected_read") as first_diag:
+        first = storage.list_bots(
+            source="runtime_bots_light",
+            projector=counting_projector,
+            read_only_projected_cache=True,
+        )
+
+    with storage.capture_read_diagnostics("second_projected_read") as second_diag:
+        second = storage.list_bots(
+            source="runtime_bots_light",
+            projector=counting_projector,
+            read_only_projected_cache=True,
+        )
+
+    assert projector_calls["count"] == 1
+    assert first[0]["symbol"] == "SOLUSDT"
+    assert second[0]["symbol"] == "SOLUSDT"
+    assert "mode_readiness_matrix" not in second[0]
+    assert first_diag["cache_result_counts"]["refill"] == 1
+    assert first_diag["phase_ms"]["projection_ms"] >= 0.0
+    assert first_diag["phase_ms"]["projection_cache_store_ms"] >= 0.0
+    assert second_diag["cache_result_counts"]["hit"] == 1
+    assert second_diag["operation_counts"]["_read_all_cached:projection_cache_hit"] == 1
+    assert second_diag["phase_ms"]["projection_cache_lookup_ms"] >= 0.0
+    assert second_diag["phase_ms"]["projection_cache_reuse_ms"] >= 0.0
+
+
 def test_save_runtime_bot_reads_cached_snapshot_once_per_update(tmp_path):
     storage_path = tmp_path / "bots.json"
     storage = BotStorageService(str(storage_path))
