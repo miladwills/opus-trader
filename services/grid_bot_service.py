@@ -1089,6 +1089,33 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
         cycle_start_cv = int(bot.get("_cycle_start_control_version") or 0)
         if cycle_start_cv <= 0:
             return False
+        cycle_start_storage_mtime_ns = bot.get("_cycle_start_storage_mtime_ns")
+        try:
+            cycle_start_storage_mtime_ns = (
+                int(cycle_start_storage_mtime_ns)
+                if cycle_start_storage_mtime_ns is not None
+                else None
+            )
+        except (TypeError, ValueError):
+            cycle_start_storage_mtime_ns = None
+        get_storage_mtime_ns = getattr(self.bot_storage, "get_storage_mtime_ns", None)
+        if (
+            cycle_start_storage_mtime_ns is not None
+            and callable(get_storage_mtime_ns)
+        ):
+            try:
+                current_storage_mtime_ns = get_storage_mtime_ns()
+            except Exception:
+                current_storage_mtime_ns = None
+            if (
+                current_storage_mtime_ns is not None
+                and int(current_storage_mtime_ns) == cycle_start_storage_mtime_ns
+            ):
+                self._observe_control_truth_reuse(
+                    bot_id=bot_id,
+                    symbol=bot.get("symbol"),
+                )
+                return False
         try:
             try:
                 fresh = self.bot_storage.get_bot_fresh(
@@ -1469,6 +1496,58 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
             int(snapshot.get("skipped_list_bots") or 0),
             int(snapshot.get("candidate_count") or 0),
             int(snapshot.get("all_bots_count") or 0),
+        )
+
+    def _observe_control_truth_reuse(
+        self,
+        *,
+        bot_id: Optional[str],
+        symbol: Optional[str],
+    ) -> None:
+        lock = getattr(self, "_control_truth_reuse_observation_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._control_truth_reuse_observation_lock = lock
+        observations = getattr(self, "_control_truth_reuse_observations", None)
+        if observations is None:
+            observations = {}
+            self._control_truth_reuse_observations = observations
+        now = time.monotonic()
+        snapshot = None
+        key = "control_version_stale_check|mtime_guard"
+        with lock:
+            stats = observations.setdefault(
+                key,
+                {
+                    "count": 0,
+                    "first_seen_at": now,
+                    "last_logged_at": 0.0,
+                    "bot_id": str(bot_id or "").strip() or "-",
+                    "symbol": str(symbol or "").strip().upper() or "-",
+                },
+            )
+            stats["count"] += 1
+            stats["bot_id"] = str(bot_id or "").strip() or "-"
+            stats["symbol"] = str(symbol or "").strip().upper() or "-"
+            should_log = (
+                int(stats.get("count") or 0) == 1
+                or (now - float(stats.get("last_logged_at") or 0.0))
+                >= STORAGE_READ_REUSE_OBSERVATION_LOG_INTERVAL_SEC
+            )
+            if should_log:
+                stats["last_logged_at"] = now
+                snapshot = dict(stats)
+        if not snapshot:
+            return
+        window_sec = max(now - float(snapshot.get("first_seen_at") or now), 0.001)
+        logger.info(
+            "BOT_STORAGE_REUSE path=control_version_stale_check source=mtime_guard "
+            "reused_snapshot=true count=%d rate_per_min=%.2f skipped_get_bot_fresh=1 "
+            "bot_id=%s symbol=%s",
+            int(snapshot.get("count") or 0),
+            float(snapshot.get("count") or 0) * 60.0 / window_sec,
+            snapshot.get("bot_id"),
+            snapshot.get("symbol"),
         )
 
     def _save_runtime_bot(self, bot: Dict[str, Any], **kwargs: Any) -> Dict[str, Any]:
@@ -12392,11 +12471,23 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
             if bot_id:
                 # Always read from disk to avoid stale-cache races with app.py.
                 fresh_bot = None
+                fresh_bot_mtime_ns = None
                 try:
-                    fresh_bot = self.bot_storage.get_bot_fresh(
-                        bot_id,
-                        source="run_bot_cycle",
+                    get_bot_fresh_with_meta = getattr(
+                        self.bot_storage,
+                        "get_bot_fresh_with_meta",
+                        None,
                     )
+                    if callable(get_bot_fresh_with_meta):
+                        fresh_bot, fresh_bot_mtime_ns = get_bot_fresh_with_meta(
+                            bot_id,
+                            source="run_bot_cycle",
+                        )
+                    else:
+                        fresh_bot = self.bot_storage.get_bot_fresh(
+                            bot_id,
+                            source="run_bot_cycle",
+                        )
                 except (AttributeError, TypeError):
                     fresh_bot = self.bot_storage.get_bot(bot_id)
                 if not isinstance(fresh_bot, dict):
@@ -12412,6 +12503,12 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
                         fresh_bot,
                         incoming_bot=incoming_bot,
                     )
+                    if fresh_bot_mtime_ns is not None:
+                        bot["_cycle_start_storage_mtime_ns"] = int(
+                            fresh_bot_mtime_ns
+                        )
+                    else:
+                        bot.pop("_cycle_start_storage_mtime_ns", None)
 
             if bot.get("status") == "stop_cleanup_pending" or bool(
                 bot.get("stop_cleanup_pending")

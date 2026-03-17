@@ -34,6 +34,27 @@ class _Storage:
         return dict(bot)
 
 
+class _ControlTruthStorage:
+    def __init__(self, fresh_bot, *, current_mtime_ns):
+        self.fresh_bot = dict(fresh_bot)
+        self.current_mtime_ns = current_mtime_ns
+        self.fresh_calls = []
+
+    def get_storage_mtime_ns(self):
+        return self.current_mtime_ns
+
+    def get_bot_fresh(self, bot_id, source=None):
+        self.fresh_calls.append((bot_id, source))
+        if self.fresh_bot.get("id") == bot_id:
+            return dict(self.fresh_bot)
+        return None
+
+    def get_bot(self, bot_id, source=None):
+        if self.fresh_bot.get("id") == bot_id:
+            return dict(self.fresh_bot)
+        return None
+
+
 def _build_mock_session():
     session = Mock()
     response = Mock()
@@ -218,3 +239,104 @@ def test_recent_control_change_is_expedited_for_runner_pickup():
         bot,
         now_ts=1741876803.0,
     ) is False
+
+
+def test_control_version_stale_check_reuses_cycle_start_snapshot_when_storage_unchanged():
+    service = GridBotService.__new__(GridBotService)
+    service.bot_storage = _ControlTruthStorage(
+        {
+            "id": "bot-1",
+            "symbol": "BTCUSDT",
+            "status": "running",
+            "control_version": 5,
+        },
+        current_mtime_ns=321,
+    )
+    service._observe_control_truth_reuse = Mock()
+
+    stale = GridBotService._is_control_version_stale(
+        service,
+        {
+            "id": "bot-1",
+            "symbol": "BTCUSDT",
+            "_cycle_start_control_version": 5,
+            "_cycle_start_storage_mtime_ns": 321,
+        },
+    )
+
+    assert stale is False
+    assert service.bot_storage.fresh_calls == []
+    service._observe_control_truth_reuse.assert_called_once_with(
+        bot_id="bot-1",
+        symbol="BTCUSDT",
+    )
+
+
+def test_control_version_stale_check_reads_fresh_when_storage_changed():
+    service = GridBotService.__new__(GridBotService)
+    service.bot_storage = _ControlTruthStorage(
+        {
+            "id": "bot-1",
+            "symbol": "BTCUSDT",
+            "status": "paused",
+            "control_version": 6,
+        },
+        current_mtime_ns=322,
+    )
+    service._observe_control_truth_reuse = Mock()
+
+    stale = GridBotService._is_control_version_stale(
+        service,
+        {
+            "id": "bot-1",
+            "symbol": "BTCUSDT",
+            "_cycle_start_control_version": 5,
+            "_cycle_start_storage_mtime_ns": 321,
+        },
+    )
+
+    assert stale is True
+    assert service.bot_storage.fresh_calls == [
+        ("bot-1", "control_version_stale_check")
+    ]
+    service._observe_control_truth_reuse.assert_not_called()
+
+
+def test_run_bot_cycle_records_cycle_start_storage_mtime_from_fresh_read():
+    service = GridBotService.__new__(GridBotService)
+    lock = Mock()
+    running_bot = {
+        "id": "bot-1",
+        "symbol": "BTCUSDT",
+        "status": "running",
+        "trading_env": "mainnet",
+        "paper_trading": False,
+    }
+    captured = {}
+
+    storage = Mock()
+    storage.get_bot_fresh_with_meta = Mock(return_value=(dict(running_bot), 654321))
+    service._try_acquire_bot_run_lock = Mock(return_value=(True, lock))
+    service._release_bot_run_lock = GridBotService._release_bot_run_lock
+    service.bot_storage = storage
+    service._merge_cycle_runtime_context = (
+        lambda target_bot, incoming_bot=None: GridBotService._merge_cycle_runtime_context(
+            target_bot,
+            incoming_bot=incoming_bot,
+        )
+    )
+    service._mark_runner_pickup = Mock()
+    service._get_client_for_bot = Mock(return_value=Mock())
+    service.client = Mock()
+
+    def _capture_cycle(bot, fast_refill_tick=False):
+        captured.update(dict(bot))
+        return dict(bot, cycle_continued=True)
+
+    service._run_bot_cycle_impl = Mock(side_effect=_capture_cycle)
+
+    updated = GridBotService.run_bot_cycle(service, dict(running_bot))
+
+    assert captured["_cycle_start_storage_mtime_ns"] == 654321
+    assert updated["cycle_continued"] is True
+    lock.release.assert_called_once()

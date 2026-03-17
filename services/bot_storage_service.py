@@ -15,7 +15,7 @@ import logging
 import copy
 import threading
 from datetime import datetime, timezone
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 from contextlib import contextmanager
 
 from services.lock_service import file_lock
@@ -732,18 +732,20 @@ class BotStorageService:
                 return bot
         return None
 
-    def get_bot_fresh(self, bot_id: str, *, source: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def get_storage_mtime_ns(self) -> Optional[int]:
+        """Return the current bots.json mtime for same-cycle freshness checks."""
+        return self._get_file_mtime_ns()
+
+    def get_bot_fresh_with_meta(
+        self,
+        bot_id: str,
+        *,
+        source: Optional[str] = None,
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[int]]:
         """
-        Get a specific bot by ID, always reading from disk.
-
-        Bypasses the in-memory cache to guarantee the latest persisted state.
-        Use this when stale data would be dangerous (e.g. runner cycle entry).
-
-        Args:
-            bot_id: The unique ID of the bot
-
-        Returns:
-            Bot dictionary if found, None otherwise
+        Get the latest persisted bot state together with the file mtime used for
+        that read. The mtime lets callers safely reuse the same-cycle snapshot
+        when the storage file has not changed.
         """
         started_at = time.monotonic()
         pending_updates = self._get_pending_runtime_updates_snapshot(fail_open=True)
@@ -762,8 +764,24 @@ class BotStorageService:
         )
         for bot in bots:
             if bot.get("id") == bot_id:
-                return copy.deepcopy(bot)
-        return None
+                return copy.deepcopy(bot), mtime_ns
+        return None, mtime_ns
+
+    def get_bot_fresh(self, bot_id: str, *, source: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        Get a specific bot by ID, always reading from disk.
+
+        Bypasses the in-memory cache to guarantee the latest persisted state.
+        Use this when stale data would be dangerous (e.g. runner cycle entry).
+
+        Args:
+            bot_id: The unique ID of the bot
+
+        Returns:
+            Bot dictionary if found, None otherwise
+        """
+        bot, _mtime_ns = self.get_bot_fresh_with_meta(bot_id, source=source)
+        return bot
 
     def save_bot(
         self,
