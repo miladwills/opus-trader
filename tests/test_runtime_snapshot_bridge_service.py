@@ -2,6 +2,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from types import MethodType
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -135,3 +136,175 @@ def test_bots_runtime_rebuild_interval_is_tightened_for_ticker_events(tmp_path):
     assert bridge._resolve_rebuild_interval_sec("bots_runtime", {"ticker"}) == 0.5
     assert bridge._resolve_rebuild_interval_sec("market", {"ticker"}) == 0.5
     assert bridge._resolve_rebuild_interval_sec("bots_runtime", {"timer"}) == 2.0
+
+
+def test_publish_records_skipped_reused_section_diagnostics(tmp_path):
+    bridge = RuntimeSnapshotBridgeService(file_path=str(tmp_path / "runtime_snapshot_bridge.json"))
+    now = time.time()
+    bridge._last_snapshot = {
+        "version": 1,
+        "meta": {
+            "producer": "runner",
+            "producer_pid": 1,
+            "produced_at": now - 1,
+            "stream_owner": "runner",
+        },
+        "sections": {
+            "market": {
+                "payload": {"prices": {}, "stale_data": False},
+                "published_at": now - 0.1,
+                "source": "runner_stream_snapshot",
+                "reason": "ticker",
+            }
+        },
+    }
+    bridge._last_publish_at["market"] = now
+
+    writes = []
+
+    def fake_write_snapshot(self, payload):
+        writes.append(json.loads(json.dumps(payload)))
+
+    bridge._write_snapshot = MethodType(fake_write_snapshot, bridge)
+    bridge._publish(reason="ticker", event_types={"ticker"}, force=False)
+
+    assert len(writes) == 1
+    publish_pass = writes[0]["meta"]["publish_pass"]
+    market_diag = publish_pass["sections"]["market"]
+    assert market_diag["planned_rebuild"] is False
+    assert market_diag["skipped"] is True
+    assert market_diag["reused_previous"] is True
+    assert market_diag["start_at"] is None
+    assert market_diag["upstream_dependency"]
+    assert publish_pass["write_events"][0]["stage"] == "final"
+    assert publish_pass["final_write_requested_at"] is not None
+
+
+def test_publish_writes_core_sections_before_bots_runtime_light(tmp_path):
+    bridge = RuntimeSnapshotBridgeService(file_path=str(tmp_path / "runtime_snapshot_bridge.json"))
+    bridge._cached_bots_runtime_payload = {
+        "bots": [],
+        "error": None,
+        "stale_data": False,
+        "runtime_state_source": "runner_runtime_bots",
+        "bots_scope": "full",
+    }
+    bridge._last_snapshot = {
+        "version": 1,
+        "meta": {
+            "producer": "runner",
+            "producer_pid": 1,
+            "produced_at": time.time() - 30,
+            "stream_owner": "runner",
+        },
+        "sections": {
+            "bots_runtime_light": {
+                "payload": {
+                    "bots": [{"id": "stale-light"}],
+                    "stale_data": True,
+                    "error": "old_light",
+                    "bots_scope": "light",
+                },
+                "published_at": time.time() - 30,
+                "source": "runner_runtime_snapshot_light",
+                "reason": "timer",
+            }
+        },
+    }
+
+    bridge._build_meta = MethodType(
+        lambda self, now_ts: {
+            "producer": "runner",
+            "producer_pid": 1,
+            "produced_at": now_ts,
+            "stream_owner": "runner",
+            "stream_health": {},
+        },
+        bridge,
+    )
+    bridge._collect_market_symbols = MethodType(lambda self: [], bridge)
+    bridge._build_market_health = MethodType(lambda self, now_ts: {}, bridge)
+    bridge._build_market_payload = MethodType(
+        lambda self, *, symbols, health: {
+            "health": health,
+            "prices": {},
+            "symbols": list(symbols or []),
+            "stale_data": False,
+        },
+        bridge,
+    )
+    bridge._build_open_orders_payload = MethodType(
+        lambda self: {"symbols": {}, "stale_data": False, "error": None},
+        bridge,
+    )
+    bridge._get_cached_account_snapshot = MethodType(
+        lambda self, *, force: {
+            "equity": 100.0,
+            "available_balance": 80.0,
+            "funding_balance": 0.0,
+            "realized_pnl": 1.0,
+            "unrealized_pnl": 0.0,
+            "error": None,
+        },
+        bridge,
+    )
+    bridge._build_positions_payload = MethodType(
+        lambda self, account_payload=None: {
+            "positions": [],
+            "summary": {
+                "total_positions": 0,
+                "longs": 0,
+                "shorts": 0,
+                "total_unrealized_pnl": 0.0,
+            },
+            "stale_data": False,
+            "error": None,
+        },
+        bridge,
+    )
+    bridge._build_summary_payload = MethodType(
+        lambda self, *, account_payload, positions_payload: {
+            "account": dict(account_payload),
+            "positions_summary": dict(positions_payload.get("summary") or {}),
+            "stale_data": False,
+        },
+        bridge,
+    )
+
+    writes = []
+
+    def fake_write_snapshot(self, payload):
+        writes.append(json.loads(json.dumps(payload)))
+
+    def fake_build_bots_runtime_light_payload(self):
+        assert len(writes) == 1
+        first = writes[0]
+        assert first["meta"]["publish_pass"]["write_events"][0]["stage"] == "pre_bots_runtime_light"
+        assert "summary" in first["sections"]
+        assert first["sections"]["bots_runtime_light"]["payload"]["error"] == "old_light"
+        return {
+            "bots": [{"id": "fresh-light"}],
+            "error": None,
+            "stale_data": False,
+            "runtime_state_source": "runner_runtime_bots_light",
+            "runtime_publish_ts": time.time(),
+            "bots_scope": "light",
+        }
+
+    bridge._write_snapshot = MethodType(fake_write_snapshot, bridge)
+    bridge._build_bots_runtime_light_payload = MethodType(
+        fake_build_bots_runtime_light_payload,
+        bridge,
+    )
+
+    bridge._publish(reason="timer", event_types={"timer"}, force=True)
+
+    assert len(writes) == 2
+    first_pass = writes[0]["meta"]["publish_pass"]
+    final_pass = writes[1]["meta"]["publish_pass"]
+    assert first_pass["write_events"][0]["stage"] == "pre_bots_runtime_light"
+    assert final_pass["write_events"][-1]["stage"] == "final"
+    assert final_pass["sections"]["bots_runtime_light"]["success"] is True
+    assert final_pass["sections"]["bots_runtime_light"]["elapsed_ms"] is not None
+    assert final_pass["sections"]["bots_runtime_light"]["upstream_dependency"]
+    assert writes[1]["sections"]["bots_runtime_light"]["payload"]["bots"][0]["id"] == "fresh-light"

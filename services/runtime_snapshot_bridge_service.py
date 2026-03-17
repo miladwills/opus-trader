@@ -94,6 +94,35 @@ class RuntimeSnapshotBridgeService:
         "bots_runtime_light": 6.0,
         "summary": 12.0,
     }
+    PUBLISH_DIAGNOSTIC_LOG_THROTTLE_SEC = 30.0
+    PUBLISH_DIAGNOSTIC_SLOW_PASS_MS = 5000.0
+    PUBLISH_DIAGNOSTIC_SLOW_SECTION_MS = 2000.0
+    SECTION_DEPENDENCIES = {
+        "market": (
+            "stream_service.get_health_snapshot + "
+            "stream_service.get_dashboard_snapshot + "
+            "bot_storage.list_bots/get_runtime_positions_payload"
+        ),
+        "open_orders": (
+            "bot_status_service.get_live_open_orders_by_symbol -> "
+            "stream_service.get_open_orders_fresh or bybit_client.get_open_orders"
+        ),
+        "positions": (
+            "bot_status_service.get_runtime_positions_payload or "
+            "position_service.get_positions + bot_storage.list_bots"
+        ),
+        "summary": (
+            "account_service.get_overview + pnl_service.get_today_stats + "
+            "risk_manager.get_risk_state"
+        ),
+        "bots_runtime_light": (
+            "bot_status_service.get_runtime_bots_light + bot_storage.list_bots + "
+            "symbol_pnl_service + cached scanner/stopped-preview/runtime positions"
+        ),
+        "bots_runtime": (
+            "cached full enrichment payload from _run_full_enrich_loop or storage fallback"
+        ),
+    }
 
     def __init__(
         self,
@@ -149,6 +178,7 @@ class RuntimeSnapshotBridgeService:
         self._full_enrich_in_progress = False
         self._full_enrich_last_duration_ms: Optional[float] = None
         self._light_publish_count_during_full: int = 0
+        self._last_publish_diag_log_at: float = 0.0
 
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -398,13 +428,36 @@ class RuntimeSnapshotBridgeService:
         snapshot["version"] = self.SNAPSHOT_VERSION
         snapshot["meta"] = self._build_meta(now_ts)
         sections = snapshot.setdefault("sections", {})
+        section_order = (
+            "market",
+            "open_orders",
+            "positions",
+            "summary",
+            "bots_runtime_light",
+            "bots_runtime",
+        )
+        rebuild_plan = {
+            name: self._should_rebuild(name, event_set, force)
+            for name in section_order
+        }
+        publish_diag = self._build_publish_diagnostics(
+            reason=reason,
+            event_set=event_set,
+            force=force,
+            sections=sections,
+            rebuild_plan=rebuild_plan,
+            started_at=now_ts,
+        )
+        rebuilt_before_light = False
 
-        if self._should_rebuild("market", event_set, force):
-            market_symbols = self._collect_market_symbols()
-            market_health = self._build_market_health(now_ts)
-            market_payload = self._build_market_payload(
-                symbols=market_symbols,
-                health=market_health,
+        if rebuild_plan["market"]:
+            market_payload = self._run_publish_section(
+                publish_diag,
+                "market",
+                lambda: self._build_market_payload(
+                    symbols=self._collect_market_symbols(),
+                    health=self._build_market_health(now_ts),
+                ),
             )
             market_published_at = time.time()
             sections["market"] = self._wrap_section(
@@ -414,9 +467,14 @@ class RuntimeSnapshotBridgeService:
                 source="runner_stream_snapshot",
             )
             self._last_publish_at["market"] = market_published_at
+            rebuilt_before_light = True
 
-        if self._should_rebuild("open_orders", event_set, force):
-            open_orders_payload = self._build_open_orders_payload()
+        if rebuild_plan["open_orders"]:
+            open_orders_payload = self._run_publish_section(
+                publish_diag,
+                "open_orders",
+                self._build_open_orders_payload,
+            )
             open_orders_published_at = time.time()
             sections["open_orders"] = self._wrap_section(
                 open_orders_payload,
@@ -425,11 +483,16 @@ class RuntimeSnapshotBridgeService:
                 source="runner_runtime_snapshot",
             )
             self._last_publish_at["open_orders"] = open_orders_published_at
+            rebuilt_before_light = True
 
         positions_payload: Optional[Dict[str, Any]] = None
-        if self._should_rebuild("positions", event_set, force):
+        if rebuild_plan["positions"]:
             account_payload = self._get_cached_account_snapshot(force=force)
-            positions_payload = self._build_positions_payload(account_payload)
+            positions_payload = self._run_publish_section(
+                publish_diag,
+                "positions",
+                lambda: self._build_positions_payload(account_payload),
+            )
             positions_published_at = time.time()
             sections["positions"] = self._wrap_section(
                 positions_payload,
@@ -438,11 +501,16 @@ class RuntimeSnapshotBridgeService:
                 source="runner_runtime_snapshot",
             )
             self._last_publish_at["positions"] = positions_published_at
+            rebuilt_before_light = True
 
-        if self._should_rebuild("summary", event_set, force):
+        if rebuild_plan["summary"]:
             account_payload = self._get_cached_account_snapshot(force=True)
             if positions_payload is None:
-                positions_payload = self._build_positions_payload(account_payload)
+                positions_payload = self._run_publish_section(
+                    publish_diag,
+                    "positions",
+                    lambda: self._build_positions_payload(account_payload),
+                )
                 positions_published_at = time.time()
                 sections["positions"] = self._wrap_section(
                     positions_payload,
@@ -451,9 +519,14 @@ class RuntimeSnapshotBridgeService:
                     source="runner_runtime_snapshot",
                 )
                 self._last_publish_at["positions"] = positions_published_at
-            summary_payload = self._build_summary_payload(
-                account_payload=account_payload,
-                positions_payload=positions_payload,
+                rebuilt_before_light = True
+            summary_payload = self._run_publish_section(
+                publish_diag,
+                "summary",
+                lambda: self._build_summary_payload(
+                    account_payload=account_payload,
+                    positions_payload=positions_payload or {},
+                ),
             )
             summary_published_at = time.time()
             sections["summary"] = self._wrap_section(
@@ -463,22 +536,25 @@ class RuntimeSnapshotBridgeService:
                 source="runner_runtime_snapshot",
             )
             self._last_publish_at["summary"] = summary_published_at
+            rebuilt_before_light = True
 
-        # Intermediate write on startup: publish critical sections (market,
-        # open_orders, positions, summary) before the expensive bots_runtime
-        # build so the dashboard gets usable data within seconds.
-        if "startup" in event_set and any(
-            k in sections for k in ("market", "positions", "summary")
-        ):
-            with self._state_lock:
-                snapshot["meta"]["snapshot_epoch"] = self._next_writer_seq
-                self._next_writer_seq += 1
-                self._write_snapshot(snapshot)
-                self._last_snapshot = self._copy(snapshot)
+        # Publish whatever we have before the proven slow light runtime build.
+        # This keeps fresh market/orders/positions/summary truth visible even if
+        # bots_runtime_light stalls for many seconds.
+        if rebuild_plan["bots_runtime_light"] and rebuilt_before_light:
+            self._write_publish_snapshot(
+                snapshot,
+                publish_diag,
+                stage="pre_bots_runtime_light",
+            )
 
         # bots_runtime_light — fast, every cycle, never blocks
-        if self._should_rebuild("bots_runtime_light", event_set, force):
-            light_payload = self._build_bots_runtime_light_payload()
+        if rebuild_plan["bots_runtime_light"]:
+            light_payload = self._run_publish_section(
+                publish_diag,
+                "bots_runtime_light",
+                self._build_bots_runtime_light_payload,
+            )
             light_published_at = time.time()
             sections["bots_runtime_light"] = self._wrap_section(
                 light_payload,
@@ -494,16 +570,16 @@ class RuntimeSnapshotBridgeService:
         # bots_runtime (full) — reads the background enrichment thread's
         # cached result.  NEVER calls get_runtime_bots(cache_only=False)
         # from this thread — the background _run_full_enrich_loop does that.
-        if self._should_rebuild("bots_runtime", event_set, force):
-            with self._enrich_result_lock:
-                cached_full = (
-                    self._copy(self._cached_bots_runtime_payload)
-                    if self._cached_bots_runtime_payload is not None
-                    else None
-                )
-            if cached_full is not None:
-                bots_runtime_payload = cached_full
-            else:
+        if rebuild_plan["bots_runtime"]:
+            def _build_bots_runtime_section() -> Dict[str, Any]:
+                with self._enrich_result_lock:
+                    cached_full = (
+                        self._copy(self._cached_bots_runtime_payload)
+                        if self._cached_bots_runtime_payload is not None
+                        else None
+                    )
+                if cached_full is not None:
+                    return cached_full
                 # No full payload yet (startup or background thread hasn't
                 # completed first build).  Publish an explicitly stale
                 # placeholder so the section exists but is clearly marked.
@@ -511,13 +587,19 @@ class RuntimeSnapshotBridgeService:
                     fallback_bots = self._get_bots_cached()
                 except Exception:
                     fallback_bots = []
-                bots_runtime_payload = {
+                return {
                     "bots": fallback_bots,
                     "error": "full_enrich_not_ready",
                     "stale_data": True,
                     "runtime_state_source": "storage_fallback_awaiting_full",
                     "bots_scope": "full",
                 }
+
+            bots_runtime_payload = self._run_publish_section(
+                publish_diag,
+                "bots_runtime",
+                _build_bots_runtime_section,
+            )
             bots_runtime_published_at = time.time()
             sections["bots_runtime"] = self._wrap_section(
                 bots_runtime_payload,
@@ -527,11 +609,8 @@ class RuntimeSnapshotBridgeService:
             )
             self._last_publish_at["bots_runtime"] = bots_runtime_published_at
 
-        with self._state_lock:
-            snapshot["meta"]["snapshot_epoch"] = self._next_writer_seq
-            self._next_writer_seq += 1
-            self._write_snapshot(snapshot)
-            self._last_snapshot = self._copy(snapshot)
+        self._write_publish_snapshot(snapshot, publish_diag, stage="final")
+        self._maybe_log_publish_diagnostics(publish_diag)
 
     def _write_snapshot(self, payload: Dict[str, Any]) -> None:
         serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -639,6 +718,219 @@ class RuntimeSnapshotBridgeService:
             except (TypeError, ValueError):
                 continue
         return effective_interval
+
+    def _build_publish_diagnostics(
+        self,
+        *,
+        reason: str,
+        event_set: Iterable[str],
+        force: bool,
+        sections: Dict[str, Any],
+        rebuild_plan: Dict[str, bool],
+        started_at: float,
+    ) -> Dict[str, Any]:
+        diag = {
+            "reason": reason,
+            "event_types": sorted(set(event_set or [])),
+            "force": bool(force),
+            "pass_started_at": started_at,
+            "pass_elapsed_ms": 0.0,
+            "write_events": [],
+            "sections": {},
+        }
+        for name, planned in rebuild_plan.items():
+            existing = sections.get(name) if isinstance(sections, dict) else None
+            existing_payload = (
+                existing.get("payload")
+                if isinstance(existing, dict)
+                else None
+            )
+            diag["sections"][name] = {
+                "section": name,
+                "upstream_dependency": self.SECTION_DEPENDENCIES.get(name),
+                "planned_rebuild": bool(planned),
+                "start_at": None,
+                "end_at": None,
+                "elapsed_ms": None,
+                "success": None,
+                "stale_data": (
+                    bool(existing_payload.get("stale_data"))
+                    if isinstance(existing_payload, dict)
+                    else None
+                ),
+                "stale_reason": (
+                    self._derive_section_stale_reason(name, existing_payload)
+                    if isinstance(existing_payload, dict)
+                    else None
+                ),
+                "error": (
+                    existing_payload.get("error")
+                    if isinstance(existing_payload, dict)
+                    else None
+                ),
+                "reused_previous": bool(existing) and not bool(planned),
+                "skipped": not bool(planned),
+                "present_before_pass": bool(existing),
+            }
+        return diag
+
+    def _run_publish_section(
+        self,
+        publish_diag: Dict[str, Any],
+        section_name: str,
+        builder,
+    ) -> Dict[str, Any]:
+        info = (
+            publish_diag.setdefault("sections", {}).setdefault(section_name, {})
+            if isinstance(publish_diag, dict)
+            else {}
+        )
+        start_ts = time.time()
+        info["planned_rebuild"] = True
+        info["start_at"] = start_ts
+        info["skipped"] = False
+        info["reused_previous"] = False
+        try:
+            payload = builder()
+        except Exception as exc:
+            end_ts = time.time()
+            info["end_at"] = end_ts
+            info["elapsed_ms"] = round(max(end_ts - start_ts, 0.0) * 1000.0, 2)
+            info["success"] = False
+            info["stale_data"] = True
+            info["stale_reason"] = "exception"
+            info["error"] = str(exc)
+            publish_diag["pass_elapsed_ms"] = round(
+                max(end_ts - float(publish_diag.get("pass_started_at") or end_ts), 0.0)
+                * 1000.0,
+                2,
+            )
+            raise
+        end_ts = time.time()
+        payload_dict = payload if isinstance(payload, dict) else {}
+        info["end_at"] = end_ts
+        info["elapsed_ms"] = round(max(end_ts - start_ts, 0.0) * 1000.0, 2)
+        info["success"] = True
+        info["stale_data"] = bool(payload_dict.get("stale_data"))
+        info["stale_reason"] = self._derive_section_stale_reason(
+            section_name,
+            payload_dict,
+        )
+        info["error"] = payload_dict.get("error")
+        return payload_dict
+
+    def _write_publish_snapshot(
+        self,
+        snapshot: Dict[str, Any],
+        publish_diag: Dict[str, Any],
+        *,
+        stage: str,
+    ) -> None:
+        requested_at = time.time()
+        publish_diag["pass_elapsed_ms"] = round(
+            max(requested_at - float(publish_diag.get("pass_started_at") or requested_at), 0.0)
+            * 1000.0,
+            2,
+        )
+        write_event = {
+            "stage": stage,
+            "requested_at": requested_at,
+        }
+        publish_diag.setdefault("write_events", []).append(write_event)
+        if stage == "final":
+            publish_diag["final_write_requested_at"] = requested_at
+        snapshot.setdefault("meta", {})["publish_pass"] = self._copy(publish_diag)
+        with self._state_lock:
+            snapshot["meta"]["snapshot_epoch"] = self._next_writer_seq
+            self._next_writer_seq += 1
+            self._write_snapshot(snapshot)
+            self._last_snapshot = self._copy(snapshot)
+        completed_at = time.time()
+        write_event["completed_at"] = completed_at
+        publish_diag["pass_elapsed_ms"] = round(
+            max(completed_at - float(publish_diag.get("pass_started_at") or completed_at), 0.0)
+            * 1000.0,
+            2,
+        )
+        if stage == "final":
+            publish_diag["final_write_completed_at"] = completed_at
+
+    def _maybe_log_publish_diagnostics(self, publish_diag: Dict[str, Any]) -> None:
+        total_ms = self._safe_float(publish_diag.get("pass_elapsed_ms"), 0.0)
+        sections = publish_diag.get("sections") or {}
+        section_summaries: List[str] = []
+        slow_section_names: List[str] = []
+        failed_sections: List[str] = []
+        for name in (
+            "market",
+            "open_orders",
+            "positions",
+            "summary",
+            "bots_runtime_light",
+            "bots_runtime",
+        ):
+            info = sections.get(name) or {}
+            elapsed_ms = self._safe_float(info.get("elapsed_ms"), 0.0)
+            skipped = bool(info.get("skipped"))
+            reused = bool(info.get("reused_previous"))
+            if skipped:
+                status = "skipped"
+            elif info.get("success") is False:
+                status = "failed"
+                failed_sections.append(name)
+            elif bool(info.get("stale_data")):
+                status = "stale"
+            else:
+                status = "ok"
+            if reused:
+                status = f"{status}/reused"
+            if elapsed_ms >= self.PUBLISH_DIAGNOSTIC_SLOW_SECTION_MS:
+                slow_section_names.append(name)
+            elapsed_label = (
+                f"{round(elapsed_ms, 1)}ms"
+                if elapsed_ms > 0
+                else "-"
+            )
+            section_summaries.append(f"{name}={status}@{elapsed_label}")
+
+        should_log = bool(failed_sections or slow_section_names) or (
+            total_ms >= self.PUBLISH_DIAGNOSTIC_SLOW_PASS_MS
+        )
+        if not should_log:
+            return
+        now_mono = time.monotonic()
+        if (
+            self._last_publish_diag_log_at > 0
+            and (now_mono - self._last_publish_diag_log_at)
+            < self.PUBLISH_DIAGNOSTIC_LOG_THROTTLE_SEC
+        ):
+            return
+        self._last_publish_diag_log_at = now_mono
+        logger.warning(
+            "Runtime snapshot bridge publish pass total_ms=%.1f reason=%s "
+            "slow_sections=%s failed_sections=%s final_write_completed_at=%.3f sections=%s",
+            total_ms,
+            publish_diag.get("reason"),
+            ",".join(slow_section_names) or "-",
+            ",".join(failed_sections) or "-",
+            self._safe_float(publish_diag.get("final_write_completed_at"), 0.0),
+            "; ".join(section_summaries),
+        )
+
+    @staticmethod
+    def _derive_section_stale_reason(
+        section_name: str,
+        payload: Optional[Dict[str, Any]],
+    ) -> Optional[str]:
+        if not isinstance(payload, dict):
+            return None
+        if not bool(payload.get("stale_data")):
+            return None
+        error = str(payload.get("error") or "").strip()
+        if error:
+            return error
+        normalized = str(section_name or "").strip().lower() or "section"
+        return f"{normalized}_stale"
 
     @staticmethod
     def _wrap_section(
