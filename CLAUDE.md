@@ -62,7 +62,10 @@
 - Favor truthful state badges/fields over explanatory prose.
 
 ## Delivery Rules
-- After any meaningful patch: restart `app.py` and `runner.py`, verify final PIDs, and push changes to GitHub (`git add -A && git commit && git push origin main`).
+- Never work directly on `main`. Always create a task branch (`fix/`, `feature/`, `chore/`, `audit/`).
+- After any meaningful patch: restart `app.py` and `runner.py`, verify final PIDs, commit and push the task branch to GitHub.
+- Update `CLAUDE.me` with a structured entry before committing.
+- GitHub branch push is the canonical deliverable. ZIP only if explicitly requested.
 - Never push `.env`, `venv`, logs, or other sensitive/heavy artifacts (covered by `.gitignore`).
 
 ## Do Not Break
