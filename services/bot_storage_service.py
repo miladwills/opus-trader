@@ -162,6 +162,7 @@ class BotStorageService:
         self._runtime_persist_observations: Dict[str, Dict[str, Any]] = {}
         self._read_observation_lock = threading.RLock()
         self._read_observations: Dict[str, Dict[str, Any]] = {}
+        self._read_diagnostics_local = threading.local()
         self.runtime_flush_delay_sec = max(
             float(os.environ.get("BOT_RUNTIME_FLUSH_DELAY_SEC", "0.5") or 0.5),
             0.1,
@@ -183,6 +184,142 @@ class BotStorageService:
     def _clone_bots(bots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         return copy.deepcopy(bots)
 
+    def _get_read_diagnostics_stack(self) -> List[Dict[str, Any]]:
+        stack = getattr(self._read_diagnostics_local, "stack", None)
+        if stack is None:
+            stack = []
+            self._read_diagnostics_local.stack = stack
+        return stack
+
+    def _active_read_diagnostics(self) -> Optional[Dict[str, Any]]:
+        stack = getattr(self._read_diagnostics_local, "stack", None)
+        if not stack:
+            return None
+        return stack[-1]
+
+    @staticmethod
+    def _increment_counter(bucket: Dict[str, Any], key: str, amount: int = 1) -> None:
+        bucket[key] = int(bucket.get(key) or 0) + int(amount or 0)
+
+    @staticmethod
+    def _accumulate_ms(bucket: Dict[str, Any], key: str, elapsed_ms: float) -> None:
+        bucket[key] = round(
+            float(bucket.get(key) or 0.0) + max(float(elapsed_ms or 0.0), 0.0),
+            3,
+        )
+
+    def _record_read_diagnostic(
+        self,
+        *,
+        operation: Optional[str] = None,
+        source: Optional[str] = None,
+        cache_result: Optional[str] = None,
+        full_list_read: bool = False,
+        elapsed_ms: Optional[float] = None,
+        metric_name: Optional[str] = None,
+        metric_ms: Optional[float] = None,
+        bot_count: Optional[int] = None,
+    ) -> None:
+        trace = self._active_read_diagnostics()
+        if trace is None:
+            return
+        if operation:
+            self._increment_counter(trace.setdefault("operation_counts", {}), operation)
+        if source:
+            self._increment_counter(trace.setdefault("source_counts", {}), source)
+        if cache_result:
+            self._increment_counter(
+                trace.setdefault("cache_result_counts", {}),
+                str(cache_result),
+            )
+        if full_list_read:
+            trace["full_list_read_count"] = int(trace.get("full_list_read_count") or 0) + 1
+        if elapsed_ms is not None:
+            trace["storage_read_call_count"] = int(
+                trace.get("storage_read_call_count") or 0
+            ) + 1
+            self._accumulate_ms(trace.setdefault("operation_elapsed_ms", {}), operation or "read", elapsed_ms)
+        if metric_name and metric_ms is not None:
+            self._accumulate_ms(trace.setdefault("phase_ms", {}), metric_name, metric_ms)
+        if bot_count is not None:
+            trace["last_bot_count"] = int(bot_count)
+
+    def _record_lock_diagnostic(
+        self,
+        *,
+        lock_name: str,
+        wait_ms: float,
+        acquired: bool,
+    ) -> None:
+        trace = self._active_read_diagnostics()
+        if trace is None:
+            return
+        lock_wait_ms = trace.setdefault("lock_wait_ms", {})
+        self._accumulate_ms(lock_wait_ms, lock_name, wait_ms)
+        self._increment_counter(trace.setdefault("lock_acquire_counts", {}), lock_name)
+        max_waits = trace.setdefault("lock_wait_max_ms", {})
+        max_waits[lock_name] = round(
+            max(float(max_waits.get(lock_name) or 0.0), max(float(wait_ms or 0.0), 0.0)),
+            3,
+        )
+        if not acquired:
+            self._increment_counter(trace.setdefault("lock_timeout_counts", {}), lock_name)
+
+    def _finalize_read_diagnostics(self, trace: Dict[str, Any]) -> Dict[str, Any]:
+        completed_at = time.time()
+        trace["completed_at"] = completed_at
+        trace["total_ms"] = round(
+            max(completed_at - float(trace.get("started_at") or completed_at), 0.0) * 1000.0,
+            3,
+        )
+        top_operation = None
+        top_count = 0
+        for name, count in (trace.get("operation_counts") or {}).items():
+            if int(count or 0) > top_count:
+                top_operation = str(name)
+                top_count = int(count or 0)
+        trace["top_repeated_operation"] = (
+            {
+                "name": top_operation,
+                "count": top_count,
+            }
+            if top_operation and top_count > 1
+            else None
+        )
+        return trace
+
+    @contextmanager
+    def capture_read_diagnostics(self, label: str):
+        trace = {
+            "label": str(label or "").strip() or "bot_storage",
+            "started_at": time.time(),
+            "storage_read_call_count": 0,
+            "full_list_read_count": 0,
+            "cache_result_counts": {},
+            "source_counts": {},
+            "operation_counts": {},
+            "operation_elapsed_ms": {},
+            "phase_ms": {},
+            "lock_wait_ms": {},
+            "lock_wait_max_ms": {},
+            "lock_acquire_counts": {},
+            "lock_timeout_counts": {},
+            "last_bot_count": 0,
+        }
+        stack = self._get_read_diagnostics_stack()
+        stack.append(trace)
+        try:
+            yield trace
+        finally:
+            if stack and stack[-1] is trace:
+                stack.pop()
+            else:
+                try:
+                    stack.remove(trace)
+                except ValueError:
+                    pass
+            self._finalize_read_diagnostics(trace)
+
     def _get_file_mtime_ns(self) -> Optional[int]:
         try:
             return self.file_path.stat().st_mtime_ns
@@ -195,10 +332,16 @@ class BotStorageService:
         *,
         mtime_ns: Optional[int] = None,
     ) -> None:
+        started_at = time.monotonic()
         # Perform expensive deepcopy OUTSIDE the lock so that _cache_lock
         # only protects an O(1) pointer swap instead of blocking other
         # threads for the full copy duration.
         cloned = self._clone_bots(bots)
+        clone_ms = (time.monotonic() - started_at) * 1000.0
+        self._record_read_diagnostic(
+            metric_name="cache_update_clone_ms",
+            metric_ms=clone_ms,
+        )
         resolved_mtime = (
             mtime_ns if mtime_ns is not None
             else self._get_file_mtime_ns()
@@ -213,11 +356,20 @@ class BotStorageService:
                 return
             self._cached_bots = cloned
             self._cached_mtime_ns = resolved_mtime
-        clone_ms = (time.monotonic() - t0) * 1000
-        if clone_ms > 50.0:
+        lock_hold_ms = (time.monotonic() - t0) * 1000.0
+        self._record_read_diagnostic(
+            metric_name="cache_update_lock_ms",
+            metric_ms=lock_hold_ms,
+        )
+        total_ms = (time.monotonic() - started_at) * 1000.0
+        self._record_read_diagnostic(
+            metric_name="cache_update_total_ms",
+            metric_ms=total_ms,
+        )
+        if lock_hold_ms > 50.0:
             logger.debug(
                 "_update_cache: lock held %.1fms (%d bots)",
-                clone_ms,
+                lock_hold_ms,
                 len(bots),
             )
 
@@ -235,7 +387,14 @@ class BotStorageService:
             if timeout_sec is None
             else max(float(timeout_sec or 0.0), 0.0)
         )
+        wait_started = time.monotonic()
         acquired = lock.acquire(timeout=wait_timeout)
+        wait_ms = (time.monotonic() - wait_started) * 1000.0
+        self._record_lock_diagnostic(
+            lock_name=lock_name,
+            wait_ms=wait_ms,
+            acquired=bool(acquired),
+        )
         if not acquired:
             logger.warning(
                 "Bot storage %s timed out after %.3fs",
@@ -502,6 +661,7 @@ class BotStorageService:
         started_at = time.monotonic()
         mtime_ns = self._get_file_mtime_ns()
         pending_updates = self._get_pending_runtime_updates_snapshot(fail_open=True)
+        cache_check_started = time.monotonic()
         with self._timed_internal_lock(
             self._cache_lock,
             "cache_lock",
@@ -509,6 +669,24 @@ class BotStorageService:
         ) as acquired:
             if acquired and self._cached_bots is not None and self._cached_mtime_ns == mtime_ns:
                 bots = self._clone_bots(self._cached_bots)
+                cache_lookup_ms = (time.monotonic() - cache_check_started) * 1000.0
+                self._record_read_diagnostic(
+                    operation="_read_all_cached:hit",
+                    source=source,
+                    cache_result="hit",
+                    full_list_read=False,
+                    elapsed_ms=(time.monotonic() - started_at) * 1000.0,
+                    metric_name="cache_lookup_ms",
+                    metric_ms=cache_lookup_ms,
+                    bot_count=len(bots),
+                )
+                self._record_read_diagnostic(
+                    metric_name="clone_ms",
+                    metric_ms=max(
+                        ((time.monotonic() - started_at) * 1000.0) - cache_lookup_ms,
+                        0.0,
+                    ),
+                )
                 self._observe_read_access(
                     path="_read_all_cached",
                     source=source,
@@ -518,10 +696,43 @@ class BotStorageService:
                     elapsed_ms=(time.monotonic() - started_at) * 1000.0,
                 )
                 return bots
+        self._record_read_diagnostic(
+            metric_name="cache_lookup_ms",
+            metric_ms=(time.monotonic() - cache_check_started) * 1000.0,
+        )
+        disk_read_started = time.monotonic()
         bots = self._read_all_locked()
+        disk_read_ms = (time.monotonic() - disk_read_started) * 1000.0
+        self._record_read_diagnostic(
+            metric_name="disk_read_ms",
+            metric_ms=disk_read_ms,
+        )
+        runtime_merge_started = time.monotonic()
         self._apply_runtime_updates_to_bots(bots, pending_updates)
+        runtime_merge_ms = (time.monotonic() - runtime_merge_started) * 1000.0
+        self._record_read_diagnostic(
+            metric_name="runtime_merge_ms",
+            metric_ms=runtime_merge_ms,
+        )
+        cache_update_started = time.monotonic()
         self._update_cache(bots, mtime_ns=mtime_ns)
+        self._record_read_diagnostic(
+            metric_name="cache_update_call_ms",
+            metric_ms=(time.monotonic() - cache_update_started) * 1000.0,
+        )
+        clone_started = time.monotonic()
         cloned = self._clone_bots(bots)
+        clone_ms = (time.monotonic() - clone_started) * 1000.0
+        self._record_read_diagnostic(
+            operation="_read_all_cached:refill",
+            source=source,
+            cache_result="refill",
+            full_list_read=True,
+            elapsed_ms=(time.monotonic() - started_at) * 1000.0,
+            metric_name="clone_ms",
+            metric_ms=clone_ms,
+            bot_count=len(cloned),
+        )
         self._observe_read_access(
             path="_read_all_cached",
             source=source,
@@ -544,7 +755,14 @@ class BotStorageService:
         Yields:
             Lock file descriptor
         """
+        lock_name = "file_lock_exclusive" if exclusive else "file_lock_shared"
+        wait_started = time.monotonic()
         with file_lock(self.lock_path, exclusive=exclusive) as lock_fd:
+            self._record_lock_diagnostic(
+                lock_name=lock_name,
+                wait_ms=(time.monotonic() - wait_started) * 1000.0,
+                acquired=True,
+            )
             yield lock_fd
 
     def _read_all_unlocked(self) -> List[Dict[str, Any]]:
@@ -557,10 +775,27 @@ class BotStorageService:
         """
         try:
             with open(self.file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+                read_started = time.monotonic()
+                raw_data = f.read()
+                self._record_read_diagnostic(
+                    metric_name="file_read_ms",
+                    metric_ms=(time.monotonic() - read_started) * 1000.0,
+                )
+                parse_started = time.monotonic()
+                data = json.loads(raw_data)
+                self._record_read_diagnostic(
+                    metric_name="json_parse_ms",
+                    metric_ms=(time.monotonic() - parse_started) * 1000.0,
+                )
                 if isinstance(data, list):
+                    normalize_started = time.monotonic()
                     for bot in data:
                         self._normalize_mode_range_state(bot)
+                    self._record_read_diagnostic(
+                        metric_name="normalize_ms",
+                        metric_ms=(time.monotonic() - normalize_started) * 1000.0,
+                        bot_count=len(data),
+                    )
                     return data
                 return []
         except (json.JSONDecodeError, FileNotFoundError, IOError) as e:
@@ -749,11 +984,29 @@ class BotStorageService:
         """
         started_at = time.monotonic()
         pending_updates = self._get_pending_runtime_updates_snapshot(fail_open=True)
+        disk_read_started = time.monotonic()
         bots = self._read_all_locked()
+        self._record_read_diagnostic(
+            metric_name="disk_read_ms",
+            metric_ms=(time.monotonic() - disk_read_started) * 1000.0,
+        )
+        runtime_merge_started = time.monotonic()
         self._apply_runtime_updates_to_bots(bots, pending_updates)
+        self._record_read_diagnostic(
+            metric_name="runtime_merge_ms",
+            metric_ms=(time.monotonic() - runtime_merge_started) * 1000.0,
+        )
         # Update the cache so subsequent get_bot() calls benefit
         mtime_ns = self._get_file_mtime_ns()
         self._update_cache(bots, mtime_ns=mtime_ns)
+        self._record_read_diagnostic(
+            operation="get_bot_fresh:fresh",
+            source=source,
+            cache_result="fresh",
+            full_list_read=True,
+            elapsed_ms=(time.monotonic() - started_at) * 1000.0,
+            bot_count=len(bots),
+        )
         self._observe_read_access(
             path="get_bot_fresh",
             source=source,

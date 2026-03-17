@@ -4,7 +4,9 @@ Bybit Control Center - Bot Status Service
 Provides enriched runtime view of all bots for the dashboard.
 """
 
+import logging
 import time
+import threading
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 
@@ -98,6 +100,8 @@ READINESS_STABILITY_INACTIVE_POLICY = {
     "hold_sec": 4.0,
 }
 READINESS_STABILITY_CACHE_TTL_SEC = 900.0
+RUNTIME_LIGHT_DIAGNOSTIC_LOG_THROTTLE_SEC = 60.0
+RUNTIME_LIGHT_DIAGNOSTIC_SLOW_CALL_MS = 1000.0
 
 
 class BotStatusService:
@@ -175,6 +179,9 @@ class BotStatusService:
             "error": None,
         }
         self._last_runtime_batch_context: Dict[str, Any] = {}
+        self._last_runtime_light_diagnostics: Dict[str, Any] = {}
+        self._runtime_light_diag_log_lock = threading.Lock()
+        self._runtime_light_diag_last_logged_at = 0.0
 
     def _get_watchdog_diagnostics_service(self) -> WatchdogDiagnosticsService:
         service = getattr(self, "_watchdog_diagnostics_service", None)
@@ -928,6 +935,56 @@ class BotStatusService:
     def get_last_runtime_batch_context(self) -> Dict[str, Any]:
         return dict(self._last_runtime_batch_context)
 
+    def get_last_runtime_light_diagnostics(self) -> Dict[str, Any]:
+        return dict(self._last_runtime_light_diagnostics)
+
+    @staticmethod
+    def _runtime_diag_top_phase(phase_ms: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        top_name = None
+        top_elapsed_ms = -1.0
+        for name, elapsed in (phase_ms or {}).items():
+            try:
+                numeric_elapsed = float(elapsed or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if numeric_elapsed > top_elapsed_ms:
+                top_name = str(name)
+                top_elapsed_ms = numeric_elapsed
+        if top_name is None:
+            return None
+        return {
+            "name": top_name,
+            "elapsed_ms": round(top_elapsed_ms, 3),
+        }
+
+    def _maybe_log_runtime_light_diagnostics(self, diagnostics: Dict[str, Any]) -> None:
+        total_ms = self._safe_float(diagnostics.get("total_ms"), 0.0)
+        if total_ms < RUNTIME_LIGHT_DIAGNOSTIC_SLOW_CALL_MS:
+            return
+        now_mono = time.monotonic()
+        with self._runtime_light_diag_log_lock:
+            if (
+                self._runtime_light_diag_last_logged_at > 0
+                and (now_mono - self._runtime_light_diag_last_logged_at)
+                < RUNTIME_LIGHT_DIAGNOSTIC_LOG_THROTTLE_SEC
+            ):
+                return
+            self._runtime_light_diag_last_logged_at = now_mono
+        top_phase = diagnostics.get("top_phase") or {}
+        storage = diagnostics.get("storage") or {}
+        logging.warning(
+            "Runtime bots light diagnostics total_ms=%.1f bot_count=%d top_phase=%s top_phase_ms=%.1f "
+            "storage_reads=%d cache_lock_wait_ms=%.1f runtime_lock_wait_ms=%.1f file_lock_wait_ms=%.1f",
+            total_ms,
+            int(diagnostics.get("bot_count") or 0),
+            top_phase.get("name") or "-",
+            self._safe_float(top_phase.get("elapsed_ms"), 0.0),
+            int(storage.get("storage_read_call_count") or 0),
+            self._safe_float((storage.get("lock_wait_ms") or {}).get("cache_lock"), 0.0),
+            self._safe_float((storage.get("lock_wait_ms") or {}).get("runtime_lock"), 0.0),
+            self._safe_float((storage.get("lock_wait_ms") or {}).get("file_lock_shared"), 0.0),
+        )
+
     @staticmethod
     def _get_raw_runtime_signal_blocker(bot: Dict[str, Any]) -> Optional[str]:
         reconcile = dict(bot.get("exchange_reconciliation") or {})
@@ -1273,75 +1330,191 @@ class BotStatusService:
         The method is safe to call every 2 seconds without stalling.
         """
         runtime_build_started_ts = time.time()
-        bots = self.bot_storage.list_bots()
-        running_bot_ids_by_symbol = self._build_running_bot_ids_by_symbol(bots)
-        symbol_pnl_lookup = self.symbol_pnl_service.get_all_symbols_pnl()
-        bot_pnl_lookup = self.symbol_pnl_service.get_all_bot_pnl()
+        started_mono = time.monotonic()
+        phase_ms: Dict[str, float] = {}
+        operation_counts: Dict[str, int] = {}
+        enrich_diagnostics: Dict[str, float] = {
+            "readiness_stability_ms": 0.0,
+            "light_dict_build_ms": 0.0,
+        }
 
-        active_symbol_owner_bots = [
-            bot
-            for bot in bots
-            if bot.get("status") in ACTIVE_POSITION_OWNER_STATUSES
-            and str(bot.get("symbol") or "").strip()
-            and str(bot.get("symbol") or "").strip().lower() != "auto-pilot"
-        ]
-
-        # Cache-only lookups — never trigger heavy recomputation
-        scanner_lookup = self._get_scanner_recommendation_lookup(bots, cache_only=True)
-        stopped_preview_lookup = self._build_stopped_preview_lookup(bots, cache_only=True)
-
-        if not active_symbol_owner_bots:
-            positions_data: Dict[str, Any] = {"positions": []}
-            live_open_orders_by_symbol: Dict[str, List[Dict[str, Any]]] = {}
-        else:
-            positions_data = self._get_runtime_positions_payload(
-                skip_cache=positions_skip_cache
-            )
-            live_open_orders_by_symbol = self._build_live_open_orders_by_symbol(
-                bots, cache_only=True
+        def record_phase(name: str, phase_started: float) -> None:
+            phase_ms[name] = round(
+                max(time.monotonic() - phase_started, 0.0) * 1000.0,
+                3,
             )
 
-        positions_list = positions_data.get("positions", [])
-        positions_by_symbol = self._build_positions_by_symbol(positions_list)
-        position_lookup: Dict[str, Dict[str, Any]] = {}
-        for pos in positions_list:
-            symbol = pos.get("symbol")
-            if symbol:
-                position_lookup[symbol] = {
-                    "size": pos.get("size", 0.0),
-                    "side": pos.get("side", ""),
-                    "unrealized_pnl": pos.get("unrealized_pnl", 0.0),
-                    "entry_price": pos.get("entry_price", 0.0),
-                    "mark_price": pos.get("mark_price", 0.0),
+        def count_operation(name: str) -> None:
+            operation_counts[name] = int(operation_counts.get(name) or 0) + 1
+
+        with self.bot_storage.capture_read_diagnostics(
+            "bot_status_service.get_runtime_bots_light"
+        ) as storage_diag:
+            phase_started = time.monotonic()
+            count_operation("bot_storage.list_bots")
+            bots = self.bot_storage.list_bots(source="bot_status_runtime_light")
+            record_phase("source_bot_load_ms", phase_started)
+
+            phase_started = time.monotonic()
+            self._prune_readiness_stability_cache(
+                {
+                    str(bot.get("id") or "").strip()
+                    for bot in list(bots or [])
+                    if str(bot.get("id") or "").strip()
                 }
-
-        enriched_bots = []
-        for bot in bots:
-            enriched = self._enrich_bot_light(
-                bot,
-                position_lookup,
-                positions_by_symbol,
-                symbol_pnl_lookup,
-                bot_pnl_lookup,
-                running_bot_ids_by_symbol,
-                scanner_lookup,
-                live_open_orders_by_symbol,
-                stopped_preview_lookup,
             )
-            enriched_bots.append(enriched)
+            running_bot_ids_by_symbol = self._build_running_bot_ids_by_symbol(bots)
+            record_phase("runtime_merge_index_ms", phase_started)
 
-        enriched_bots.sort(
-            key=lambda x: (
-                0 if bool(x.get("auto_pilot")) else 1,
-                str(x.get("symbol") or ""),
+            phase_started = time.monotonic()
+            count_operation("symbol_pnl_service.get_all_symbols_pnl")
+            symbol_pnl_lookup = self.symbol_pnl_service.get_all_symbols_pnl()
+            record_phase("symbol_pnl_lookup_ms", phase_started)
+
+            phase_started = time.monotonic()
+            count_operation("symbol_pnl_service.get_all_bot_pnl")
+            bot_pnl_lookup = self.symbol_pnl_service.get_all_bot_pnl()
+            record_phase("bot_pnl_lookup_ms", phase_started)
+
+            phase_started = time.monotonic()
+            active_symbol_owner_bots = [
+                bot
+                for bot in bots
+                if bot.get("status") in ACTIVE_POSITION_OWNER_STATUSES
+                and str(bot.get("symbol") or "").strip()
+                and str(bot.get("symbol") or "").strip().lower() != "auto-pilot"
+            ]
+            record_phase("active_symbol_owner_scan_ms", phase_started)
+
+            phase_started = time.monotonic()
+            count_operation("scanner_lookup")
+            scanner_lookup = self._get_scanner_recommendation_lookup(
+                bots,
+                cache_only=True,
             )
-        )
+            record_phase("scanner_lookup_ms", phase_started)
 
-        return self._annotate_runtime_publish_latency(
-            enriched_bots,
-            runtime_publish_ts=time.time(),
-            runtime_build_started_ts=runtime_build_started_ts,
+            phase_started = time.monotonic()
+            count_operation("stopped_preview_lookup")
+            stopped_preview_lookup = self._build_stopped_preview_lookup(
+                bots,
+                cache_only=True,
+            )
+            record_phase("stopped_preview_lookup_ms", phase_started)
+
+            if not active_symbol_owner_bots:
+                positions_data = {"positions": []}
+                live_open_orders_by_symbol = {}
+                phase_ms["positions_payload_ms"] = 0.0
+                phase_ms["open_orders_lookup_ms"] = 0.0
+            else:
+                phase_started = time.monotonic()
+                count_operation("runtime_positions_payload")
+                positions_data = self._get_runtime_positions_payload(
+                    skip_cache=positions_skip_cache
+                )
+                record_phase("positions_payload_ms", phase_started)
+
+                phase_started = time.monotonic()
+                count_operation("live_open_orders_lookup")
+                live_open_orders_by_symbol = self._build_live_open_orders_by_symbol(
+                    bots,
+                    cache_only=True,
+                )
+                record_phase("open_orders_lookup_ms", phase_started)
+
+            phase_started = time.monotonic()
+            positions_list = positions_data.get("positions", [])
+            positions_by_symbol = self._build_positions_by_symbol(positions_list)
+            position_lookup: Dict[str, Dict[str, Any]] = {}
+            for pos in positions_list:
+                symbol = pos.get("symbol")
+                if symbol:
+                    position_lookup[symbol] = {
+                        "size": pos.get("size", 0.0),
+                        "side": pos.get("side", ""),
+                        "unrealized_pnl": pos.get("unrealized_pnl", 0.0),
+                        "entry_price": pos.get("entry_price", 0.0),
+                        "mark_price": pos.get("mark_price", 0.0),
+                    }
+            record_phase("position_lookup_ms", phase_started)
+
+            phase_started = time.monotonic()
+            enriched_bots = []
+            for bot in bots:
+                enriched = self._enrich_bot_light(
+                    bot,
+                    position_lookup,
+                    positions_by_symbol,
+                    symbol_pnl_lookup,
+                    bot_pnl_lookup,
+                    running_bot_ids_by_symbol,
+                    scanner_lookup,
+                    live_open_orders_by_symbol,
+                    stopped_preview_lookup,
+                    diagnostics=enrich_diagnostics,
+                )
+                enriched_bots.append(enriched)
+            record_phase("per_bot_enrich_ms", phase_started)
+
+            phase_started = time.monotonic()
+            enriched_bots.sort(
+                key=lambda x: (
+                    0 if bool(x.get("auto_pilot")) else 1,
+                    str(x.get("symbol") or ""),
+                )
+            )
+            record_phase("sort_and_finalize_ms", phase_started)
+
+            runtime_publish_ts = time.time()
+            annotated = self._annotate_runtime_publish_latency(
+                enriched_bots,
+                runtime_publish_ts=runtime_publish_ts,
+                runtime_build_started_ts=runtime_build_started_ts,
+            )
+
+        phase_ms["readiness_stability_ms"] = round(
+            float(enrich_diagnostics.get("readiness_stability_ms") or 0.0),
+            3,
         )
+        phase_ms["light_dict_build_ms"] = round(
+            float(enrich_diagnostics.get("light_dict_build_ms") or 0.0),
+            3,
+        )
+        diagnostics = {
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "total_ms": round(max(time.monotonic() - started_mono, 0.0) * 1000.0, 3),
+            "bot_count": len(annotated),
+            "active_symbol_owner_bot_count": len(active_symbol_owner_bots),
+            "position_count": len(positions_list),
+            "positions_skip_cache": bool(positions_skip_cache),
+            "cache_only_paths": {
+                "scanner_lookup": True,
+                "stopped_preview_lookup": True,
+                "live_open_orders_lookup": True,
+            },
+            "phase_ms": phase_ms,
+            "storage": dict(storage_diag),
+            "operation_counts": operation_counts,
+        }
+        diagnostics["top_phase"] = self._runtime_diag_top_phase(phase_ms)
+        top_operation_name = None
+        top_operation_count = 0
+        for name, count in operation_counts.items():
+            if int(count or 0) > top_operation_count:
+                top_operation_name = str(name)
+                top_operation_count = int(count or 0)
+        diagnostics["top_repeated_operation"] = (
+            {
+                "name": top_operation_name,
+                "count": top_operation_count,
+            }
+            if top_operation_name and top_operation_count > 1
+            else (dict(storage_diag.get("top_repeated_operation")) if storage_diag.get("top_repeated_operation") else None)
+        )
+        self._last_runtime_light_diagnostics = diagnostics
+        self._maybe_log_runtime_light_diagnostics(diagnostics)
+        return annotated
 
     def get_live_open_orders_by_symbol(
         self,
@@ -2915,6 +3088,7 @@ class BotStatusService:
         scanner_lookup: Optional[Dict[str, Dict[str, Any]]] = None,
         live_open_orders_by_symbol: Optional[Dict[str, List[Dict[str, Any]]]] = None,
         stopped_preview_lookup: Optional[Dict[str, Dict[str, Any]]] = None,
+        diagnostics: Optional[Dict[str, float]] = None,
     ) -> Dict[str, Any]:
         """Lightweight bot enrichment for the dashboard-critical fast path.
 
@@ -3157,6 +3331,7 @@ class BotStatusService:
             )
 
         # --- Readiness: use stability cache (NO fresh evaluation) ---
+        readiness_started = time.monotonic()
         cache = self._ensure_readiness_stability_cache()
         cache_key = f"{bot_id}:configured"
         cached_readiness = cache.get(cache_key) or {}
@@ -3174,6 +3349,10 @@ class BotStatusService:
         execution_viability_status = bot.get("execution_viability_status") or "unknown"
         execution_blocked = bool(bot.get("execution_blocked", False))
         execution_margin_limited = bool(bot.get("execution_margin_limited", False))
+        if diagnostics is not None:
+            diagnostics["readiness_stability_ms"] = float(
+                diagnostics.get("readiness_stability_ms") or 0.0
+            ) + ((time.monotonic() - readiness_started) * 1000.0)
 
         # Exchange truth (cheap dict reads)
         exchange_reconciliation = dict(bot.get("exchange_reconciliation") or {})
@@ -3182,6 +3361,7 @@ class BotStatusService:
         )
 
         # --- Build light-only enriched dict ---
+        light_dict_started = time.monotonic()
         enriched = {
             "id": bot.get("id"),
             "symbol": symbol,
@@ -3403,7 +3583,10 @@ class BotStatusService:
             "symbol_pnl": self._get_symbol_pnl_summary(symbol, symbol_pnl_lookup),
             "bot_pnl": self._get_bot_pnl_summary(bot_id, bot_pnl_lookup),
         }
-
+        if diagnostics is not None:
+            diagnostics["light_dict_build_ms"] = float(
+                diagnostics.get("light_dict_build_ms") or 0.0
+            ) + ((time.monotonic() - light_dict_started) * 1000.0)
         return enriched
 
     def _get_entry_readiness(

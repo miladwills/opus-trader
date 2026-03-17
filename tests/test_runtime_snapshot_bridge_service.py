@@ -129,6 +129,53 @@ def test_read_section_exposes_bridge_and_runtime_snapshot_ages(tmp_path):
     assert section["runtime_snapshot_age_ms"] >= 4500
 
 
+def test_capture_read_diagnostics_tracks_repeated_section_reads(tmp_path):
+    bridge_path = tmp_path / "runtime_snapshot_bridge.json"
+    bridge_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "meta": {
+                    "producer": "runner",
+                    "producer_pid": 1234,
+                    "produced_at": time.time(),
+                    "stream_owner": "runner",
+                    "snapshot_epoch": 1,
+                },
+                "sections": {
+                    "summary": {
+                        "payload": {"account": {}, "positions_summary": {}},
+                        "published_at": time.time(),
+                        "source": "runner_runtime_snapshot",
+                        "reason": "timer",
+                    },
+                    "positions": {
+                        "payload": {"positions": []},
+                        "published_at": time.time(),
+                        "source": "runner_runtime_snapshot",
+                        "reason": "timer",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    bridge = RuntimeSnapshotBridgeService(file_path=str(bridge_path))
+
+    with bridge.capture_read_diagnostics("test") as diag:
+        bridge.read_section("summary")
+        bridge.read_section("summary")
+        bridge.read_section("positions")
+
+    assert diag["operation_counts"]["read_snapshot"] == 3
+    assert diag["section_call_counts"]["summary"] == 2
+    assert diag["section_call_counts"]["positions"] == 1
+    assert diag["top_repeated_section"]["name"] == "summary"
+    assert diag["phase_ms"]["snapshot_file_read_ms"] >= 0.0
+    assert diag["phase_ms"]["snapshot_json_parse_ms"] >= 0.0
+
+
 def test_bots_runtime_rebuild_interval_is_tightened_for_ticker_events(tmp_path):
     bridge = RuntimeSnapshotBridgeService(file_path=str(tmp_path / "runtime_snapshot_bridge.json"))
 

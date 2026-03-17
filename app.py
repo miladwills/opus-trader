@@ -15,6 +15,7 @@ import re
 import zlib
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 import pandas as pd
@@ -224,6 +225,14 @@ DASHBOARD_BOTS_SNAPSHOT_REFRESH_TTL_SEC = 1.0
 DASHBOARD_STREAM_FALLBACK_INTERVAL_SEC = 2.0
 BOOTSTRAP_RECOVERY_LOG_LOCK = threading.Lock()
 BOOTSTRAP_RECOVERY_LOG_STATE: Dict[str, float] = {"last_logged_at": 0.0}
+REQUEST_DIAGNOSTICS_LOCK = threading.Lock()
+REQUEST_DIAGNOSTICS: Dict[str, Dict[str, Any]] = {}
+REQUEST_DIAGNOSTIC_LOG_STATE: Dict[str, float] = {}
+REQUEST_DIAGNOSTIC_LOG_THROTTLE_SEC = 60.0
+REQUEST_DIAGNOSTIC_SLOW_MS = {
+    "dashboard_bootstrap": 1000.0,
+    "bridge_diagnostics": 250.0,
+}
 RUNTIME_SNAPSHOT_BRIDGE_FILE = os.environ.get(
     "RUNTIME_SNAPSHOT_BRIDGE_FILE",
     os.path.join("storage", "runtime_snapshot_bridge.json"),
@@ -237,6 +246,82 @@ runtime_snapshot_bridge = RuntimeSnapshotBridgeService(
 
 def _copy_payload(value: Any) -> Any:
     return copy.deepcopy(value)
+
+
+def _top_timing_phase(phase_ms: Dict[str, Any] | None) -> Dict[str, Any] | None:
+    top_name = None
+    top_elapsed_ms = -1.0
+    for name, elapsed in (phase_ms or {}).items():
+        try:
+            numeric_elapsed = float(elapsed or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if numeric_elapsed > top_elapsed_ms:
+            top_name = str(name)
+            top_elapsed_ms = numeric_elapsed
+    if top_name is None:
+        return None
+    return {
+        "name": top_name,
+        "elapsed_ms": round(top_elapsed_ms, 3),
+    }
+
+
+def _store_request_diagnostics(name: str, payload: Dict[str, Any]) -> None:
+    with REQUEST_DIAGNOSTICS_LOCK:
+        REQUEST_DIAGNOSTICS[str(name or "").strip() or "unknown"] = _copy_payload(payload)
+
+
+def _get_request_diagnostics(name: str) -> Dict[str, Any] | None:
+    with REQUEST_DIAGNOSTICS_LOCK:
+        payload = REQUEST_DIAGNOSTICS.get(str(name or "").strip() or "unknown")
+        return _copy_payload(payload) if payload is not None else None
+
+
+def _maybe_log_request_diagnostics(name: str, payload: Dict[str, Any]) -> None:
+    normalized = str(name or "").strip() or "unknown"
+    threshold_ms = float(REQUEST_DIAGNOSTIC_SLOW_MS.get(normalized, 0.0) or 0.0)
+    total_ms = float((payload or {}).get("total_ms") or 0.0)
+    if total_ms < threshold_ms:
+        return
+    now_mono = time.monotonic()
+    with REQUEST_DIAGNOSTICS_LOCK:
+        last_logged_at = float(REQUEST_DIAGNOSTIC_LOG_STATE.get(normalized, 0.0))
+        if (
+            last_logged_at > 0
+            and (now_mono - last_logged_at) < REQUEST_DIAGNOSTIC_LOG_THROTTLE_SEC
+        ):
+            return
+        REQUEST_DIAGNOSTIC_LOG_STATE[normalized] = now_mono
+    top_phase = (payload or {}).get("top_phase") or {}
+    bridge_reads = (payload or {}).get("bridge_reads") or {}
+    storage_reads = (payload or {}).get("storage_reads") or {}
+    logging.warning(
+        "Request diagnostics route=%s total_ms=%.1f top_phase=%s top_phase_ms=%.1f "
+        "bridge_snapshot_calls=%d bridge_top_section=%s storage_reads=%d cache_lock_wait_ms=%.1f",
+        normalized,
+        total_ms,
+        top_phase.get("name") or "-",
+        float(top_phase.get("elapsed_ms") or 0.0),
+        int((bridge_reads.get("operation_counts") or {}).get("read_snapshot") or 0),
+        ((bridge_reads.get("top_repeated_section") or {}).get("name") or "-"),
+        int(storage_reads.get("storage_read_call_count") or 0),
+        float(((storage_reads.get("lock_wait_ms") or {}).get("cache_lock") or 0.0)),
+    )
+
+
+def _runtime_snapshot_bridge_read_diagnostics_context(label: str):
+    bridge = runtime_snapshot_bridge
+    if bridge is not None and hasattr(bridge, "capture_read_diagnostics"):
+        return bridge.capture_read_diagnostics(label)
+    return nullcontext({})
+
+
+def _bot_storage_read_diagnostics_context(label: str):
+    storage = globals().get("bot_storage")
+    if storage is not None and hasattr(storage, "capture_read_diagnostics"):
+        return storage.capture_read_diagnostics(label)
+    return nullcontext({})
 
 
 def _dashboard_future_done(key: str, future) -> None:
@@ -503,8 +588,16 @@ def _build_runtime_bots_payload() -> Dict[str, Any]:
 def _build_runtime_bots_light_payload() -> Dict[str, Any]:
     """Build a lightweight bot payload using get_runtime_bots_light() — no heavy enrichment."""
     bots = []
+    light_runtime_diagnostics = {}
     try:
         bots = bot_status_service.get_runtime_bots_light() if "bot_status_service" in globals() and bot_status_service is not None else []
+        light_runtime_diagnostics = (
+            bot_status_service.get_last_runtime_light_diagnostics()
+            if "bot_status_service" in globals()
+            and bot_status_service is not None
+            and hasattr(bot_status_service, "get_last_runtime_light_diagnostics")
+            else {}
+        )
     except Exception as exc:
         logging.warning("Runtime bot light rebuild failed: %s", exc)
         return _build_runtime_bots_light_fallback("bots_runtime_light_rebuild_error")
@@ -522,6 +615,11 @@ def _build_runtime_bots_light_payload() -> Dict[str, Any]:
         "snapshot_source": "app_runtime_light_rebuild",
         "snapshot_reason": "direct_light_refresh",
         "snapshot_owner": "app",
+        "light_runtime_diagnostics": (
+            dict(light_runtime_diagnostics)
+            if isinstance(light_runtime_diagnostics, dict)
+            else {}
+        ),
     }
 
 
@@ -2826,54 +2924,106 @@ def _dashboard_emit_interval_for_event(event_type: str) -> float | None:
 @require_basic_auth
 def api_dashboard_bootstrap():
     """Single fast payload for first page load — critical data only."""
-    # Check if ALL critical bridge sections are usable (alive + fresh)
-    # Prefer bots_runtime_light (fast cadence) over bots_runtime (slow).
-    summary_bridged = runtime_snapshot_bridge.read_section("summary")
-    positions_bridged = runtime_snapshot_bridge.read_section("positions")
-    bots_light_bridged = runtime_snapshot_bridge.read_section("bots_runtime_light")
-    bots_bridged = (
-        bots_light_bridged
-        if _bridge_section_usable(bots_light_bridged)
-        else runtime_snapshot_bridge.read_section("bots_runtime")
-    )
-    all_fresh = (
-        _bridge_section_usable(summary_bridged)
-        and _bridge_section_usable(positions_bridged)
-        and _bridge_section_usable(bots_bridged)
-    )
-
-    if all_fresh:
-        payload = _build_dashboard_stream_payload("bootstrap", fast=True)
-    else:
-        # Any section dead/missing/stale — recover with direct builders so the
-        # bootstrap path is not capped by the generic 1.5s snapshot timeout.
-        results, section_elapsed_ms = _recover_bootstrap_dashboard_sections(timeout_sec=3.0)
-        _log_bootstrap_recovery_timing(
-            timeout_sec=3.0,
-            section_elapsed_ms=section_elapsed_ms,
-            all_fresh=all_fresh,
+    request_started = time.monotonic()
+    phase_ms: Dict[str, float] = {}
+    with _runtime_snapshot_bridge_read_diagnostics_context(
+        "api_dashboard_bootstrap"
+    ) as bridge_reads, _bot_storage_read_diagnostics_context(
+        "api_dashboard_bootstrap"
+    ) as storage_reads:
+        phase_started = time.monotonic()
+        # Check if ALL critical bridge sections are usable (alive + fresh)
+        # Prefer bots_runtime_light (fast cadence) over bots_runtime (slow).
+        summary_bridged = runtime_snapshot_bridge.read_section("summary")
+        positions_bridged = runtime_snapshot_bridge.read_section("positions")
+        bots_light_bridged = runtime_snapshot_bridge.read_section("bots_runtime_light")
+        bots_bridged = (
+            bots_light_bridged
+            if _bridge_section_usable(bots_light_bridged)
+            else runtime_snapshot_bridge.read_section("bots_runtime")
         )
-        bots_snapshot = results["bots"]
-        payload = _build_dashboard_payload_from_snapshots(
-            "bootstrap",
-            summary_snapshot=results["summary"],
-            positions_snapshot=results["positions"],
-            bots_snapshot=bots_snapshot,
-            market_snapshot=runtime_snapshot_bridge.read_market_snapshot(),
-            fast=True,
+        all_fresh = (
+            _bridge_section_usable(summary_bridged)
+            and _bridge_section_usable(positions_bridged)
+            and _bridge_section_usable(bots_bridged)
+        )
+        phase_ms["initial_bridge_probe_ms"] = round(
+            max(time.monotonic() - phase_started, 0.0) * 1000.0,
+            3,
         )
 
-    try:
-        # PnL sync is runner's responsibility — dashboard serves from local logs only
-        logs = pnl_service.get_log(use_global_baseline=True)
-        today = pnl_service.get_today_stats(use_global_baseline=True)
-        payload["pnl"] = {
-            "logs": logs[-100:],
-            "today": today,
-            "performance_baseline": _performance_baseline_metadata(),
+        if all_fresh:
+            phase_started = time.monotonic()
+            payload = _build_dashboard_stream_payload("bootstrap", fast=True)
+            phase_ms["fresh_payload_build_ms"] = round(
+                max(time.monotonic() - phase_started, 0.0) * 1000.0,
+                3,
+            )
+            recovery_elapsed_ms = {}
+        else:
+            # Any section dead/missing/stale — recover with direct builders so the
+            # bootstrap path is not capped by the generic 1.5s snapshot timeout.
+            phase_started = time.monotonic()
+            results, section_elapsed_ms = _recover_bootstrap_dashboard_sections(timeout_sec=3.0)
+            phase_ms["recovery_sections_ms"] = round(
+                max(time.monotonic() - phase_started, 0.0) * 1000.0,
+                3,
+            )
+            recovery_elapsed_ms = dict(section_elapsed_ms)
+            _log_bootstrap_recovery_timing(
+                timeout_sec=3.0,
+                section_elapsed_ms=section_elapsed_ms,
+                all_fresh=all_fresh,
+            )
+            bots_snapshot = results["bots"]
+            phase_started = time.monotonic()
+            payload = _build_dashboard_payload_from_snapshots(
+                "bootstrap",
+                summary_snapshot=results["summary"],
+                positions_snapshot=results["positions"],
+                bots_snapshot=bots_snapshot,
+                market_snapshot=runtime_snapshot_bridge.read_market_snapshot(),
+                fast=True,
+            )
+            phase_ms["recovery_payload_shape_ms"] = round(
+                max(time.monotonic() - phase_started, 0.0) * 1000.0,
+                3,
+            )
+
+        phase_started = time.monotonic()
+        try:
+            # PnL sync is runner's responsibility — dashboard serves from local logs only
+            logs = pnl_service.get_log(use_global_baseline=True)
+            today = pnl_service.get_today_stats(use_global_baseline=True)
+            payload["pnl"] = {
+                "logs": logs[-100:],
+                "today": today,
+                "performance_baseline": _performance_baseline_metadata(),
+            }
+        except Exception:
+            payload["pnl"] = {"logs": [], "today": {}}
+        phase_ms["pnl_payload_ms"] = round(
+            max(time.monotonic() - phase_started, 0.0) * 1000.0,
+            3,
+        )
+
+        request_diag = {
+            "route": "dashboard_bootstrap",
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "all_fresh": bool(all_fresh),
+            "path": "fresh_bridge" if all_fresh else "degraded_recovery",
+            "total_ms": round(
+                max(time.monotonic() - request_started, 0.0) * 1000.0,
+                3,
+            ),
+            "phase_ms": phase_ms,
+            "bridge_reads": dict(bridge_reads),
+            "storage_reads": dict(storage_reads),
+            "recovery_section_elapsed_ms": recovery_elapsed_ms,
         }
-    except Exception:
-        payload["pnl"] = {"logs": [], "today": {}}
+        request_diag["top_phase"] = _top_timing_phase(phase_ms)
+        _store_request_diagnostics("dashboard_bootstrap", request_diag)
+        _maybe_log_request_diagnostics("dashboard_bootstrap", request_diag)
     return _set_no_cache_headers(jsonify(payload))
 
 
@@ -2881,61 +3031,117 @@ def api_dashboard_bootstrap():
 @require_basic_auth
 def api_bridge_diagnostics():
     """Read-only diagnostics for runtime snapshot bridge health."""
-    snapshot = runtime_snapshot_bridge.read_snapshot()
-    now = time.time()
-    meta = (snapshot.get("meta") or {}) if snapshot else {}
-    producer_pid = meta.get("producer_pid")
-    producer_alive = _pid_is_alive(producer_pid, expected_substring="runner.py")
-    sections_data = (snapshot.get("sections") or {}) if snapshot else {}
+    request_started = time.monotonic()
+    phase_ms: Dict[str, float] = {}
+    with _runtime_snapshot_bridge_read_diagnostics_context(
+        "api_bridge_diagnostics"
+    ) as bridge_reads, _bot_storage_read_diagnostics_context(
+        "api_bridge_diagnostics"
+    ) as storage_reads:
+        phase_started = time.monotonic()
+        snapshot = runtime_snapshot_bridge.read_snapshot()
+        phase_ms["bridge_snapshot_read_ms"] = round(
+            max(time.monotonic() - phase_started, 0.0) * 1000.0,
+            3,
+        )
+        now = time.time()
+        meta = (snapshot.get("meta") or {}) if snapshot else {}
+        producer_pid = meta.get("producer_pid")
 
-    section_names = ["market", "open_orders", "positions", "bots_runtime", "bots_runtime_light", "summary"]
-    stale_thresholds = runtime_snapshot_bridge.READ_STALE_AGE_SEC
-    sections_diag = {}
-    for name in section_names:
-        section = sections_data.get(name) or {}
-        payload = section.get("payload") or {}
-        published_at = float(section.get("published_at") or 0)
-        age_sec = round(now - published_at, 2) if published_at > 0 else None
-        threshold = stale_thresholds.get(name, 10.0)
-        stale = age_sec is None or age_sec > threshold
-        shape_valid = runtime_snapshot_bridge._payload_shape_valid(name, payload)
-        counts = {}
-        if name == "positions":
-            counts["positions"] = len(payload.get("positions") or [])
-        elif name in ("bots_runtime", "bots_runtime_light"):
-            counts["bots"] = len(payload.get("bots") or [])
-            counts["bots_scope"] = payload.get("bots_scope")
-        elif name == "open_orders":
-            counts["orders"] = len(payload.get("orders") or [])
-        sections_diag[name] = {
-            "present": bool(section),
-            "published_at": published_at or None,
-            "age_sec": age_sec,
-            "stale_threshold_sec": threshold,
-            "stale": stale,
-            "shape_valid": shape_valid,
-            "payload_counts": counts,
-            "source": section.get("source"),
-            "reason": section.get("reason"),
+        phase_started = time.monotonic()
+        producer_alive = _pid_is_alive(producer_pid, expected_substring="runner.py")
+        phase_ms["producer_alive_check_ms"] = round(
+            max(time.monotonic() - phase_started, 0.0) * 1000.0,
+            3,
+        )
+
+        sections_data = (snapshot.get("sections") or {}) if snapshot else {}
+
+        section_names = ["market", "open_orders", "positions", "bots_runtime", "bots_runtime_light", "summary"]
+        stale_thresholds = runtime_snapshot_bridge.READ_STALE_AGE_SEC
+        phase_started = time.monotonic()
+        sections_diag = {}
+        for name in section_names:
+            section = sections_data.get(name) or {}
+            payload = section.get("payload") or {}
+            published_at = float(section.get("published_at") or 0)
+            age_sec = round(now - published_at, 2) if published_at > 0 else None
+            threshold = stale_thresholds.get(name, 10.0)
+            stale = age_sec is None or age_sec > threshold
+            shape_valid = runtime_snapshot_bridge._payload_shape_valid(name, payload)
+            counts = {}
+            if name == "positions":
+                counts["positions"] = len(payload.get("positions") or [])
+            elif name in ("bots_runtime", "bots_runtime_light"):
+                counts["bots"] = len(payload.get("bots") or [])
+                counts["bots_scope"] = payload.get("bots_scope")
+            elif name == "open_orders":
+                counts["orders"] = len(payload.get("orders") or [])
+            section_diag = {
+                "present": bool(section),
+                "published_at": published_at or None,
+                "age_sec": age_sec,
+                "stale_threshold_sec": threshold,
+                "stale": stale,
+                "shape_valid": shape_valid,
+                "payload_counts": counts,
+                "source": section.get("source"),
+                "reason": section.get("reason"),
+            }
+            if name == "bots_runtime_light" and isinstance(
+                payload.get("light_runtime_diagnostics"),
+                dict,
+            ):
+                section_diag["light_runtime_diagnostics"] = dict(
+                    payload.get("light_runtime_diagnostics") or {}
+                )
+            sections_diag[name] = section_diag
+        phase_ms["sections_assembly_ms"] = round(
+            max(time.monotonic() - phase_started, 0.0) * 1000.0,
+            3,
+        )
+
+        # Include enrichment thread diagnostics if available
+        enrichment_diag = {}
+        phase_started = time.monotonic()
+        if hasattr(runtime_snapshot_bridge, "get_enrichment_diagnostics"):
+            try:
+                enrichment_diag = runtime_snapshot_bridge.get_enrichment_diagnostics()
+            except Exception:
+                enrichment_diag = {"error": "unavailable"}
+        phase_ms["enrichment_diagnostics_ms"] = round(
+            max(time.monotonic() - phase_started, 0.0) * 1000.0,
+            3,
+        )
+
+        current_request_diag = {
+            "route": "bridge_diagnostics",
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "total_ms": round(
+                max(time.monotonic() - request_started, 0.0) * 1000.0,
+                3,
+            ),
+            "phase_ms": phase_ms,
+            "bridge_reads": dict(bridge_reads),
+            "storage_reads": dict(storage_reads),
         }
+        current_request_diag["top_phase"] = _top_timing_phase(phase_ms)
+        _store_request_diagnostics("bridge_diagnostics", current_request_diag)
+        _maybe_log_request_diagnostics("bridge_diagnostics", current_request_diag)
 
-    # Include enrichment thread diagnostics if available
-    enrichment_diag = {}
-    if hasattr(runtime_snapshot_bridge, "get_enrichment_diagnostics"):
-        try:
-            enrichment_diag = runtime_snapshot_bridge.get_enrichment_diagnostics()
-        except Exception:
-            enrichment_diag = {"error": "unavailable"}
-
-    result = {
-        "checked_at": now,
-        "producer_pid": producer_pid,
-        "producer_alive": producer_alive,
-        "snapshot_epoch": meta.get("snapshot_epoch"),
-        "produced_at": meta.get("produced_at"),
-        "sections": sections_diag,
-        "enrichment": enrichment_diag,
-    }
+        result = {
+            "checked_at": now,
+            "producer_pid": producer_pid,
+            "producer_alive": producer_alive,
+            "snapshot_epoch": meta.get("snapshot_epoch"),
+            "produced_at": meta.get("produced_at"),
+            "sections": sections_diag,
+            "enrichment": enrichment_diag,
+            "request_diagnostics": {
+                "bridge_diagnostics": current_request_diag,
+                "last_bootstrap": _get_request_diagnostics("dashboard_bootstrap"),
+            },
+        }
     return _set_no_cache_headers(jsonify(result))
 
 

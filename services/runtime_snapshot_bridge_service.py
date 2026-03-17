@@ -14,6 +14,7 @@ import os
 import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -179,6 +180,7 @@ class RuntimeSnapshotBridgeService:
         self._full_enrich_last_duration_ms: Optional[float] = None
         self._light_publish_count_during_full: int = 0
         self._last_publish_diag_log_at: float = 0.0
+        self._read_diagnostics_local = threading.local()
 
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -188,6 +190,97 @@ class RuntimeSnapshotBridgeService:
             return json.loads(json.dumps(value, separators=(",", ":")))
         except (TypeError, ValueError):
             return copy.deepcopy(value)
+
+    def _get_read_diagnostics_stack(self) -> List[Dict[str, Any]]:
+        stack = getattr(self._read_diagnostics_local, "stack", None)
+        if stack is None:
+            stack = []
+            self._read_diagnostics_local.stack = stack
+        return stack
+
+    def _active_read_diagnostics(self) -> Optional[Dict[str, Any]]:
+        stack = getattr(self._read_diagnostics_local, "stack", None)
+        if not stack:
+            return None
+        return stack[-1]
+
+    @staticmethod
+    def _increment_counter(bucket: Dict[str, Any], key: str, amount: int = 1) -> None:
+        bucket[key] = int(bucket.get(key) or 0) + int(amount or 0)
+
+    @staticmethod
+    def _accumulate_ms(bucket: Dict[str, Any], key: str, elapsed_ms: float) -> None:
+        bucket[key] = round(
+            float(bucket.get(key) or 0.0) + max(float(elapsed_ms or 0.0), 0.0),
+            3,
+        )
+
+    def _record_read_diagnostic(
+        self,
+        *,
+        operation: Optional[str] = None,
+        section_name: Optional[str] = None,
+        metric_name: Optional[str] = None,
+        metric_ms: Optional[float] = None,
+    ) -> None:
+        trace = self._active_read_diagnostics()
+        if trace is None:
+            return
+        if operation:
+            self._increment_counter(trace.setdefault("operation_counts", {}), operation)
+        if section_name:
+            self._increment_counter(
+                trace.setdefault("section_call_counts", {}),
+                str(section_name),
+            )
+        if metric_name and metric_ms is not None:
+            self._accumulate_ms(trace.setdefault("phase_ms", {}), metric_name, metric_ms)
+
+    def _finalize_read_diagnostics(self, trace: Dict[str, Any]) -> Dict[str, Any]:
+        completed_at = time.time()
+        trace["completed_at"] = completed_at
+        trace["total_ms"] = round(
+            max(completed_at - float(trace.get("started_at") or completed_at), 0.0) * 1000.0,
+            3,
+        )
+        top_section = None
+        top_count = 0
+        for name, count in (trace.get("section_call_counts") or {}).items():
+            if int(count or 0) > top_count:
+                top_section = str(name)
+                top_count = int(count or 0)
+        trace["top_repeated_section"] = (
+            {
+                "name": top_section,
+                "count": top_count,
+            }
+            if top_section and top_count > 1
+            else None
+        )
+        return trace
+
+    @contextmanager
+    def capture_read_diagnostics(self, label: str):
+        trace = {
+            "label": str(label or "").strip() or "runtime_snapshot_bridge",
+            "started_at": time.time(),
+            "operation_counts": {},
+            "section_call_counts": {},
+            "phase_ms": {},
+        }
+        stack = self._get_read_diagnostics_stack()
+        stack.append(trace)
+        try:
+            yield trace
+        finally:
+            if stack and stack[-1] is trace:
+                stack.pop()
+            else:
+                try:
+                    stack.remove(trace)
+                except ValueError:
+                    pass
+            self._finalize_read_diagnostics(trace)
 
     def start(self) -> None:
         if not self.write_enabled:
@@ -233,6 +326,8 @@ class RuntimeSnapshotBridgeService:
         self._publish(reason=reason, event_types=event_types, force=True)
 
     def read_snapshot(self) -> Optional[Dict[str, Any]]:
+        self._record_read_diagnostic(operation="read_snapshot")
+        stat_started = time.monotonic()
         try:
             stat = self.file_path.stat()
         except FileNotFoundError:
@@ -240,17 +335,40 @@ class RuntimeSnapshotBridgeService:
         except Exception as exc:
             logger.debug("Runtime snapshot bridge stat failed: %s", exc)
             return None
+        self._record_read_diagnostic(
+            metric_name="snapshot_stat_ms",
+            metric_ms=(time.monotonic() - stat_started) * 1000.0,
+        )
 
         with self._state_lock:
             if (
                 self._read_cache is not None
                 and self._read_cache_mtime_ns == getattr(stat, "st_mtime_ns", None)
             ):
-                return self._copy(self._read_cache)
+                self._record_read_diagnostic(operation="read_snapshot:cache_hit")
+                copy_started = time.monotonic()
+                payload = self._copy(self._read_cache)
+                self._record_read_diagnostic(
+                    metric_name="snapshot_cache_copy_ms",
+                    metric_ms=(time.monotonic() - copy_started) * 1000.0,
+                )
+                return payload
 
         try:
             with open(self.file_path, "r", encoding="utf-8") as handle:
-                payload = json.load(handle)
+                self._record_read_diagnostic(operation="read_snapshot:file_read")
+                read_started = time.monotonic()
+                raw_payload = handle.read()
+                self._record_read_diagnostic(
+                    metric_name="snapshot_file_read_ms",
+                    metric_ms=(time.monotonic() - read_started) * 1000.0,
+                )
+            parse_started = time.monotonic()
+            payload = json.loads(raw_payload)
+            self._record_read_diagnostic(
+                metric_name="snapshot_json_parse_ms",
+                metric_ms=(time.monotonic() - parse_started) * 1000.0,
+            )
         except FileNotFoundError:
             return None
         except Exception as exc:
@@ -263,7 +381,13 @@ class RuntimeSnapshotBridgeService:
         with self._state_lock:
             self._read_cache = self._copy(payload)
             self._read_cache_mtime_ns = getattr(stat, "st_mtime_ns", None)
-        return self._copy(payload)
+        copy_started = time.monotonic()
+        copied = self._copy(payload)
+        self._record_read_diagnostic(
+            metric_name="snapshot_payload_copy_ms",
+            metric_ms=(time.monotonic() - copy_started) * 1000.0,
+        )
+        return copied
 
     def read_section(
         self,
@@ -271,21 +395,37 @@ class RuntimeSnapshotBridgeService:
         *,
         max_age_sec: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
+        normalized_section_name = str(section_name or "").strip()
+        self._record_read_diagnostic(
+            operation="read_section",
+            section_name=normalized_section_name,
+        )
+        section_started = time.monotonic()
         snapshot = self.read_snapshot()
         if not snapshot:
             return None
         sections = snapshot.get("sections") or {}
         if not isinstance(sections, dict):
             return None
-        section = sections.get(str(section_name or "").strip())
+        section = sections.get(normalized_section_name)
         if not isinstance(section, dict):
             return None
 
+        copy_started = time.monotonic()
         payload = self._copy(section.get("payload"))
+        self._record_read_diagnostic(
+            metric_name="section_payload_copy_ms",
+            metric_ms=(time.monotonic() - copy_started) * 1000.0,
+        )
         if not isinstance(payload, dict):
             return None
 
+        shape_started = time.monotonic()
         payload_valid = self._payload_shape_valid(section_name, payload)
+        self._record_read_diagnostic(
+            metric_name="section_shape_validation_ms",
+            metric_ms=(time.monotonic() - shape_started) * 1000.0,
+        )
         if not payload_valid:
             payload.setdefault("stale_data", True)
             payload["error"] = (
@@ -339,6 +479,10 @@ class RuntimeSnapshotBridgeService:
         )
         payload.setdefault("snapshot_fresh", bool(snapshot_fresh))
         payload.setdefault("integrity_shape_valid", payload_valid)
+        self._record_read_diagnostic(
+            metric_name="section_total_ms",
+            metric_ms=(time.monotonic() - section_started) * 1000.0,
+        )
         return payload
 
     def read_dashboard_payload(self, reason: str) -> Optional[Dict[str, Any]]:
@@ -1312,6 +1456,11 @@ class RuntimeSnapshotBridgeService:
             bots = self.bot_status_service.get_runtime_bots_light(
                 positions_skip_cache=False,
             )
+            light_runtime_diagnostics = (
+                self.bot_status_service.get_last_runtime_light_diagnostics()
+                if hasattr(self.bot_status_service, "get_last_runtime_light_diagnostics")
+                else {}
+            )
             return {
                 "bots": bots,
                 "error": None,
@@ -1319,6 +1468,11 @@ class RuntimeSnapshotBridgeService:
                 "runtime_state_source": "runner_runtime_bots_light",
                 "runtime_publish_ts": time.time(),
                 "bots_scope": "light",
+                "light_runtime_diagnostics": (
+                    dict(light_runtime_diagnostics)
+                    if isinstance(light_runtime_diagnostics, dict)
+                    else {}
+                ),
             }
         except Exception as exc:
             logger.warning("Runtime snapshot bridge light bot runtime build failed: %s", exc)

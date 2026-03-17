@@ -9,6 +9,7 @@ Covers:
 
 import threading
 import time
+from contextlib import nullcontext
 from unittest.mock import MagicMock, patch, PropertyMock
 
 import pytest
@@ -347,6 +348,15 @@ class TestLightPathIsolation:
                 "grid_count": 8,
             },
         ]
+        svc.bot_storage.capture_read_diagnostics = MagicMock(
+            return_value=nullcontext(
+                {
+                    "storage_read_call_count": 1,
+                    "lock_wait_ms": {"cache_lock": 0.0},
+                    "top_repeated_operation": None,
+                }
+            )
+        )
         svc.symbol_pnl_service = MagicMock()
         svc.symbol_pnl_service.get_all_symbols_pnl.return_value = {}
         svc.symbol_pnl_service.get_all_bot_pnl.return_value = {}
@@ -365,6 +375,10 @@ class TestLightPathIsolation:
         svc._scanner_cache = {}
         svc._stopped_preview_cache = {}
         svc._readiness_stability_cache = {}
+        svc._last_runtime_batch_context = {}
+        svc._last_runtime_light_diagnostics = {}
+        svc._runtime_light_diag_log_lock = threading.Lock()
+        svc._runtime_light_diag_last_logged_at = 0.0
 
         return svc
 
@@ -411,6 +425,23 @@ class TestLightPathIsolation:
                     with patch.object(svc, "_build_live_open_orders_by_symbol", return_value={}):
                         with patch.object(svc, "_enrich_bot", side_effect=AssertionError("Must not call full _enrich_bot")):
                             svc.get_runtime_bots_light()  # should not raise
+
+    def test_light_path_records_phase_level_diagnostics(self):
+        svc = self._make_service()
+        with patch.object(svc, "_get_scanner_recommendation_lookup", return_value={}):
+            with patch.object(svc, "_build_stopped_preview_lookup", return_value={}):
+                with patch.object(svc, "_get_runtime_positions_payload", return_value={"positions": []}):
+                    with patch.object(svc, "_build_live_open_orders_by_symbol", return_value={}):
+                        result = svc.get_runtime_bots_light()
+
+        diagnostics = svc.get_last_runtime_light_diagnostics()
+
+        assert diagnostics["bot_count"] == len(result)
+        assert diagnostics["operation_counts"]["bot_storage.list_bots"] == 1
+        assert diagnostics["phase_ms"]["source_bot_load_ms"] >= 0.0
+        assert diagnostics["phase_ms"]["per_bot_enrich_ms"] >= 0.0
+        assert diagnostics["phase_ms"]["readiness_stability_ms"] >= 0.0
+        assert diagnostics["storage"]["storage_read_call_count"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -485,6 +516,29 @@ class TestBridgeThreading:
         )
         payload = bridge._build_bots_runtime_light_payload()
         assert payload["bots_scope"] == "light"
+
+    def test_light_payload_includes_runtime_diagnostics(self):
+        from services.runtime_snapshot_bridge_service import RuntimeSnapshotBridgeService
+
+        bridge = RuntimeSnapshotBridgeService(
+            file_path="/tmp/test_bridge_scope_diag.json",
+            owner_name="test",
+            write_enabled=False,
+        )
+
+        class FakeBotStatusService:
+            def get_runtime_bots_light(self, positions_skip_cache=False):
+                return [{"id": "bot-1"}]
+
+            def get_last_runtime_light_diagnostics(self):
+                return {"total_ms": 12.5, "phase_ms": {"source_bot_load_ms": 3.0}}
+
+        bridge.bot_status_service = FakeBotStatusService()
+
+        payload = bridge._build_bots_runtime_light_payload()
+
+        assert payload["bots_scope"] == "light"
+        assert payload["light_runtime_diagnostics"]["total_ms"] == 12.5
 
     def test_full_publish_without_cached_payload_is_stale(self):
         """When background thread hasn't run yet, full section is explicitly stale."""

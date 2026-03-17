@@ -1,5 +1,6 @@
 import base64
 import importlib
+import json
 import sys
 import time
 from pathlib import Path
@@ -724,6 +725,103 @@ def test_bootstrap_recovery_returns_degraded_when_bridge_stale_and_cache_empty(
     assert payload["positions"]["stale_data"] is True
     assert payload["summary"]["error"] == "bootstrap_recovery"
     assert payload["positions"]["error"] == "bootstrap_recovery"
+
+
+def test_bridge_diagnostics_exposes_last_bootstrap_request_trace(
+    monkeypatch,
+    tmp_path,
+):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+    from services.runtime_snapshot_bridge_service import RuntimeSnapshotBridgeService
+
+    now = time.time()
+    bridge_path = tmp_path / "runtime_snapshot_bridge.json"
+    bridge_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "meta": {
+                    "producer": "runner",
+                    "producer_pid": 4321,
+                    "produced_at": now,
+                    "stream_owner": "runner",
+                    "snapshot_epoch": 11,
+                },
+                "sections": {
+                    "market": {
+                        "payload": {"health": {}, "stale_data": False},
+                        "published_at": now,
+                        "source": "runner_stream_snapshot",
+                        "reason": "timer",
+                    },
+                    "summary": {
+                        "payload": {
+                            "account": {"equity": 100.0},
+                            "positions_summary": {"total_positions": 0},
+                            "today_pnl": {},
+                            "stale_data": False,
+                        },
+                        "published_at": now,
+                        "source": "runner_runtime_snapshot",
+                        "reason": "timer",
+                    },
+                    "positions": {
+                        "payload": {"positions": [], "summary": {}, "stale_data": False},
+                        "published_at": now,
+                        "source": "runner_runtime_snapshot",
+                        "reason": "timer",
+                    },
+                    "bots_runtime_light": {
+                        "payload": {
+                            "bots": [{"id": "bot-1"}],
+                            "bots_scope": "light",
+                            "stale_data": False,
+                            "light_runtime_diagnostics": {"total_ms": 7.5},
+                        },
+                        "published_at": now,
+                        "source": "runner_runtime_snapshot",
+                        "reason": "timer",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    app_module.runtime_snapshot_bridge = RuntimeSnapshotBridgeService(
+        file_path=str(bridge_path),
+        owner_name="app",
+        write_enabled=False,
+    )
+    app_module.pnl_service = SimpleNamespace(
+        get_log=lambda use_global_baseline=True: [],
+        get_today_stats=lambda use_global_baseline=True: {},
+    )
+
+    client = app_module.app.test_client()
+    bootstrap_response = client.get(
+        "/api/dashboard/bootstrap",
+        headers=_basic_auth_headers(),
+    )
+    assert bootstrap_response.status_code == 200
+
+    diagnostics_response = client.get(
+        "/api/bridge/diagnostics",
+        headers=_basic_auth_headers(),
+    )
+    assert diagnostics_response.status_code == 200
+    payload = diagnostics_response.get_json()
+
+    assert payload["request_diagnostics"]["last_bootstrap"]["route"] == "dashboard_bootstrap"
+    assert (
+        payload["request_diagnostics"]["last_bootstrap"]["bridge_reads"]["section_call_counts"]["summary"]
+        >= 1
+    )
+    assert (
+        payload["request_diagnostics"]["bridge_diagnostics"]["bridge_reads"]["operation_counts"]["read_snapshot"]
+        >= 1
+    )
+    assert payload["sections"]["bots_runtime_light"]["light_runtime_diagnostics"]["total_ms"] == 7.5
 
 
 def test_api_bots_runtime_exposes_response_and_integrity_latency_fields(

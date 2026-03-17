@@ -537,6 +537,36 @@ def test_storage_read_helpers_accept_source_labels_without_behavior_change(tmp_p
     assert fresh["status"] == "running"
 
 
+def test_capture_read_diagnostics_records_cache_paths(tmp_path):
+    storage_path = tmp_path / "bots.json"
+    storage = BotStorageService(str(storage_path))
+    storage.save_bot(
+        {
+            "id": "bot-1",
+            "symbol": "SOLUSDT",
+            "mode": "long",
+            "status": "running",
+        }
+    )
+    storage._cached_bots = None
+    storage._cached_mtime_ns = None
+
+    with storage.capture_read_diagnostics("first_read") as first_diag:
+        storage.list_bots(source="runtime_bots_light")
+
+    with storage.capture_read_diagnostics("second_read") as second_diag:
+        storage.list_bots(source="runtime_bots_light")
+
+    assert first_diag["storage_read_call_count"] == 1
+    assert first_diag["full_list_read_count"] == 1
+    assert first_diag["cache_result_counts"]["refill"] == 1
+    assert first_diag["source_counts"]["runtime_bots_light"] == 1
+    assert first_diag["phase_ms"]["disk_read_ms"] >= 0.0
+    assert first_diag["phase_ms"]["json_parse_ms"] >= 0.0
+    assert second_diag["storage_read_call_count"] == 1
+    assert second_diag["cache_result_counts"]["hit"] == 1
+
+
 def test_save_runtime_bot_reads_cached_snapshot_once_per_update(tmp_path):
     storage_path = tmp_path / "bots.json"
     storage = BotStorageService(str(storage_path))
