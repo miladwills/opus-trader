@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Probes{% endblock %}
+{% block content %}
+<h1 class="text-lg font-medium text-gray-200 mb-4">Probe Status</h1>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+    {% for pname, p in probes.items() %}
+    <div class="bg-slate-900 rounded-lg p-3 border border-slate-800">
+        <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full
+                    {% if p.status == 'ok' %}bg-emerald-400{% elif p.status == 'degraded' %}bg-yellow-400{% elif p.status == 'timeout' %}bg-orange-400{% else %}bg-red-400{% endif %}"></span>
+                <span class="text-sm font-medium text-gray-300">{{ pname }}</span>
+            </div>
+            <span class="text-xs px-2 py-0.5 rounded-full
+                {% if p.status == 'ok' %}bg-emerald-900/50 text-emerald-400{% elif p.status == 'degraded' %}bg-yellow-900/50 text-yellow-400{% elif p.status == 'timeout' %}bg-orange-900/50 text-orange-400{% else %}bg-red-900/50 text-red-400{% endif %}">
+                {{ p.status }}
+            </span>
+        </div>
+        <div class="flex items-center justify-between text-xs text-gray-500">
+            <span>Latency: {{ p.latency_ms | round(1) }}ms</span>
+            <span>{{ time_ago(p.timestamp) }}</span>
+        </div>
+        {% if p.error %}
+        <div class="mt-1 text-xs text-red-400 truncate">{{ p.error }}</div>
+        {% endif %}
+        <div class="mt-2">
+            <canvas class="probe-sparkline" data-probe="{{ pname }}" height="30"></canvas>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', async () => {
+    const canvases = document.querySelectorAll('.probe-sparkline');
+    for (const canvas of canvases) {
+        const name = canvas.dataset.probe;
+        try {
+            const resp = await fetch(`/api/probes/${name}/history?limit=30`);
+            const data = await resp.json();
+            if (data.length < 2) continue;
+            const W = canvas.parentElement.clientWidth;
+            canvas.width = W;
+            const H = 30;
+            canvas.height = H;
+            const ctx = canvas.getContext('2d');
+            const latencies = data.reverse().map(d => d.latency_ms);
+            const maxL = Math.max(...latencies, 1);
+            ctx.strokeStyle = '#34d399';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            latencies.forEach((l, i) => {
+                const x = (i / (latencies.length - 1)) * W;
+                const y = H - (l / maxL) * (H - 4) - 2;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+        } catch(e) {}
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}System{% endblock %}
+{% block content %}
+<h1 class="text-lg font-medium text-gray-200 mb-4">System Health</h1>
+
+<!-- Services -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+    {% set services = {'proc_trader': 'opus_trader.service', 'proc_runner': 'opus_runner.service'} %}
+    {% for pname, label in services.items() %}
+        {% set p = probes.get(pname, {}) %}
+        {% set st = p.get('status', 'unknown') if p else 'unknown' %}
+        <div class="bg-slate-900 rounded-lg p-4 border border-slate-800">
+            <div class="flex items-center justify-between">
+                <div>
+                    <div class="text-sm font-medium text-gray-300">{{ label }}</div>
+                    <div class="text-xs text-gray-500 mt-1">
+                        State: {{ p.get('detail', {}).get('state', '--') if p else '--' }}
+                    </div>
+                </div>
+                <span class="w-3 h-3 rounded-full {% if st == 'ok' %}bg-emerald-400{% elif st == 'degraded' %}bg-yellow-400{% else %}bg-red-400{% endif %}"></span>
+            </div>
+        </div>
+    {% endfor %}
+</div>
+
+<!-- Runner lock -->
+{% set lock = probes.get('file_runner_lock', {}) %}
+{% if lock %}
+<div class="bg-slate-900 rounded-lg p-4 border border-slate-800 mb-6">
+    <div class="text-xs text-gray-500 mb-2">Runner Lock</div>
+    <div class="grid grid-cols-3 gap-3 text-xs">
+        <div>
+            <span class="text-gray-500">Exists:</span>
+            <span class="ml-1 text-gray-300">{{ lock.get('detail', {}).get('exists', '--') }}</span>
+        </div>
+        <div>
+            <span class="text-gray-500">PID:</span>
+            <span class="ml-1 text-gray-300">{{ lock.get('detail', {}).get('pid', '--') }}</span>
+        </div>
+        <div>
+            <span class="text-gray-500">PID Alive:</span>
+            <span class="ml-1 {% if lock.get('detail', {}).get('pid_alive') %}text-emerald-400{% else %}text-red-400{% endif %}">
+                {{ lock.get('detail', {}).get('pid_alive', '--') }}
+            </span>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- System resources -->
+{% set sys = probes.get('sys_resources', {}) %}
+{% if sys %}
+<div class="bg-slate-900 rounded-lg p-4 border border-slate-800 mb-6">
+    <div class="text-xs text-gray-500 mb-3">System Resources</div>
+    {% set d = sys.get('detail', {}) if sys else {} %}
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <!-- CPU Load -->
+        <div>
+            <div class="text-xs text-gray-500 mb-1">Load Average</div>
+            <div class="text-lg font-bold text-gray-300">{{ d.get('load_1m', '--') }}</div>
+            <div class="text-xs text-gray-500">5m: {{ d.get('load_5m', '--') }} / 15m: {{ d.get('load_15m', '--') }}</div>
+        </div>
+        <!-- Memory -->
+        <div>
+            <div class="text-xs text-gray-500 mb-1">Memory</div>
+            <div class="text-lg font-bold {% if d.get('mem_used_pct', 0) > 90 %}text-red-400{% elif d.get('mem_used_pct', 0) > 80 %}text-yellow-400{% else %}text-gray-300{% endif %}">
+                {{ d.get('mem_used_pct', '--') }}%
+            </div>
+            <div class="text-xs text-gray-500">{{ d.get('mem_available_mb', '--') | int }}MB free</div>
+            <div class="mt-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                <div class="h-full rounded-full {% if d.get('mem_used_pct', 0) > 90 %}bg-red-500{% elif d.get('mem_used_pct', 0) > 80 %}bg-yellow-500{% else %}bg-emerald-500{% endif %}"
+                     style="width: {{ d.get('mem_used_pct', 0) }}%"></div>
+            </div>
+        </div>
+        <!-- Disk -->
+        <div>
+            <div class="text-xs text-gray-500 mb-1">Disk</div>
+            <div class="text-lg font-bold {% if d.get('disk_used_pct', 0) > 90 %}text-red-400{% elif d.get('disk_used_pct', 0) > 80 %}text-yellow-400{% else %}text-gray-300{% endif %}">
+                {{ d.get('disk_used_pct', '--') }}%
+            </div>
+            <div class="text-xs text-gray-500">{{ d.get('disk_free_gb', '--') }}GB free</div>
+            <div class="mt-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                <div class="h-full rounded-full {% if d.get('disk_used_pct', 0) > 90 %}bg-red-500{% elif d.get('disk_used_pct', 0) > 80 %}bg-yellow-500{% else %}bg-emerald-500{% endif %}"
+                     style="width: {{ d.get('disk_used_pct', 0) }}%"></div>
+            </div>
+        </div>
+        <!-- Log Freshness -->
+        {% set logs = probes.get('file_log_fresh', {}) %}
+        {% set ld = logs.get('detail', {}) if logs else {} %}
+        <div>
+            <div class="text-xs text-gray-500 mb-1">Log Freshness</div>
+            <div class="text-xs text-gray-400 mt-1">
+                Runner: <span class="{% if ld.get('runner_age', 999) > 60 %}text-red-400{% else %}text-emerald-400{% endif %}">{{ ld.get('runner_age', '--') }}s</span>
+            </div>
+            <div class="text-xs text-gray-400">
+                App: <span class="{% if ld.get('app_age', 999) > 60 %}text-red-400{% else %}text-emerald-400{% endif %}">{{ ld.get('app_age', '--') }}s</span>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- HTTP Services -->
+{% set svc = probes.get('http_services', {}) %}
+{% if svc %}
+<div class="bg-slate-900 rounded-lg p-4 border border-slate-800">
+    <div class="text-xs text-gray-500 mb-2">Runner Status (via API)</div>
+    {% set sd = svc.get('detail', {}) if svc else {} %}
+    <div class="grid grid-cols-3 gap-3 text-xs">
+        <div>
+            <span class="text-gray-500">Active:</span>
+            <span class="ml-1 {% if sd.get('runner_active') %}text-emerald-400{% else %}text-red-400{% endif %}">
+                {{ sd.get('runner_active', '--') }}
+            </span>
+        </div>
+        <div>
+            <span class="text-gray-500">PID:</span>
+            <span class="ml-1 text-gray-300">{{ sd.get('runner_pid', '--') }}</span>
+        </div>
+        <div>
+            <span class="text-gray-500">Stop Flag:</span>
+            <span class="ml-1 {% if sd.get('stop_flag_exists') %}text-yellow-400{% else %}text-gray-300{% endif %}">
+                {{ sd.get('stop_flag_exists', '--') }}
+            </span>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

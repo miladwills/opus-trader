@@ -1,0 +1,24 @@
+{
+  "name": "Neutral - Safe Fixed",
+  "sortLevels": [
+    {"col": "neutral", "dir": "desc"},
+    {"col": "adx15", "dir": "asc"},
+    {"col": "bbw15", "dir": "asc"},
+    {"col": "atrPct15", "dir": "asc"},
+    {"col": "speed_pct", "dir": "asc"},
+    {"col": "btc_impact", "dir": "desc"},
+    {"col": "vol24h", "dir": "desc"}
+  ],
+  "filterRules": [
+    {"col": "neutral", "op": "=", "val": "true", "val2": ""},
+    {"col": "adx15", "op": "<=", "val": "25", "val2": ""},
+    {"col": "rsi15", "op": "between", "val": "38", "val2": "62"},
+    {"col": "bbw15", "op": "<=", "val": "10", "val2": ""},
+    {"col": "atrPct15", "op": "<=", "val": "1.5", "val2": ""},
+    {"col": "speed_pct", "op": "<=", "val": "35", "val2": ""},
+    {"col": "vol24h", "op": ">=", "val": "10000000", "val2": ""}
+  ],
+  "combineMode": "AND",
+  "createdAt": "2026-01-09T00:00:00Z",
+  "updatedAt": "2026-03-14T00:00:00Z"
+}

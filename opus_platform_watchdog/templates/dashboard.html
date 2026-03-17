@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<!-- Overall health banner -->
+<div id="health-banner" class="mb-6 rounded-lg p-4 border
+    {% if health and health.overall_status == 'healthy' %}bg-emerald-900/20 border-emerald-700{% elif health and health.overall_status == 'degraded' %}bg-yellow-900/20 border-yellow-700{% elif health and health.overall_status == 'unhealthy' %}bg-orange-900/20 border-orange-700{% else %}bg-red-900/20 border-red-700{% endif %}">
+    <div class="flex items-center justify-between">
+        <div class="flex items-center gap-4">
+            <div class="text-3xl font-bold
+                {% if health and health.overall_status == 'healthy' %}text-emerald-400{% elif health and health.overall_status == 'degraded' %}text-yellow-400{% elif health and health.overall_status == 'unhealthy' %}text-orange-400{% else %}text-red-400{% endif %}">
+                {% if health %}{{ health.overall_score }}{% else %}--{% endif %}
+            </div>
+            <div>
+                <div class="text-sm font-medium uppercase tracking-wide
+                    {% if health and health.overall_status == 'healthy' %}text-emerald-400{% elif health and health.overall_status == 'degraded' %}text-yellow-400{% elif health and health.overall_status == 'unhealthy' %}text-orange-400{% else %}text-red-400{% endif %}">
+                    {% if health %}{{ health.overall_status }}{% else %}No Data{% endif %}
+                </div>
+                <div class="text-xs text-gray-500">Platform Health Score</div>
+            </div>
+        </div>
+        <div class="text-xs text-gray-500">
+            {% if health %}Updated {{ time_ago(health.timestamp) }}{% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Component cards -->
+<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+    {% set comp_names = {'runner_process': 'Runner', 'trader_process': 'Trader', 'bridge_health': 'Bridge', 'api_latency': 'API Latency', 'error_rate': 'Error Rate'} %}
+    {% if health and health.components %}
+        {% for key, label in comp_names.items() %}
+            {% set c = health.components.get(key, {}) %}
+            {% set st = c.get('status', 'unknown') %}
+            <div class="bg-slate-900 rounded-lg p-3 border border-slate-800">
+                <div class="text-xs text-gray-500 mb-1">{{ label }}</div>
+                <div class="flex items-center justify-between">
+                    <span class="text-lg font-bold
+                        {% if st == 'healthy' %}text-emerald-400{% elif st == 'degraded' %}text-yellow-400{% elif st == 'unhealthy' %}text-orange-400{% else %}text-red-400{% endif %}">
+                        {{ c.get('score', '--') }}
+                    </span>
+                    <span class="text-xs px-2 py-0.5 rounded-full
+                        {% if st == 'healthy' %}bg-emerald-900/50 text-emerald-400{% elif st == 'degraded' %}bg-yellow-900/50 text-yellow-400{% elif st == 'unhealthy' %}bg-orange-900/50 text-orange-400{% else %}bg-red-900/50 text-red-400{% endif %}">
+                        {{ st }}
+                    </span>
+                </div>
+                {% if key == 'api_latency' and c.get('p95') is not none %}
+                    <div class="text-xs text-gray-500 mt-1">p95: {{ c.p95 }}ms</div>
+                {% elif key == 'error_rate' and c.get('open_counts') %}
+                    <div class="text-xs text-gray-500 mt-1">
+                        {% for sev, cnt in c.open_counts.items() %}{{ sev }}: {{ cnt }} {% endfor %}
+                    </div>
+                {% elif key == 'bridge_health' and c.get('stale_count') is not none %}
+                    <div class="text-xs text-gray-500 mt-1">{{ c.stale_count }}/{{ c.get('total_sections', '?') }} stale</div>
+                {% endif %}
+            </div>
+        {% endfor %}
+    {% else %}
+        <div class="col-span-full text-center text-gray-500 py-8">Waiting for first health computation...</div>
+    {% endif %}
+</div>
+
+<!-- Critical probes quick view -->
+<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+    {% set probe_labels = {'http_bootstrap': 'Bootstrap API', 'http_bridge_diag': 'Bridge Diag API', 'http_services': 'Services API', 'proc_trader': 'opus_trader', 'proc_runner': 'opus_runner', 'file_bridge': 'Bridge File'} %}
+    {% for pname, plabel in probe_labels.items() %}
+        {% set p = probes.get(pname, {}) %}
+        {% set pst = p.get('status', 'unknown') if p else 'unknown' %}
+        <div class="bg-slate-900 rounded p-2 border border-slate-800 text-center">
+            <div class="text-[10px] text-gray-500 truncate">{{ plabel }}</div>
+            <div class="mt-1">
+                <span class="inline-block w-2 h-2 rounded-full
+                    {% if pst == 'ok' %}bg-emerald-400{% elif pst == 'degraded' %}bg-yellow-400{% elif pst == 'timeout' %}bg-orange-400{% else %}bg-red-400{% endif %}"></span>
+                <span class="text-xs ml-1
+                    {% if pst == 'ok' %}text-emerald-400{% elif pst == 'degraded' %}text-yellow-400{% elif pst == 'timeout' %}text-orange-400{% else %}text-red-400{% endif %}">{{ pst }}</span>
+            </div>
+            {% if p and p.get('latency_ms') %}
+                <div class="text-[10px] text-gray-600">{{ p.latency_ms | round(0) | int }}ms</div>
+            {% endif %}
+        </div>
+    {% endfor %}
+</div>
+
+<!-- Health trend sparkline -->
+{% if health_history %}
+<div class="bg-slate-900 rounded-lg p-4 border border-slate-800 mb-6">
+    <div class="text-xs text-gray-500 mb-2">Health Score - Last 2 Hours</div>
+    <canvas id="health-chart" height="60"></canvas>
+</div>
+{% endif %}
+
+<!-- Recent incidents -->
+<div class="bg-slate-900 rounded-lg border border-slate-800">
+    <div class="px-4 py-3 border-b border-slate-800 flex justify-between items-center">
+        <span class="text-sm font-medium text-gray-300">Recent Incidents</span>
+        <a href="/incidents" class="text-xs text-emerald-400 hover:underline">View all</a>
+    </div>
+    {% if incidents %}
+    <div class="divide-y divide-slate-800">
+        {% for inc in incidents %}
+        <div class="px-4 py-2 flex items-center gap-3 text-sm">
+            <span class="w-2 h-2 rounded-full flex-shrink-0
+                {% if inc.severity == 'critical' %}bg-red-500{% elif inc.severity == 'high' %}bg-orange-500{% elif inc.severity == 'medium' %}bg-yellow-500{% else %}bg-blue-500{% endif %}"></span>
+            <span class="text-xs text-gray-500 w-16 flex-shrink-0">{{ time_ago(inc.opened_at) }}</span>
+            <span class="text-gray-300 truncate flex-1">{{ inc.summary }}</span>
+            <span class="text-xs px-2 py-0.5 rounded-full flex-shrink-0
+                {% if inc.status == 'open' %}bg-red-900/50 text-red-400{% elif inc.status == 'acknowledged' %}bg-yellow-900/50 text-yellow-400{% else %}bg-slate-800 text-gray-500{% endif %}">
+                {{ inc.status }}{% if inc.hit_count > 1 %} (x{{ inc.hit_count }}){% endif %}
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="px-4 py-8 text-center text-gray-500 text-sm">No incidents detected</div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Health trend chart (simple canvas sparkline)
+    const historyData = {{ health_history | tojson }};
+    if (historyData.length > 1) {
+        const canvas = document.getElementById('health-chart');
+        if (canvas) {
+            const ctx = canvas.getContext('2d');
+            const W = canvas.parentElement.clientWidth - 32;
+            const H = 60;
+            canvas.width = W;
+            canvas.height = H;
+            const scores = historyData.map(h => h.score);
+            const minS = Math.max(0, Math.min(...scores) - 5);
+            const maxS = Math.min(100, Math.max(...scores) + 5);
+            const range = maxS - minS || 1;
+            ctx.strokeStyle = '#34d399';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            scores.forEach((s, i) => {
+                const x = (i / (scores.length - 1)) * W;
+                const y = H - ((s - minS) / range) * H;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+            // Reference lines
+            [90, 70, 40].forEach(threshold => {
+                if (threshold >= minS && threshold <= maxS) {
+                    const y = H - ((threshold - minS) / range) * H;
+                    ctx.strokeStyle = threshold === 90 ? '#065f4630' : threshold === 70 ? '#71471730' : '#7f1d1d30';
+                    ctx.setLineDash([4, 4]);
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(W, y);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+            });
+        }
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Bridge{% endblock %}
+{% block content %}
+<h1 class="text-lg font-medium text-gray-200 mb-4">Bridge Health</h1>
+
+<!-- Producer status -->
+<div class="bg-slate-900 rounded-lg p-4 border border-slate-800 mb-4">
+    <div class="text-xs text-gray-500 mb-2">Producer (Runner)</div>
+    {% if bridge_http %}
+        {% set alive = bridge_http.detail.get('producer_alive', false) %}
+        <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full {% if alive %}bg-emerald-400{% else %}bg-red-400{% endif %}"></span>
+            <span class="text-sm {% if alive %}text-emerald-400{% else %}text-red-400{% endif %}">
+                {% if alive %}Alive{% else %}Dead{% endif %}
+            </span>
+            {% if bridge_http.detail.get('snapshot_epoch') %}
+            <span class="text-xs text-gray-500 ml-4">Epoch: {{ bridge_http.detail.snapshot_epoch }}</span>
+            {% endif %}
+        </div>
+    {% else %}
+        <span class="text-gray-500">No data</span>
+    {% endif %}
+</div>
+
+<!-- Section health table -->
+<div class="bg-slate-900 rounded-lg border border-slate-800">
+    <div class="px-4 py-3 border-b border-slate-800">
+        <span class="text-sm font-medium text-gray-300">Bridge Sections</span>
+    </div>
+    <table class="w-full text-sm">
+        <thead>
+            <tr class="border-b border-slate-800 text-xs text-gray-500 uppercase">
+                <th class="px-4 py-2 text-left">Section</th>
+                <th class="px-4 py-2 text-left">Status</th>
+                <th class="px-4 py-2 text-left">Age</th>
+                <th class="px-4 py-2 text-left">Threshold</th>
+                <th class="px-4 py-2 text-left">Shape</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-800">
+            {% set sections_data = {} %}
+            {% if bridge_http and bridge_http.detail.get('sections') %}
+                {% set sections_data = bridge_http.detail.sections %}
+            {% elif bridge_file and bridge_file.detail.get('sections') %}
+                {% set sections_data = bridge_file.detail.sections %}
+            {% endif %}
+            {% set expected = ['market', 'open_orders', 'positions', 'summary', 'bots_runtime', 'bots_runtime_light'] %}
+            {% for sec in expected %}
+                {% set info = sections_data.get(sec, {}) %}
+                {% set is_stale = info.get('stale', true) %}
+                <tr class="hover:bg-slate-800/50">
+                    <td class="px-4 py-2 font-mono text-xs">{{ sec }}</td>
+                    <td class="px-4 py-2">
+                        {% if info %}
+                        <span class="text-xs px-2 py-0.5 rounded-full
+                            {% if not is_stale %}bg-emerald-900/50 text-emerald-400{% else %}bg-red-900/50 text-red-400{% endif %}">
+                            {% if not is_stale %}fresh{% else %}stale{% endif %}
+                        </span>
+                        {% else %}
+                        <span class="text-xs text-gray-600">missing</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-2 text-xs {% if info.get('age_sec', 999) > info.get('threshold', 10) %}text-red-400{% else %}text-gray-400{% endif %}">
+                        {{ info.get('age_sec', '--') }}s
+                    </td>
+                    <td class="px-4 py-2 text-xs text-gray-500">{{ info.get('threshold', '--') }}s</td>
+                    <td class="px-4 py-2">
+                        {% if info.get('shape_valid') is not none %}
+                        <span class="text-xs {% if info.shape_valid %}text-emerald-400{% else %}text-red-400{% endif %}">
+                            {% if info.shape_valid %}valid{% else %}invalid{% endif %}
+                        </span>
+                        {% else %}
+                        <span class="text-xs text-gray-600">--</span>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Bridge file metadata -->
+{% if bridge_file %}
+<div class="bg-slate-900 rounded-lg p-4 border border-slate-800 mt-4">
+    <div class="text-xs text-gray-500 mb-2">Bridge File Direct Read</div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+        <div>
+            <span class="text-gray-500">File Age:</span>
+            <span class="ml-1 {% if bridge_file.detail.get('bridge_age_sec', 999) > 15 %}text-red-400{% else %}text-gray-300{% endif %}">
+                {{ bridge_file.detail.get('bridge_age_sec', '--') }}s
+            </span>
+        </div>
+        <div>
+            <span class="text-gray-500">Producer PID:</span>
+            <span class="ml-1 text-gray-300">{{ bridge_file.detail.get('producer_pid', '--') }}</span>
+        </div>
+        <div>
+            <span class="text-gray-500">Epoch:</span>
+            <span class="ml-1 text-gray-300">{{ bridge_file.detail.get('snapshot_epoch', '--') }}</span>
+        </div>
+        <div>
+            <span class="text-gray-500">Sections:</span>
+            <span class="ml-1 text-gray-300">{{ bridge_file.detail.get('section_count', '--') }}</span>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

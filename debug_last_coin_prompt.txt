@@ -1,0 +1,153 @@
+## AI Agent Task: Debug "Last Coin Quick-Run" Feature
+
+### Server Access
+- SSH: root@178.18.245.6
+- Project Folder: /var/www/opus_trader/
+
+### Goal
+Investigate why the "Last Coin Quick-Run" feature's HTML section is not appearing in the browser despite being present in the template file.
+
+### Context
+A "Last Coin Quick-Run" feature was added to allow users to quickly restart the last bot they started. The feature consists of:
+
+1. **HTML Section** (added to `templates/dashboard.html` at lines 663-676):
+   - A hidden section with id `last-coin-section`
+   - Contains elements: `last-coin-symbol`, `last-coin-mode`, `btn-run-last-coin`, `run-last-coin-text`
+   - Located right before the "Active Bots Table" section
+
+2. **JavaScript Functions** (added to `static/js/app_lf.js`):
+   - `LAST_STARTED_BOT_KEY` constant at line 7
+   - `saveLastStartedBot()`, `updateLastCoinDisplay()`, `runLastCoin()` functions after line 224
+   - Modified `botAction()` to capture bot data before API call
+   - `updateLastCoinDisplay()` called on page load
+
+### The Problem
+The JavaScript is working correctly (console shows):
+```
+[LastCoin] saveLastStartedBot called with: {...}
+[LastCoin] Saved to localStorage: {id: '...', symbol: 'RIVERUSDT', mode: 'long'}
+[LastCoin] updateLastCoinDisplay - section: null symbolEl: null modeEl: null
+[LastCoin] ERROR: section element not found!
+```
+
+**The HTML elements return `null` when queried with `document.getElementById()`**, even though:
+- The section exists in `templates/dashboard.html` (verified with grep/cat)
+- Flask is configured with `TEMPLATES_AUTO_RELOAD = True` and `debug_mode = True`
+- The server has been restarted multiple times
+- Hard refresh (`Ctrl+Shift+R`) has been performed
+
+### Files to Investigate
+
+1. **`templates/dashboard.html`** - Verify the section exists at lines 663-676
+2. **`dashboard.html`** (root folder) - There's a SECOND dashboard.html in the root that may be interfering
+3. **`static/js/app_lf.js`** - The active JS file (not `app.js`)
+4. **`static/js/app_v5.js`** - Also loaded, may have conflicting code
+5. **`app.py`** - Flask configuration at line 75, template rendering at line 422
+
+### Key Questions to Answer
+
+1. **Is Flask serving from the correct template file?**
+   - Flask uses `render_template("dashboard.html")` at line 422
+   - Template folder is `templates/` (default)
+   - But there's also a `dashboard.html` in the project root - is this causing issues?
+
+2. **Is the HTML actually being served to the browser?**
+   - Check the actual page source served by the server
+   - Search for `last-coin-section` in the served HTML
+   - Command: `curl -s http://127.0.0.1:8000/ | grep "last-coin-section"`
+
+3. **Is there a caching issue?**
+   - Flask template caching
+   - Browser caching
+   - Jinja2 bytecode cache
+   - Nginx/reverse proxy caching (if applicable)
+
+4. **Is there another script or code removing/hiding the element?**
+   - Check if any JavaScript might be removing the element
+   - Check if Jinja2 conditionals might be hiding it
+
+5. **Are the JS files synced between local and server?**
+   - Verify `static/js/app_lf.js` on server has the Last Coin functions
+   - Check version strings match
+
+### Debugging Steps to Perform
+
+1. SSH into the server:
+   ```bash
+   ssh root@178.18.245.6
+   cd /var/www/opus_trader/
+   ```
+
+2. Verify the HTML section exists in the template:
+   ```bash
+   grep -n "last-coin-section" templates/dashboard.html
+   ```
+
+3. Check if root dashboard.html exists and differs:
+   ```bash
+   ls -la dashboard.html templates/dashboard.html
+   grep -c "last-coin-section" dashboard.html templates/dashboard.html
+   ```
+
+4. Verify the served HTML contains the section:
+   ```bash
+   curl -s http://127.0.0.1:8000/ | grep "last-coin-section"
+   ```
+   (May need authentication - check config/config.py for BASIC_AUTH credentials)
+
+5. Check if JS file has the Last Coin functions:
+   ```bash
+   grep -n "LAST_STARTED_BOT_KEY" static/js/app_lf.js
+   grep -n "updateLastCoinDisplay" static/js/app_lf.js
+   ```
+
+6. Restart Flask/Gunicorn to clear any caching:
+   ```bash
+   systemctl restart opus_trader  # or whatever the service name is
+   # OR
+   pkill -f app.py && python app.py &
+   ```
+
+7. Check for any Nginx caching:
+   ```bash
+   cat /etc/nginx/sites-enabled/opus_trader  # or similar
+   nginx -t && systemctl reload nginx
+   ```
+
+8. Look for Jinja2 conditionals in the template:
+   ```bash
+   grep -B5 -A5 "last-coin-section" templates/dashboard.html
+   ```
+
+### Expected HTML Section (should exist at lines 663-676)
+```html
+<!-- Quick Re-Run Last Coin (Hidden by default, shown when last coin exists) -->
+<section id="last-coin-section" class="hidden">
+  <div class="bg-gradient-to-r from-slate-900/90 via-emerald-900/20 to-slate-900/90 rounded-xl border border-emerald-800/50 px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <span class="text-emerald-400 text-sm font-medium">Last Coin:</span>
+      <span id="last-coin-symbol" class="text-white font-bold text-sm">-</span>
+      <span id="last-coin-mode" class="px-2 py-0.5 text-xs font-medium rounded-full bg-slate-700 text-slate-300">-</span>
+    </div>
+    <button id="btn-run-last-coin" onclick="runLastCoin()"
+      class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:cursor-not-allowed disabled:text-slate-500 text-white font-bold text-sm rounded-lg transition flex items-center gap-2">
+      <span id="run-last-coin-text">Run Again</span>
+    </button>
+  </div>
+</section>
+```
+
+### Expected Outcome
+After debugging:
+1. The "Last Coin" bar should appear above the Active Bots Table
+2. Shows the symbol and mode of the last started bot
+3. "Run Again" button starts the bot with loading state
+4. Persists across page refreshes (stored in localStorage)
+
+### Possible Root Causes to Check
+1. Template file on server doesn't have the HTML section (sync issue)
+2. Flask is serving from root `dashboard.html` instead of `templates/dashboard.html`
+3. Reverse proxy (Nginx) caching old HTML
+4. Jinja2 template caching
+5. Service not restarted after file changes
+6. File permissions preventing Flask from reading updated template

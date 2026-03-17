@@ -1,0 +1,833 @@
+import base64
+import importlib
+import sys
+import time
+from pathlib import Path
+from types import SimpleNamespace
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+
+def _basic_auth_headers(user="test-user", password="test-pass"):
+    token = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
+    return {"Authorization": f"Basic {token}"}
+
+
+def _load_app_module(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("BASIC_AUTH_USER", "test-user")
+    monkeypatch.setenv("BASIC_AUTH_PASS", "test-pass")
+    monkeypatch.setenv("BYBIT_MAINNET_API_KEY", "test-key")
+    monkeypatch.setenv("BYBIT_MAINNET_API_SECRET", "test-secret")
+    monkeypatch.setenv("ENABLE_BYBIT_STREAMS", "0")
+
+    if "config.config" in sys.modules:
+        importlib.reload(sys.modules["config.config"])
+
+    sys.modules.pop("app", None)
+    app_module = importlib.import_module("app")
+    app_module.APP_RUNTIME_INITIALIZED = True
+    app_module._sync_stream_subscriptions_once = lambda: None
+    app_module._maybe_sync_closed_pnl_for_api = lambda: None
+    app_module.DASHBOARD_SNAPSHOT_WAIT_SEC = 0.01
+    app_module.DASHBOARD_SNAPSHOT_REFRESH_TTL_SEC = 0.0
+    with app_module.DASHBOARD_SNAPSHOT_LOCK:
+        app_module.DASHBOARD_SNAPSHOT_CACHE.clear()
+        app_module.DASHBOARD_SNAPSHOT_FUTURES.clear()
+    return app_module
+
+
+def test_api_summary_returns_stale_fallback_when_snapshot_times_out(
+    monkeypatch,
+    tmp_path,
+):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+
+    def slow_summary():
+        time.sleep(0.05)
+        return {"account": {"equity": 10.0}}
+
+    app_module._build_summary_payload = slow_summary
+
+    flask_app = app_module.app
+    flask_app.config["TESTING"] = True
+
+    with flask_app.test_client() as client:
+        response = client.get("/api/summary", headers=_basic_auth_headers())
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["stale_data"] is True
+    assert payload["error"] == "summary_timeout"
+    assert payload["account"]["equity"] == 0.0
+
+
+def test_api_positions_fresh_request_prefers_runner_bridge_payload(
+    monkeypatch,
+    tmp_path,
+):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+    monkeypatch.setenv("BYBIT_STREAM_OWNER", "runner")
+    app_module.position_service = object()
+    app_module.runtime_snapshot_bridge = SimpleNamespace(
+        read_section=lambda section_name, max_age_sec=None: (
+            {
+                "positions": [{"symbol": "BTCUSDT", "side": "Buy"}],
+                "summary": {"total_positions": 1},
+                "snapshot_source": "runner_runtime_snapshot",
+                "stale_data": True,
+                "error": "positions_stale",
+            }
+            if section_name == "positions"
+            else None
+        )
+    )
+    app_module._build_positions_payload = lambda: (_ for _ in ()).throw(
+        AssertionError("direct positions refresh should not run")
+    )
+
+    flask_app = app_module.app
+    flask_app.config["TESTING"] = True
+
+    with flask_app.test_client() as client:
+        response = client.get("/api/positions?fresh=1", headers=_basic_auth_headers())
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["positions"][0]["symbol"] == "BTCUSDT"
+    assert payload["fresh_request_degraded"] is True
+    assert payload["fresh_request_reason"] == "positions_runner_bridge_preferred"
+
+
+def test_api_summary_fresh_request_prefers_runner_bridge_payload(
+    monkeypatch,
+    tmp_path,
+):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+    monkeypatch.setenv("BYBIT_STREAM_OWNER", "runner")
+    app_module.account_service = object()
+    app_module.runtime_snapshot_bridge = SimpleNamespace(
+        read_section=lambda section_name, max_age_sec=None: (
+            {
+                "account": {"equity": 42.0},
+                "positions_summary": {"total_positions": 0},
+                "today_pnl": {"net": 0.0},
+                "snapshot_source": "runner_runtime_snapshot",
+                "stale_data": True,
+                "error": "summary_stale",
+            }
+            if section_name == "summary"
+            else None
+        )
+    )
+    app_module._build_summary_payload = lambda: (_ for _ in ()).throw(
+        AssertionError("direct summary refresh should not run")
+    )
+
+    flask_app = app_module.app
+    flask_app.config["TESTING"] = True
+
+    with flask_app.test_client() as client:
+        response = client.get("/api/summary?fresh=1", headers=_basic_auth_headers())
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["account"]["equity"] == 42.0
+    assert payload["fresh_request_degraded"] is True
+    assert payload["fresh_request_reason"] == "summary_runner_bridge_preferred"
+
+
+def test_api_bots_runtime_returns_raw_bot_fallback_when_snapshot_times_out(
+    monkeypatch,
+    tmp_path,
+):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+
+    def slow_runtime_bots():
+        time.sleep(0.05)
+        return [{"id": "live-bot"}]
+
+    app_module.bot_status_service = SimpleNamespace(get_runtime_bots=slow_runtime_bots)
+    app_module.bot_storage = SimpleNamespace(
+        list_bots=lambda: [
+            {
+                "id": "raw-bot",
+                "symbol": "BTCUSDT",
+                "mode": "long",
+                "status": "running",
+            }
+        ]
+    )
+
+    flask_app = app_module.app
+    flask_app.config["TESTING"] = True
+
+    with flask_app.test_client() as client:
+        response = client.get("/api/bots/runtime", headers=_basic_auth_headers())
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["stale_data"] is True
+    assert payload["error"] == "bots_runtime_timeout"
+    assert payload["bots"][0]["id"] == "raw-bot"
+
+
+def test_runtime_bots_fallback_preserves_cached_payload_shape(monkeypatch, tmp_path):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+
+    with app_module.DASHBOARD_SNAPSHOT_LOCK:
+        app_module.DASHBOARD_SNAPSHOT_CACHE["bots_runtime"] = {
+            "ts": time.time() - 5.0,
+            "value": {
+                "bots": [{"id": "cached-bot", "symbol": "ETHUSDT"}],
+                "error": None,
+                "stale_data": False,
+            },
+        }
+
+    payload = app_module._build_runtime_bots_fallback("bots_runtime_timeout")
+
+    assert payload["stale_data"] is True
+    assert payload["error"] == "bots_runtime_timeout"
+    assert isinstance(payload["bots"], list)
+    assert payload["bots"][0]["id"] == "cached-bot"
+
+
+def test_api_bot_config_returns_canonical_persisted_bot_for_editor_hydration(
+    monkeypatch,
+    tmp_path,
+):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+
+    canonical_bot = {
+        "id": "bot-1",
+        "symbol": "ETHUSDT",
+        "mode": "short",
+        "trailing_sl_enabled": False,
+        "quick_profit_enabled": False,
+        "settings_version": 9,
+    }
+
+    app_module.bot_storage = SimpleNamespace(
+        get_bot=lambda bot_id: dict(canonical_bot) if bot_id == "bot-1" else None,
+        list_bots=lambda: [],
+    )
+    app_module.bot_status_service = SimpleNamespace(
+        get_runtime_bots=lambda: [
+            {
+                "id": "bot-1",
+                "symbol": "ETHUSDT",
+                "mode": "short",
+                "trailing_sl_enabled": True,
+                "quick_profit_enabled": True,
+                "settings_version": 8,
+            }
+        ]
+    )
+
+    flask_app = app_module.app
+    flask_app.config["TESTING"] = True
+
+    with flask_app.test_client() as client:
+        response = client.get("/api/bots/bot-1", headers=_basic_auth_headers())
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["bot"]["id"] == canonical_bot["id"]
+    assert payload["bot"]["symbol"] == canonical_bot["symbol"]
+    assert payload["bot"]["mode"] == canonical_bot["mode"]
+    assert payload["bot"]["trailing_sl_enabled"] is False
+    assert payload["bot"]["quick_profit_enabled"] is False
+    assert payload["bot"]["settings_version"] == canonical_bot["settings_version"]
+    assert payload["bot"]["range_mode"] == "fixed"
+
+
+def test_api_bot_config_returns_404_for_missing_bot(monkeypatch, tmp_path):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+    app_module.bot_storage = SimpleNamespace(get_bot=lambda bot_id: None)
+
+    flask_app = app_module.app
+    flask_app.config["TESTING"] = True
+
+    with flask_app.test_client() as client:
+        response = client.get("/api/bots/missing-bot", headers=_basic_auth_headers())
+
+    assert response.status_code == 404
+    assert response.get_json()["error"] == "bot not found"
+
+
+def test_api_stream_events_falls_back_to_snapshot_poll_when_stream_service_disabled(
+    monkeypatch,
+    tmp_path,
+):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+    app_module.stream_service = None
+    app_module._build_dashboard_stream_payload = lambda reason, fast=False: {
+        "reason": reason,
+        "summary": {"account": {"equity": 10.0}},
+        "positions": {"positions": []},
+        "bots": [],
+    }
+
+    flask_app = app_module.app
+    flask_app.config["TESTING"] = True
+
+    with flask_app.test_client() as client:
+        response = client.get(
+            "/api/stream/events",
+            headers=_basic_auth_headers(),
+            buffered=False,
+        )
+        try:
+            chunks = response.response
+            first_chunk = next(chunks).decode("utf-8")
+            second_chunk = next(chunks).decode("utf-8")
+        finally:
+            response.close()
+
+    assert response.status_code == 200
+    # First event is an immediate heartbeat (fast SSE open)
+    assert "event: heartbeat" in first_chunk
+    # Second event is the dashboard snapshot poll
+    assert "event: dashboard" in second_chunk
+    assert '"reason":"snapshot_poll"' in second_chunk
+
+
+def test_api_stream_events_prefers_snapshot_poll_when_bridge_is_canonical(
+    monkeypatch,
+    tmp_path,
+):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+    app_module.stream_service = SimpleNamespace(
+        get_latest_event_seq=lambda: (_ for _ in ()).throw(AssertionError("local stream unused")),
+        get_dashboard_snapshot=lambda symbols: (_ for _ in ()).throw(AssertionError("local stream unused")),
+    )
+    app_module._prefer_runtime_snapshot_bridge = lambda: True
+    app_module._build_dashboard_stream_payload = lambda reason, fast=False: {
+        "reason": reason,
+        "summary": {"account": {"equity": 10.0}},
+        "positions": {"positions": []},
+        "bots": [],
+    }
+
+    flask_app = app_module.app
+    flask_app.config["TESTING"] = True
+
+    with flask_app.test_client() as client:
+        response = client.get(
+            "/api/stream/events",
+            headers=_basic_auth_headers(),
+            buffered=False,
+        )
+        try:
+            chunks = response.response
+            first_chunk = next(chunks).decode("utf-8")
+            second_chunk = next(chunks).decode("utf-8")
+        finally:
+            response.close()
+
+    assert response.status_code == 200
+    # First event is an immediate heartbeat (fast SSE open)
+    assert "event: heartbeat" in first_chunk
+    # Second event is the dashboard snapshot poll
+    assert "event: dashboard" in second_chunk
+    assert '"reason":"snapshot_poll"' in second_chunk
+
+
+def test_live_dashboard_bundle_does_not_keep_fresh_probe_hot_path():
+    template = (PROJECT_ROOT / "templates" / "dashboard.html").read_text(
+        encoding="utf-8"
+    )
+    assert "js/app_lf.min.js" in template
+
+    live_bundle = (PROJECT_ROOT / "static" / "js" / "app_lf.min.js").read_text(
+        encoding="utf-8"
+    )
+    assert "refreshPositions(true).catch(() => {});" not in live_bundle
+    assert "refreshSummary(true).catch(() => {});" not in live_bundle
+
+
+def test_build_dashboard_stream_payload_exposes_section_snapshot_meta(
+    monkeypatch,
+    tmp_path,
+):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+
+    market_payload = {
+        "health": {"transport": "stream"},
+        "snapshot_published_at": 101.0,
+        "snapshot_produced_at": 101.5,
+        "snapshot_age_sec": 0.5,
+        "snapshot_fresh": True,
+        "snapshot_source": "runner_stream_snapshot",
+        "snapshot_reason": "ticker",
+        "snapshot_owner": "runner",
+        "snapshot_epoch": 9,
+        "stale_data": False,
+        "error": None,
+    }
+    summary_payload = {
+        "account": {"equity": 10.0},
+        "snapshot_published_at": 102.0,
+        "snapshot_produced_at": 102.5,
+        "snapshot_age_sec": 0.4,
+        "snapshot_fresh": True,
+        "snapshot_source": "runner_runtime_snapshot",
+        "snapshot_reason": "timer",
+        "snapshot_owner": "runner",
+        "snapshot_epoch": 10,
+        "stale_data": False,
+        "error": None,
+    }
+    positions_payload = {
+        "positions": [],
+        "snapshot_published_at": 103.0,
+        "snapshot_produced_at": 103.5,
+        "snapshot_age_sec": 0.3,
+        "snapshot_fresh": True,
+        "snapshot_source": "runner_runtime_snapshot",
+        "snapshot_reason": "timer",
+        "snapshot_owner": "runner",
+        "snapshot_epoch": 11,
+        "stale_data": False,
+        "error": None,
+    }
+    bots_payload = {
+        "bots": [{"id": "bot-1", "setup_ready_status": "ready"}],
+        "snapshot_published_at": 104.0,
+        "snapshot_produced_at": 104.5,
+        "snapshot_age_sec": 0.2,
+        "snapshot_fresh": True,
+        "snapshot_source": "runner_runtime_snapshot",
+        "snapshot_reason": "ticker",
+        "snapshot_owner": "runner",
+        "snapshot_epoch": 12,
+        "stale_data": False,
+        "error": None,
+    }
+
+    app_module.runtime_snapshot_bridge = SimpleNamespace(
+        read_market_snapshot=lambda: dict(market_payload),
+    )
+    app_module._get_summary_snapshot = lambda: dict(summary_payload)
+    app_module._get_positions_snapshot = lambda: dict(positions_payload)
+    app_module._get_runtime_bots_snapshot = lambda: dict(bots_payload)
+    app_module._is_bridge_producer_alive = lambda: True
+
+    payload = app_module._build_dashboard_stream_payload("snapshot_poll")
+
+    assert payload["market_meta"]["snapshot_source"] == "runner_stream_snapshot"
+    assert payload["summary_meta"]["snapshot_epoch"] == 10
+    assert payload["positions_meta"]["snapshot_age_sec"] == 0.3
+    assert payload["bots_meta"]["snapshot_reason"] == "ticker"
+
+
+def test_prefer_runtime_snapshot_bridge_requires_fresh_bots_runtime(
+    monkeypatch,
+    tmp_path,
+):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+    monkeypatch.setenv("BYBIT_STREAM_OWNER", "runner")
+    app_module.runtime_snapshot_bridge = SimpleNamespace(
+        read_market_snapshot=lambda: {
+            "snapshot_owner": "runner",
+            "snapshot_fresh": True,
+            "stale_data": False,
+        },
+        read_section=lambda section_name, max_age_sec=None: (
+            {
+                "snapshot_owner": "runner",
+                "snapshot_fresh": False,
+                "stale_data": True,
+            }
+            if section_name == "bots_runtime"
+            else None
+        ),
+    )
+
+    assert app_module._prefer_runtime_snapshot_bridge() is False
+
+
+def test_get_runtime_bots_snapshot_recovers_when_bridge_stale(
+    monkeypatch,
+    tmp_path,
+):
+    """When bridge is stale (alive but hard-stale), recovery runs and fresh
+    data from the app-side rebuild is preferred over stale bridge data."""
+    app_module = _load_app_module(monkeypatch, tmp_path)
+    app_module.runtime_snapshot_bridge = SimpleNamespace(
+        read_section=lambda section_name, max_age_sec=None: (
+            {
+                "bots": [{"id": "stale-bot"}],
+                "snapshot_source": "runner_runtime_snapshot",
+                "snapshot_fresh": False,
+                "stale_data": True,
+                "error": "bots_runtime_stale",
+            }
+            if section_name == "bots_runtime"
+            else None
+        )
+    )
+    app_module._is_bridge_producer_alive = lambda: True
+    app_module.bot_status_service = SimpleNamespace(
+        get_runtime_bots=lambda: [{"id": "fresh-bot", "setup_ready_status": "ready"}]
+    )
+    with app_module.DASHBOARD_SNAPSHOT_LOCK:
+        app_module.DASHBOARD_SNAPSHOT_CACHE.clear()
+        app_module.DASHBOARD_SNAPSHOT_FUTURES.clear()
+
+    payload = app_module._get_runtime_bots_snapshot()
+
+    # Recovery produces fresh data, watchdog prefers it over stale bridge
+    assert payload["bots"][0]["id"] == "fresh-bot"
+    assert payload["stale_data"] is False
+
+
+def test_build_dashboard_stream_payload_recovers_stale_bots_for_snapshot_poll(
+    monkeypatch,
+    tmp_path,
+):
+    """When bots_runtime bridge is stale, recovery runs and fresh rebuilt
+    data is used in the stream payload."""
+    app_module = _load_app_module(monkeypatch, tmp_path)
+    app_module.runtime_snapshot_bridge = SimpleNamespace(
+        read_dashboard_payload=lambda reason: {
+            "reason": reason,
+            "summary": {"account": {"equity": 10.0}},
+            "positions": {"positions": []},
+            "bots": [{"id": "stale-bot"}],
+            "market": {"snapshot_owner": "runner", "snapshot_fresh": True, "stale_data": False},
+        },
+        read_section=lambda section_name, max_age_sec=None: (
+            {
+                "bots": [{"id": "stale-bot"}],
+                "snapshot_source": "runner_runtime_snapshot",
+                "snapshot_fresh": False,
+                "stale_data": True,
+                "error": "bots_runtime_stale",
+            }
+            if section_name == "bots_runtime"
+            else None
+        ),
+        read_market_snapshot=lambda: {"snapshot_owner": "runner", "snapshot_fresh": True, "stale_data": False},
+    )
+    app_module._is_bridge_producer_alive = lambda: True
+    app_module.bot_status_service = SimpleNamespace(
+        get_runtime_bots=lambda: [{"id": "fresh-bot", "setup_ready_status": "ready"}]
+    )
+    app_module._get_summary_snapshot = lambda: {
+        "account": {"equity": 10.0},
+        "stale_data": False,
+        "error": None,
+    }
+    app_module._get_positions_snapshot = lambda: {
+        "positions": [],
+        "stale_data": False,
+        "error": None,
+    }
+    with app_module.DASHBOARD_SNAPSHOT_LOCK:
+        app_module.DASHBOARD_SNAPSHOT_CACHE.clear()
+        app_module.DASHBOARD_SNAPSHOT_FUTURES.clear()
+
+    payload = app_module._build_dashboard_stream_payload("snapshot_poll")
+
+    # Fresh rebuilt data preferred over stale bridge
+    assert payload["bots"][0]["id"] == "fresh-bot"
+    assert payload["bots_meta"]["stale_data"] is False
+
+
+def test_build_dashboard_stream_payload_does_not_use_raw_dashboard_bridge_bundle(
+    monkeypatch,
+    tmp_path,
+):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+    app_module.runtime_snapshot_bridge = SimpleNamespace(
+        read_dashboard_payload=lambda reason: (_ for _ in ()).throw(
+            AssertionError("raw dashboard bridge bundle should not be used")
+        ),
+        read_market_snapshot=lambda: {"snapshot_source": "runner_stream_snapshot"},
+    )
+    app_module._get_summary_snapshot = lambda: {
+        "account": {"equity": 25.0},
+        "snapshot_epoch": 10,
+        "stale_data": False,
+        "error": None,
+    }
+    app_module._get_positions_snapshot = lambda: {
+        "positions": [{"symbol": "BTCUSDT"}],
+        "snapshot_epoch": 11,
+        "stale_data": False,
+        "error": None,
+    }
+    app_module._get_runtime_bots_snapshot = lambda: {
+        "bots": [{"id": "bot-1"}],
+        "snapshot_epoch": 12,
+        "stale_data": False,
+        "error": None,
+    }
+    app_module._is_bridge_producer_alive = lambda: True
+
+    payload = app_module._build_dashboard_stream_payload("snapshot_poll")
+
+    assert payload["summary"]["account"]["equity"] == 25.0
+    assert payload["positions"]["positions"][0]["symbol"] == "BTCUSDT"
+    assert payload["bots"][0]["id"] == "bot-1"
+
+
+def test_api_dashboard_bootstrap_recovery_uses_direct_builders_not_snapshot_wrappers(
+    monkeypatch,
+    tmp_path,
+):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+    stale_section = {
+        "snapshot_fresh": False,
+        "stale_data": True,
+        "error": "bridge_stale",
+    }
+    app_module.runtime_snapshot_bridge = SimpleNamespace(
+        read_section=lambda section_name, max_age_sec=None: dict(stale_section),
+        read_market_snapshot=lambda: None,
+    )
+    app_module._get_summary_snapshot = lambda: (_ for _ in ()).throw(
+        AssertionError("bootstrap should not use summary snapshot wrapper")
+    )
+    app_module._get_positions_snapshot = lambda: (_ for _ in ()).throw(
+        AssertionError("bootstrap should not use positions snapshot wrapper")
+    )
+    app_module._get_runtime_bots_snapshot = lambda: (_ for _ in ()).throw(
+        AssertionError("bootstrap should not use runtime bots snapshot wrapper")
+    )
+
+    def build_summary():
+        time.sleep(0.02)
+        return {
+            "account": {"equity": 123.0},
+            "positions_summary": {"total_positions": 1},
+            "today_pnl": {"net": 5.0},
+            "daily_loss_pct": 0.0,
+            "kill_switch_triggered": False,
+            "kill_switch_triggered_at": None,
+        }
+
+    def build_positions(account=None):
+        time.sleep(0.02)
+        return {
+            "positions": [{"symbol": "BTCUSDT", "side": "Buy"}],
+            "summary": {"total_positions": 1},
+            "wallet_balance": 123.0,
+            "available_balance": 100.0,
+            "realized_pnl": 0.0,
+            "unrealized_pnl": 5.0,
+            "stale_data": False,
+            "error": None,
+        }
+
+    def build_bots():
+        time.sleep(0.02)
+        return {
+            "bots": [{"id": "bot-1", "setup_ready_status": "ready"}],
+            "stale_data": False,
+            "error": None,
+            "runtime_integrity": {"status": "healthy"},
+        }
+
+    app_module._build_summary_payload = build_summary
+    app_module._build_positions_payload = build_positions
+    app_module._build_runtime_bots_light_payload = build_bots
+
+    client = app_module.app.test_client()
+    response = client.get("/api/dashboard/bootstrap", headers=_basic_auth_headers())
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["summary"]["account"]["equity"] == 123.0
+    assert payload["positions"]["positions"][0]["symbol"] == "BTCUSDT"
+    assert payload["bots"][0]["id"] == "bot-1"
+    with app_module.DASHBOARD_SNAPSHOT_LOCK:
+        assert app_module.DASHBOARD_SNAPSHOT_CACHE["summary"]["value"]["account"]["equity"] == 123.0
+        assert app_module.DASHBOARD_SNAPSHOT_CACHE["positions"]["value"]["positions"][0]["symbol"] == "BTCUSDT"
+        assert app_module.DASHBOARD_SNAPSHOT_CACHE["bots_runtime_light"]["value"]["bots"][0]["id"] == "bot-1"
+
+
+def test_recover_bootstrap_dashboard_sections_uses_single_outer_timeout_budget(
+    monkeypatch,
+    tmp_path,
+):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+
+    def slow_summary():
+        time.sleep(0.08)
+        return {"account": {"equity": 1.0}}
+
+    def slow_positions(account=None):
+        time.sleep(0.08)
+        return {"positions": []}
+
+    def slow_bots():
+        time.sleep(0.08)
+        return {"bots": []}
+
+    app_module._build_summary_payload = slow_summary
+    app_module._build_positions_payload = slow_positions
+    app_module._build_runtime_bots_light_payload = slow_bots
+
+    started_at = time.monotonic()
+    results = app_module._recover_bootstrap_dashboard_sections(timeout_sec=0.02)
+    elapsed = time.monotonic() - started_at
+
+    assert elapsed < 0.05
+    assert results["summary"]["error"] == "bootstrap_timeout"
+    assert results["positions"]["error"] == "bootstrap_timeout"
+    assert results["bots"]["error"] == "bootstrap_timeout"
+
+
+def test_bootstrap_recovery_primes_cache_for_following_stream_timeout(
+    monkeypatch,
+    tmp_path,
+):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+    app_module._is_bridge_producer_alive = lambda: True
+
+    def stale_bridge(section_name, max_age_sec=None):
+        if section_name in {"summary", "positions", "bots_runtime"}:
+            return {
+                "snapshot_fresh": False,
+                "stale_data": True,
+                "error": f"{section_name}_stale",
+            }
+        return None
+
+    app_module.runtime_snapshot_bridge = SimpleNamespace(
+        read_section=stale_bridge,
+        read_market_snapshot=lambda: None,
+    )
+
+    summary_payload = {
+        "account": {"equity": 77.0},
+        "positions_summary": {"total_positions": 1},
+        "today_pnl": {"net": 1.0},
+        "daily_loss_pct": 0.0,
+        "kill_switch_triggered": False,
+        "kill_switch_triggered_at": None,
+    }
+    positions_payload = {
+        "positions": [{"symbol": "ETHUSDT", "side": "Sell"}],
+        "summary": {"total_positions": 1},
+        "wallet_balance": 77.0,
+        "available_balance": 55.0,
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 1.0,
+        "stale_data": False,
+        "error": None,
+    }
+    bots_payload = {
+        "bots": [{"id": "bot-77", "setup_ready_status": "armed"}],
+        "stale_data": False,
+        "error": None,
+        "runtime_integrity": {"status": "healthy"},
+    }
+
+    app_module._build_summary_payload = lambda: dict(summary_payload)
+    app_module._build_positions_payload = lambda account=None: dict(positions_payload)
+    app_module._build_runtime_bots_light_payload = lambda: dict(bots_payload)
+
+    client = app_module.app.test_client()
+    response = client.get("/api/dashboard/bootstrap", headers=_basic_auth_headers())
+    assert response.status_code == 200
+
+    def slow_summary():
+        time.sleep(0.05)
+        return dict(summary_payload)
+
+    def slow_positions(account=None):
+        time.sleep(0.05)
+        return dict(positions_payload)
+
+    app_module._build_summary_payload = slow_summary
+    app_module._build_positions_payload = slow_positions
+    app_module._get_runtime_bots_snapshot = lambda: dict(bots_payload)
+
+    payload = app_module._build_dashboard_stream_payload("snapshot_poll")
+
+    assert payload["summary"]["account"]["equity"] == 77.0
+    assert payload["positions"]["positions"][0]["symbol"] == "ETHUSDT"
+    assert payload["summary_meta"]["stale_data"] is True
+    assert payload["positions_meta"]["stale_data"] is True
+
+
+def test_api_bots_runtime_exposes_response_and_integrity_latency_fields(
+    monkeypatch,
+    tmp_path,
+):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+    app_module.runtime_snapshot_bridge = SimpleNamespace(
+        read_section=lambda section_name, max_age_sec=None: (
+            {
+                "bots": [{"id": "bot-1", "setup_ready_status": "armed"}],
+                "snapshot_published_at": time.time() - 1.0,
+                "snapshot_produced_at": time.time() - 1.0,
+                "snapshot_source": "runner_runtime_snapshot",
+                "runtime_publish_ts": time.time() - 2.0,
+                "runtime_publish_at": "2026-03-13T00:00:00+00:00",
+                "runtime_snapshot_age_ms": 2000.0,
+                "bridge_age_ms": 1000.0,
+                "stale_data": False,
+                "error": None,
+                "runtime_integrity": {
+                    "status": "healthy",
+                    "runtime_integrity_state": "healthy",
+                    "rebuilt_from_app": False,
+                    "held_last_good": False,
+                    "startup_pending": False,
+                    "startup_stalled": False,
+                },
+                "readiness_latency": {
+                    "dominant_segment": "market_to_eval_start_ms",
+                },
+            }
+            if section_name == "bots_runtime"
+            else None
+        ),
+    )
+    app_module._is_bridge_producer_alive = lambda: True
+
+    client = app_module.app.test_client()
+    response = client.get("/api/bots/runtime", headers=_basic_auth_headers())
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["response_generated_at"] is not None
+    assert payload["response_build_ms"] is not None
+    assert payload["response_age_ms"] is not None
+    assert payload["bridge_age_ms"] is not None
+    assert payload["runtime_snapshot_age_ms"] is not None
+    assert payload["runtime_integrity_state"] is not None
+    assert payload["rebuilt_from_app"] is False
+
+
+def test_build_watchdog_hub_payload_includes_readiness_latency_summary(
+    monkeypatch,
+    tmp_path,
+):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+    app_module.watchdog_hub_service = SimpleNamespace(
+        build_snapshot=lambda **kwargs: {"overview": {}, "active_issues": [], "recent_events": []}
+    )
+
+    payload = app_module._build_watchdog_hub_payload(
+        bots_payload={
+            "bots": [],
+            "stale_data": False,
+            "runtime_integrity": {"status": "healthy"},
+            "readiness_latency": {
+                "dominant_segment": "eval_to_runtime_publish_ms",
+                "paths": {"live_runtime": {"bot_count": 1}},
+            },
+        }
+    )
+
+    assert payload["readiness_latency"]["dominant_segment"] == "eval_to_runtime_publish_ms"
+    assert payload["readiness_latency"]["paths"]["live_runtime"]["bot_count"] == 1

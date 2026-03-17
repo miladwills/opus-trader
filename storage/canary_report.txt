@@ -1,0 +1,49 @@
+[2026-01-08T22:53:42Z] Canary session started: duration=5m, stop_on_alert=0
+[2026-01-08T22:53:42Z] Restarting services...
+[2026-01-08T22:53:42Z] Services restarted successfully
+[2026-01-08T22:58:43Z] Canary finished successfully - NO alerts detected.
+[2026-01-09T00:03:57Z] Canary session started: duration=60m, stop_on_alert=0
+[2026-01-09T00:03:57Z] Restarting services...
+[2026-01-09T00:03:57Z] Services restarted successfully
+[2026-01-09T00:08:07Z] Canary session started: duration=60m, stop_on_alert=0
+[2026-01-09T00:08:07Z] Restarting services...
+[2026-01-09T00:08:07Z] Services restarted successfully
+[2026-01-09T00:36:25Z] Canary session started: duration=60m, stop_on_alert=0
+[2026-01-09T00:36:25Z] Restarting services...
+[2026-01-09T00:36:25Z] Services restarted successfully
+[2026-01-09T00:40:24Z] ERROR: Monitoring process died
+[2026-01-09T00:53:55Z] Canary session started: duration=360m, stop_on_alert=1
+[2026-01-09T00:53:55Z] Restarting services...
+[2026-01-09T00:53:55Z] Services restarted successfully
+[2026-01-09T06:53:56Z] Canary finished successfully - NO alerts detected.
+[2026-01-09T09:47:55Z] Canary session started: duration=30m, stop_on_alert=1
+[2026-01-09T09:47:55Z] Restarting services...
+[2026-01-09T09:47:55Z] Services restarted successfully
+[2026-01-09T10:17:55Z] Canary finished successfully - NO alerts detected.
+[2026-01-09T10:49:10Z] Canary session started: duration=120m, stop_on_alert=1
+[2026-01-09T10:49:10Z] Restarting services...
+[2026-01-09T10:49:10Z] Services restarted successfully
+[2026-01-09T12:19:12Z] Canary session started: duration=120m, stop_on_alert=1
+[2026-01-09T12:19:12Z] Restarting services...
+[2026-01-09T12:19:12Z] Services restarted successfully
+[2026-01-09T12:59:43Z] Canary session started: duration=120m, stop_on_alert=1
+[2026-01-09T12:59:43Z] Restarting services...
+[2026-01-09T12:59:43Z] Services restarted successfully
+[2026-01-09T13:09:13Z] Canary session started: duration=120m, stop_on_alert=1
+[2026-01-09T13:09:13Z] Restarting services...
+[2026-01-09T13:09:13Z] Services restarted successfully
+[2026-01-09T13:27:35Z] ERROR: Monitoring process died
+[2026-01-09T13:39:24Z] Canary session started: duration=1m, stop_on_alert=0
+[2026-01-09T13:39:24Z] Restarting services...
+[2026-01-09T13:39:24Z] Services restarted successfully
+[2026-01-09T13:40:24Z] Canary finished successfully - NO alerts detected.
+[2026-01-09T13:58:47Z] Canary session started: duration=120m, stop_on_alert=1
+[2026-01-09T13:58:47Z] Restarting services...
+[2026-01-09T13:58:47Z] Services restarted successfully
+[2026-01-09T15:58:47Z] Canary finished successfully - NO alerts detected.
+[2026-01-10T17:11:52Z] ALERT FOUND: 2026-01-10 18:11:52,011 [WARNING] PnL: UNATTRIBUTED - multiple bots for symbol 'PIPPINUSDT'. Skipping fallback.
+[2026-01-10T17:11:52Z] STOP_ON_ALERT enabled - halting services immediately!
+[2026-01-10T17:12:40Z] ALERT FOUND: 2026-01-10 18:12:40,545 [WARNING] PnL: UNATTRIBUTED - multiple bots for symbol 'PIPPINUSDT'. Skipping fallback.
+[2026-01-10T17:12:40Z] STOP_ON_ALERT enabled - halting services immediately!
+[2026-01-10T17:12:40Z] ALERT FOUND: 2026-01-10 18:12:40,554 [WARNING] PnL: UNATTRIBUTED - multiple bots for symbol 'PIPPINUSDT'. Skipping fallback.
+[2026-01-10T17:12:40Z] STOP_ON_ALERT enabled - halting services immediately!

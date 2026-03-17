@@ -1,0 +1,55 @@
+openapi: 3.0.0
+info:
+  title: Bot Audit and Optimization API
+  version: 1.0.0
+paths:
+  /api/positions:
+    get:
+      summary: Get all open positions with enriched data.
+      responses:
+        '200':
+          description: A list of positions with available balance info.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  positions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Position'
+                  available_balance:
+                    type: number
+                    description: Total available margin in the account.
+                  wallet_balance:
+                    type: number
+                    description: Total equity in the account.
+  /api/bots/{bot_id}/emergency-stop:
+    post:
+      summary: Trigger emergency stop and close for a specific bot.
+      parameters:
+        - name: bot_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Bot stopped and positions closed successfully.
+
+components:
+  schemas:
+    Position:
+      type: object
+      properties:
+        symbol: { type: string }
+        side: { type: string, enum: [Buy, Sell] }
+        size: { type: number }
+        position_value: { type: number }
+        entry_price: { type: number }
+        mark_price: { type: number }
+        leverage: { type: number }
+        unrealized_pnl: { type: number }
+        realized_pnl: { type: number }
+        pct_to_liq: { type: number }
+        bot_id: { type: string }

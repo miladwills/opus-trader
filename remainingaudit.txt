@@ -1,0 +1,61 @@
+# Trading Bot Audit Implementation Status (001-trading-bot-audit)
+
+## Summary of Work Completed
+
+### Phase 1 & 2: Setup & Foundations ✅
+- All foundational constants added to `config/strategy_config.py` (Volatility freezes, Scalp multipliers, Global Kill-Switch toggle).
+- Feature branch `001-trading-bot-audit` established.
+
+### Phase 3: US1 - Available Balance Fix ✅
+- Fixed $0.00 bug in dashboard header (`static/js/app_lf.js`).
+- Updated table layouts for consistency.
+
+### Phase 4: US2 - Anti-Churn Recenter ✅
+- Added `last_recenter_ts` and cooldown logic to `services/grid_bot_service.py`.
+- Implemented **Volatility Freeze** check (ATR/BBW) to block recentering during spikes.
+
+### Phase 6: US4 - Frontend Cleanup ✅
+- Updated stale code comments and ensured no console errors in dashboard.
+
+### Phase 8: US6 - Fee-Aware Scalp ✅
+- Implemented `calculate_adaptive_min_profit` in `services/scalp_pnl_service.py`.
+- Added spread/liquidity checks and post-close cooldowns.
+
+### Phase 9: US7 - Out-of-Range Safety ✅
+- Added volatility/regime override to `grid_bot_service.py`.
+- Bots now **Pause** instead of **Recenter** if market is "too_strong" or "extreme_volatility".
+
+### Phase 10: US8 - UPnL SL Consistency ✅
+- Audited all bot modes.
+- Verified that the UPnL SL check is centralized in `_run_cycle()`, ensuring consistent protection for Neutral, Scalp, Dynamic, and Trailing modes.
+
+### Phase 11: US9 - NLP Enforcement ✅
+- Verified NLP check invocation in `neutral_classic_bybit`.
+- **Implemented Missing Feature**: Added `NEUTRAL_MOMENTUM_TIGHTEN_CAP_MULT` logic to `neutral_loss_prevention_service.py` to reduce exposure when momentum is high.
+
+### Phase 12: US10 - Position Limits ✅
+- Added "Safe Profile" documentation to config.
+- Audited `validate_new_bot()` in `risk_manager_service.py`.
+- Added logging for validation failures.
+
+### Phase 13A - Auditprompt Follow-Up Wiring ✅
+- Wired kill-switch enforcement into `runner.py` (calls `risk_manager.enforce_kill_switch(...)` after equity update).
+- Fixed frontend reduce-only action to call `/api/bots/reduce-only`.
+- Updated auto-stop direction-change logic to use structured `trend_direction` (no parsing `trend_status`).
+
+---
+
+## Remaining Tasks (Critical for Completion)
+
+### 1. Phase 13 - Final Verification
+- **T074-T085**: Restart `app.py` and `runner.py`.
+- Verify PnL and Balance updates.
+- Test "Reduce-Only" transition by manually triggering a direction change.
+- Test Kill-Switch by lowering the `MAX_DAILY_LOSS_PCT` threshold temporarily.
+- Final code review of `grid_bot_service.py` (ensure no logic branches bypass the new flags).
+
+## Key Files
+- `services/grid_bot_service.py`: Needs `reduce_only_mode` processing.
+- `services/risk_manager_service.py`: Needs kill-switch action implementation.
+- `app.py`: Needs reset endpoint.
+- `static/js/app_lf.js`: Already updated, needs final verification of UI states.

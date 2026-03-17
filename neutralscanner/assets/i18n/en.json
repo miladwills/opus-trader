@@ -1,0 +1,117 @@
+{
+    "app": {
+        "title": "Neutral Futures Scanner Pro - Bybit (15m + 1h)",
+        "subtitle": "Green row = Neutral (ranging on 15m, no trend on 1h). Red row = Trending (ADX 1h >= 25)."
+    },
+    "table": {
+        "headers": {
+            "index": "#",
+            "alert": "Alert",
+            "symbol": "Symbol",
+            "state": "State",
+            "recommendation": "Rec.",
+            "price": "Price",
+            "adx15": "ADX 15m",
+            "adx1h": "ADX 1h",
+            "rsi15": "RSI 15m",
+            "rsi1h": "RSI 1h",
+            "bbw15": "BBW% 15m",
+            "bbw1h": "BBW% 1h",
+            "atrPct15": "ATR% 15m",
+            "atrPct1h": "ATR% 1h",
+            "vol24h": "24h Vol",
+            "speed": "Speed %",
+            "direction": "Direction",
+            "btcCorr": "BTC Corr",
+            "btcBeta": "BTC Beta",
+            "btcImpact": "Impact",
+            "actions": "Actions"
+        }
+    },
+    "states": {
+        "NEUTRAL": "Neutral",
+        "TREND_UP": "Trend Up",
+        "TREND_DOWN": "Trend Down",
+        "TRANSITION": "Transition",
+        "VOLATILE": "Volatile"
+    },
+    "recommendations": {
+        "neutral_fixed": "Neutral / Fixed",
+        "neutral_trailing": "Neutral / Trailing",
+        "long_fixed": "Long / Fixed",
+        "long_trailing": "Long / Trailing",
+        "short_fixed": "Short / Fixed",
+        "short_trailing": "Short / Trailing",
+        "volatile_avoid": "Volatile / Avoid",
+        "transition_wait": "Transition / Wait"
+    },
+    "directions": {
+        "flat_range": "Ranging",
+        "neutral_up": "Neutral Up",
+        "neutral_down": "Neutral Down",
+        "unclear": "Unclear",
+        "unknown": "Unknown"
+    },
+    "impacts": {
+        "high": "High",
+        "medium": "Medium",
+        "low": "Low",
+        "weak": "Weak",
+        "unknown": "Unknown"
+    },
+    "btc_risk": {
+        "title": "BTC Risk Level",
+        "CALM": "CALM",
+        "LOW": "LOW",
+        "MED": "MEDIUM",
+        "HIGH": "HIGH",
+        "top_corr": "Top Correlated",
+        "weak_corr": "Weakest Correlated"
+    },
+    "sort": {
+        "title": "Multi-Level Sort",
+        "level": "Level",
+        "column": "Column",
+        "direction": "Direction",
+        "asc": "Ascending",
+        "desc": "Descending",
+        "apply": "Apply Sort",
+        "reset": "Reset",
+        "addLevel": "Add Level",
+        "none": "None"
+    },
+    "filter": {
+        "title": "Filter Builder",
+        "addRule": "Add Rule",
+        "apply": "Apply Filters",
+        "reset": "Reset",
+        "combineMode": "Combine Mode",
+        "and": "AND",
+        "or": "OR"
+    },
+    "presets": {
+        "title": "Presets",
+        "namePlaceholder": "Preset name (e.g., Neutral, Long Trend)",
+        "save": "Save Preset",
+        "hint": "Save current Multi-Level Sort + Filter settings as a named preset, then click a preset to apply it.",
+        "none": "No saved presets yet.",
+        "nameRequired": "Please enter a preset name.",
+        "confirmOverwrite": "Preset already exists. Overwrite it?",
+        "confirmDelete": "Delete this preset?"
+    },
+    "common": {
+        "lastUpdate": "Last Update",
+        "addSymbol": "Add Symbol",
+        "add": "Add",
+        "delete": "Delete",
+        "enable": "Enable",
+        "disable": "Disable",
+        "soundAlert": "Sound Alert",
+        "language": "Language",
+        "loading": "Loading data...",
+        "noData": "No data available. Check your internet connection and Bybit symbols."
+    },
+    "footer": {
+        "thresholds": "Neutral conditions: 15m: ADX 12-30, RSI 30-70, BBW% max ~25, ATR% max ~3%. 1h: ADX >= 25 indicates trend (red row)."
+    }
+}

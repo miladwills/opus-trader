@@ -1,0 +1,183 @@
+[
+  {
+    "name": "Neutral - Safe Fixed",
+    "sortLevels": [
+      {"col": "neutral", "dir": "desc"},
+      {"col": "adx15", "dir": "asc"},
+      {"col": "bbw15", "dir": "asc"},
+      {"col": "atrPct15", "dir": "asc"},
+      {"col": "speed_pct", "dir": "asc"},
+      {"col": "btc_impact", "dir": "desc"},
+      {"col": "vol24h", "dir": "desc"}
+    ],
+    "filterRules": [
+      {"col": "neutral", "op": "=", "val": "true", "val2": ""},
+      {"col": "adx15", "op": "<=", "val": "25", "val2": ""},
+      {"col": "rsi15", "op": "between", "val": "38", "val2": "62"},
+      {"col": "bbw15", "op": "<=", "val": "10", "val2": ""},
+      {"col": "atrPct15", "op": "<=", "val": "1.5", "val2": ""},
+      {"col": "speed_pct", "op": "<=", "val": "35", "val2": ""},
+      {"col": "vol24h", "op": ">=", "val": "10000000", "val2": ""}
+    ],
+    "combineMode": "AND",
+    "createdAt": "2026-01-09T00:00:00Z",
+    "updatedAt": "2026-03-14T00:00:00Z"
+  },
+  {
+    "name": "Neutral - Trailing Active",
+    "sortLevels": [
+      {"col": "neutral", "dir": "desc"},
+      {"col": "speed_pct", "dir": "desc"},
+      {"col": "atrPct15", "dir": "desc"},
+      {"col": "bbw15", "dir": "desc"},
+      {"col": "vol24h", "dir": "desc"}
+    ],
+    "filterRules": [
+      {"col": "neutral", "op": "=", "val": "true", "val2": ""},
+      {"col": "speed_pct", "op": "between", "val": "20", "val2": "55"},
+      {"col": "atrPct15", "op": "between", "val": "0.3", "val2": "2.0"},
+      {"col": "bbw15", "op": "between", "val": "1", "val2": "20"},
+      {"col": "adx15", "op": "<=", "val": "28", "val2": ""},
+      {"col": "vol24h", "op": ">=", "val": "10000000", "val2": ""}
+    ],
+    "combineMode": "AND",
+    "createdAt": "2026-01-09T00:00:00Z",
+    "updatedAt": "2026-03-14T00:00:00Z"
+  },
+  {
+    "name": "Long Trend - Strong Trailing",
+    "sortLevels": [
+      {"col": "state", "dir": "asc"},
+      {"col": "adx1h", "dir": "desc"},
+      {"col": "rsi1h", "dir": "desc"},
+      {"col": "speed_pct", "dir": "desc"},
+      {"col": "vol24h", "dir": "desc"}
+    ],
+    "filterRules": [
+      {"col": "state", "op": "=", "val": "TREND_UP", "val2": ""},
+      {"col": "adx1h", "op": ">=", "val": "35", "val2": ""},
+      {"col": "rsi1h", "op": ">=", "val": "55", "val2": ""},
+      {"col": "speed_pct", "op": ">=", "val": "20", "val2": ""},
+      {"col": "atrPct15", "op": "<=", "val": "3.0", "val2": ""}
+    ],
+    "combineMode": "AND",
+    "createdAt": "2026-01-09T00:00:00Z",
+    "updatedAt": "2026-03-14T00:00:00Z"
+  },
+  {
+    "name": "Long Trend - Moderate Fixed",
+    "sortLevels": [
+      {"col": "state", "dir": "asc"},
+      {"col": "adx1h", "dir": "desc"},
+      {"col": "rsi1h", "dir": "desc"},
+      {"col": "vol24h", "dir": "desc"},
+      {"col": "speed_pct", "dir": "asc"}
+    ],
+    "filterRules": [
+      {"col": "state", "op": "=", "val": "TREND_UP", "val2": ""},
+      {"col": "adx1h", "op": ">=", "val": "25", "val2": ""},
+      {"col": "rsi1h", "op": ">=", "val": "53", "val2": ""},
+      {"col": "speed_pct", "op": "<=", "val": "50", "val2": ""},
+      {"col": "atrPct15", "op": "<=", "val": "3.0", "val2": ""}
+    ],
+    "combineMode": "AND",
+    "createdAt": "2026-01-09T00:00:00Z",
+    "updatedAt": "2026-03-14T00:00:00Z"
+  },
+  {
+    "name": "Short Trend - Strong Trailing",
+    "sortLevels": [
+      {"col": "state", "dir": "asc"},
+      {"col": "adx1h", "dir": "desc"},
+      {"col": "rsi1h", "dir": "asc"},
+      {"col": "speed_pct", "dir": "desc"},
+      {"col": "vol24h", "dir": "desc"}
+    ],
+    "filterRules": [
+      {"col": "state", "op": "=", "val": "TREND_DOWN", "val2": ""},
+      {"col": "adx1h", "op": ">=", "val": "30", "val2": ""},
+      {"col": "rsi1h", "op": "<=", "val": "40", "val2": ""},
+      {"col": "speed_pct", "op": ">=", "val": "25", "val2": ""},
+      {"col": "atrPct15", "op": "<=", "val": "3.0", "val2": ""}
+    ],
+    "combineMode": "AND",
+    "createdAt": "2026-01-09T00:00:00Z",
+    "updatedAt": "2026-03-14T00:00:00Z"
+  },
+  {
+    "name": "Short Trend - Moderate Fixed",
+    "sortLevels": [
+      {"col": "state", "dir": "asc"},
+      {"col": "adx1h", "dir": "desc"},
+      {"col": "rsi1h", "dir": "asc"},
+      {"col": "vol24h", "dir": "desc"},
+      {"col": "speed_pct", "dir": "asc"}
+    ],
+    "filterRules": [
+      {"col": "state", "op": "=", "val": "TREND_DOWN", "val2": ""},
+      {"col": "adx1h", "op": "between", "val": "25", "val2": "35"},
+      {"col": "rsi1h", "op": "<=", "val": "45", "val2": ""},
+      {"col": "speed_pct", "op": "<=", "val": "50", "val2": ""},
+      {"col": "atrPct15", "op": "<=", "val": "2.5", "val2": ""}
+    ],
+    "combineMode": "AND",
+    "createdAt": "2026-01-09T00:00:00Z",
+    "updatedAt": "2026-03-14T00:00:00Z"
+  },
+  {
+    "name": "Low BTC Impact - Diversified",
+    "sortLevels": [
+      {"col": "btc_impact", "dir": "desc"},
+      {"col": "btc_corr", "dir": "asc"},
+      {"col": "vol24h", "dir": "desc"},
+      {"col": "speed_pct", "dir": "asc"}
+    ],
+    "filterRules": [
+      {"col": "btc_impact", "op": "!=", "val": "high", "val2": ""},
+      {"col": "btc_impact", "op": "!=", "val": "medium", "val2": ""},
+      {"col": "btc_impact", "op": "!=", "val": "unknown", "val2": ""},
+      {"col": "vol24h", "op": ">=", "val": "8000000", "val2": ""}
+    ],
+    "combineMode": "AND",
+    "createdAt": "2026-01-09T00:00:00Z",
+    "updatedAt": "2026-01-09T00:00:00Z"
+  },
+  {
+    "name": "Transition - Setup",
+    "sortLevels": [
+      {"col": "state", "dir": "asc"},
+      {"col": "bbw15", "dir": "asc"},
+      {"col": "adx1h", "dir": "desc"},
+      {"col": "vol24h", "dir": "desc"}
+    ],
+    "filterRules": [
+      {"col": "state", "op": "=", "val": "TRANSITION", "val2": ""},
+      {"col": "bbw15", "op": "<=", "val": "8", "val2": ""},
+      {"col": "adx1h", "op": ">=", "val": "18", "val2": ""},
+      {"col": "speed_pct", "op": "<=", "val": "45", "val2": ""},
+      {"col": "vol24h", "op": ">=", "val": "10000000", "val2": ""}
+    ],
+    "combineMode": "AND",
+    "createdAt": "2026-01-09T00:00:00Z",
+    "updatedAt": "2026-03-14T00:00:00Z"
+  },
+  {
+    "name": "Volatile - Avoid",
+    "sortLevels": [
+      {"col": "state", "dir": "asc"},
+      {"col": "speed_pct", "dir": "desc"},
+      {"col": "atrPct15", "dir": "desc"},
+      {"col": "bbw15", "dir": "desc"},
+      {"col": "vol24h", "dir": "desc"}
+    ],
+    "filterRules": [
+      {"col": "state", "op": "=", "val": "VOLATILE", "val2": ""},
+      {"col": "speed_pct", "op": ">=", "val": "60", "val2": ""},
+      {"col": "atrPct15", "op": ">=", "val": "1.5", "val2": ""},
+      {"col": "bbw15", "op": ">=", "val": "20", "val2": ""}
+    ],
+    "combineMode": "OR",
+    "createdAt": "2026-01-09T00:00:00Z",
+    "updatedAt": "2026-03-14T00:00:00Z"
+  }
+]

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Debug{% endblock %}
+{% block content %}
+<h1 class="text-lg font-medium text-gray-200 mb-4">Debug View</h1>
+
+<!-- Health snapshot -->
+<div class="bg-slate-900 rounded-lg p-4 border border-slate-800 mb-4">
+    <div class="text-xs text-gray-500 mb-2">Latest Health Snapshot</div>
+    <pre class="text-xs text-gray-400 overflow-x-auto max-h-96 overflow-y-auto">{{ health | tojson(indent=2) if health else 'null' }}</pre>
+</div>
+
+<!-- All probe results -->
+<div class="bg-slate-900 rounded-lg border border-slate-800">
+    <div class="px-4 py-3 border-b border-slate-800">
+        <span class="text-sm font-medium text-gray-300">Latest Probe Results</span>
+    </div>
+    {% for pname, p in probes.items() %}
+    <details class="border-b border-slate-800 last:border-0">
+        <summary class="px-4 py-2 cursor-pointer hover:bg-slate-800/50 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full
+                    {% if p.status == 'ok' %}bg-emerald-400{% elif p.status == 'degraded' %}bg-yellow-400{% elif p.status == 'timeout' %}bg-orange-400{% else %}bg-red-400{% endif %}"></span>
+                <span class="text-sm text-gray-300">{{ pname }}</span>
+            </div>
+            <span class="text-xs text-gray-500">{{ p.latency_ms | round(1) }}ms</span>
+        </summary>
+        <div class="px-6 py-3 bg-slate-800/20">
+            <pre class="text-xs text-gray-400 overflow-x-auto">{{ p | tojson(indent=2) }}</pre>
+        </div>
+    </details>
+    {% endfor %}
+</div>
+{% endblock %}

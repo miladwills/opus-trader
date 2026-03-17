@@ -1,0 +1,37 @@
+[
+  {
+    "id": "backtest_bot_solusdt",
+    "symbol": "SOLUSDT",
+    "status": "running",
+    "mode": "short",
+    "profile": "normal",
+    "investment": 6.45,
+    "leverage": 11.0,
+    "lower_price": 86.3,
+    "upper_price": 90.72,
+    "grid_count": 10,
+    "target_grid_count": 10,
+    "range_mode": "dynamic",
+    "created_at": "2026-03-13T07:09:10.094607+00:00",
+    "started_at": "2026-03-13T07:09:10.094138+00:00",
+    "trading_env": "backtest",
+    "paper_trading": false,
+    "auto_direction": false,
+    "trailing_sl_enabled": false,
+    "tp_pct": 0.01,
+    "realized_pnl": 0.0,
+    "unrealized_pnl": 0.0,
+    "total_pnl": 0.0,
+    "auto_margin": {
+      "enabled": false
+    },
+    "neutral_volatility_gate_enabled": false,
+    "ai_advisor_enabled": false,
+    "neutral_grid_initialized": false,
+    "neutral_grid": {},
+    "replay_run_id": "bt_solusdt_20260313_070910_50083",
+    "control_version": 0,
+    "settings_version": 0,
+    "updated_at": "2026-03-13T07:09:10.094607+00:00"
+  }
+]

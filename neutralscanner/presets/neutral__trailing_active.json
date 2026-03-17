@@ -1,0 +1,21 @@
+{
+  "name": "Neutral - Trailing Active",
+  "sortLevels": [
+    {"col": "neutral", "dir": "desc"},
+    {"col": "speed_pct", "dir": "desc"},
+    {"col": "atrPct15", "dir": "desc"},
+    {"col": "bbw15", "dir": "desc"},
+    {"col": "vol24h", "dir": "desc"}
+  ],
+  "filterRules": [
+    {"col": "neutral", "op": "=", "val": "true", "val2": ""},
+    {"col": "speed_pct", "op": "between", "val": "20", "val2": "55"},
+    {"col": "atrPct15", "op": "between", "val": "0.3", "val2": "2.0"},
+    {"col": "bbw15", "op": "between", "val": "1", "val2": "20"},
+    {"col": "adx15", "op": "<=", "val": "28", "val2": ""},
+    {"col": "vol24h", "op": ">=", "val": "10000000", "val2": ""}
+  ],
+  "combineMode": "AND",
+  "createdAt": "2026-01-09T00:00:00Z",
+  "updatedAt": "2026-03-14T00:00:00Z"
+}

@@ -1,0 +1,12 @@
+{
+  "bots": {},
+  "global": {
+    "baseline_started_at": "2026-03-12T17:45:14.297518+00:00",
+    "epoch_id": "global:c4c96e1dc8",
+    "last_archive_path": "storage/exports/performance_reset/20260312T174514_297518Z.json",
+    "last_note": "starting from watchdog + ai layer",
+    "last_reset_at": "2026-03-12T17:45:14.297518+00:00"
+  },
+  "updated_at": "2026-03-12T17:45:14.297518+00:00",
+  "version": 1
+}

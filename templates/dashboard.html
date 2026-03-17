@@ -1,0 +1,2351 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>Bt: $0.00</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/css/dashboard.css">
+</head>
+
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  <!-- Navbar -->
+  <nav class="bg-slate-900 border-b border-slate-800 fixed top-0 left-0 right-0 z-50">
+    <div class="max-w-[1800px] mx-auto px-2 sm:px-4 py-2 sm:py-3 flex items-center justify-between flex-wrap gap-2">
+      <div class="flex items-center space-x-2 sm:space-x-4">
+        <h1 class="text-sm sm:text-xl font-bold text-emerald-400 navbar-title">⚡ <span class="hidden sm:inline">Opus
+            Trader <span class="font-medium text-slate-300">Live Console</span></span><span class="sm:hidden">Opus
+            Trader</span><span
+            class="ml-2 text-[10px] text-slate-500 font-mono">v1.2c</span></h1>
+      </div>
+      <div class="flex items-center flex-wrap gap-1 sm:gap-2 sm:space-x-4">
+        <div class="hidden sm:flex items-center space-x-2 text-xs text-slate-500">
+          <span id="navbar-clock" class="text-slate-300 font-mono">--:--:-- --</span>
+          <span class="text-slate-600">|</span>
+          <span>Updated:</span>
+          <span id="last-update-time" class="text-slate-400">-</span>
+        </div>
+        <div
+          class="flex items-center gap-2 px-2 py-1 rounded-lg border border-slate-700 bg-slate-800/80 shadow-lg shadow-black/20">
+          <span id="runnerStatusDot"
+            class="inline-block w-2.5 h-2.5 rounded-full bg-slate-500 shadow-[0_0_8px_rgba(100,116,139,0.45)]"
+            title="Runner status unknown"></span>
+          <span id="runnerStatusText" class="hidden md:inline text-[11px] font-mono text-slate-400">Runner: Checking</span>
+        </div>
+        <div class="relative">
+          <button id="btnReadyNotif" type="button" onclick="toggleReadyDropdown()"
+            class="px-2 py-1 text-xs font-medium rounded bg-emerald-700 hover:bg-emerald-600 text-white transition flex items-center"
+            title="Ready to trade">
+            <span class="sm:mr-1">🎯</span>
+            <span class="hidden sm:inline">Ready</span>
+            <span id="ready-notif-count"
+              class="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold rounded-full bg-slate-900 text-slate-400 border border-slate-600">0</span>
+          </button>
+          <div id="ready-dropdown"
+            class="hidden absolute right-0 max-[480px]:right-auto max-[480px]:left-0 top-full mt-1 w-72 max-[480px]:w-64 rounded-xl border border-slate-700 bg-slate-900/98 shadow-2xl shadow-black/60 backdrop-blur z-[60] overflow-hidden">
+            <div class="px-3 py-2 border-b border-slate-800 flex items-center justify-between">
+              <span class="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-400">Ready To Trade</span>
+              <span id="ready-dropdown-count" class="text-[10px] text-slate-500">0</span>
+            </div>
+            <div id="ready-dropdown-list" class="max-h-[240px] overflow-y-auto px-2 py-1.5">
+              <span class="text-xs text-slate-600 block py-2 text-center">No setups ready</span>
+            </div>
+          </div>
+        </div>
+        <button id="btnBotStatus"
+          class="px-2 py-1 text-xs font-medium rounded bg-indigo-600 hover:bg-indigo-500 text-white transition flex items-center"
+          title="View bot status and logs">
+          <span class="sm:mr-1">📊</span>
+          <span class="hidden sm:inline">Status</span>
+        </button>
+        <span id="connection-status"
+          class="px-2 py-1 text-xs font-medium rounded bg-slate-700 text-slate-400 flex items-center">
+          <span class="inline-block w-2 h-2 bg-slate-400 rounded-full mr-1"></span><span
+            class="hidden sm:inline">Connecting...</span>
+        </span>
+        <button id="sound-toggle" onclick="toggleSound()"
+          class="px-2 py-1 text-xs font-medium rounded bg-emerald-600 text-white hover:bg-emerald-500 transition flex items-center"
+          title="Click to enable/disable sound alerts">
+          <span id="sound-icon">🔊</span>
+          <span id="sound-label" class="ml-1 hidden sm:inline">Sound On</span>
+        </button>
+        <a href="https://neutralscanner.madowlab.online/" target="_blank" rel="noopener noreferrer"
+          class="px-2 py-1 text-xs font-medium rounded bg-cyan-600 hover:bg-cyan-500 text-white transition flex items-center"
+          title="Open Neutral Scanner in a new tab">
+          <span class="sm:mr-1">🧭</span>
+          <span class="hidden sm:inline">Scanner</span>
+        </a>
+        <button id="btnAnalytics" onclick="openAnalyticsModal()"
+          class="px-2 py-1 text-xs font-medium rounded bg-emerald-600 hover:bg-emerald-500 text-white transition flex items-center"
+          title="View detailed performance analytics">
+          <span class="sm:mr-1">📈</span>
+          <span class="hidden sm:inline">Analytics</span>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Flash Crash Protection Alert Banner (Smart Feature #12) -->
+  <div id="flash-crash-banner" class="hidden bg-red-900/90 border-b-2 border-red-500 px-4 py-3">
+    <div class="max-w-[1800px] mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="text-2xl animate-pulse">🚨</span>
+        <div>
+          <p class="text-red-100 font-bold text-sm">FLASH CRASH PROTECTION ACTIVE</p>
+          <p id="flash-crash-details" class="text-red-300 text-xs">All bots paused due to extreme market volatility</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <span id="flash-crash-time" class="text-red-400 text-xs"></span>
+        <span class="inline-block w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+      </div>
+    </div>
+  </div>
+
+  <main class="max-w-[1800px] mx-auto px-4 py-2 space-y-2 pt-20 sm:pt-22">
+    <!-- Monitoring Hero -->
+    <section class="space-y-2">
+      <div class="flex flex-col gap-2 xl:flex-row xl:items-stretch">
+        <div id="emergency-stop-section" class="w-full flex-col gap-2.5 xl:w-[320px] xl:flex-none" style="display: none;">
+          <div id="emergency-stop-card" class="w-full rounded-2xl border border-red-500/50 bg-red-950/55 p-4 shadow-2xl shadow-red-950/40 h-full">
+            <div class="section-eyebrow text-red-300">Emergency</div>
+            <button id="btn-emergency-stop" onclick="emergencyStop()"
+              class="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border-2 border-red-400 bg-red-600 px-4 py-3 text-base font-black text-white shadow-2xl shadow-red-900/50 transition hover:bg-red-500 active:bg-red-700 sm:gap-3 sm:px-8 sm:py-4 sm:text-xl">
+              <span class="text-xl sm:text-3xl">🚨</span>
+              <span>EMERGENCY STOP</span>
+              <span class="hidden text-xl sm:inline sm:text-3xl">🚨</span>
+            </button>
+            <!-- Ready To Trade relocated to Activity Strip -->
+          </div>
+          <div id="emergency-restart-panel" class="hidden w-full rounded-2xl border border-emerald-500/25 bg-emerald-950/20 p-3.5 shadow-xl shadow-emerald-950/20">
+            <div class="section-eyebrow text-emerald-300">Quick Restart</div>
+            <div id="emergency-restart-list" class="mt-3 space-y-2"></div>
+          </div>
+        </div>
+
+        <div class="grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <div class="monitor-card min-w-0 px-3.5 py-2.5 sm:px-4">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="section-eyebrow text-emerald-300">Assets</p>
+                <h2 class="mt-1 text-lg font-semibold text-white">Total Assets</h2>
+              </div>
+              <span class="text-xl text-emerald-300">💰</span>
+            </div>
+            <div class="mt-2 flex items-end justify-between gap-2">
+              <div class="text-white">$<span id="summary-total-assets" class="value-transition">0.00</span></div>
+              <div class="inline-flex items-end gap-1.5">
+                <span class="text-[9px] font-medium uppercase tracking-[0.2em] text-slate-500 sm:text-[10px]">Available</span>
+                <span id="pos-available-balance" class="text-4xl font-semibold leading-none text-white underline decoration-slate-400/70 underline-offset-4 sm:text-5xl">$0.00</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="monitor-card min-w-0 px-3.5 py-2.5 sm:px-4">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="section-eyebrow text-amber-300">Unrealized</p>
+                <h2 class="mt-1 text-lg font-semibold text-white">Open Exposure</h2>
+              </div>
+              <span class="text-xl text-amber-300">⚡</span>
+            </div>
+            <div class="mt-3 flex flex-wrap items-end gap-2">
+              <span id="summary-unrealized-pnl" class="value-transition">$0.00</span>
+              <span id="summary-open-exposure-value" class="text-sm font-medium text-slate-400 sm:text-base">$0.00</span>
+              <span id="summary-open-exposure-mode"></span>
+            </div>
+            <!-- Mobile: Running bots inlined under Open Exposure -->
+            <div id="running-bots-mobile-wrap" class="mt-2 border-t border-slate-700/50 pt-2 sm:hidden">
+              <span class="section-eyebrow text-slate-400" style="margin:0;font-size:9px">Running Now</span>
+              <div id="running-bots-list-mobile" class="mt-1 flex flex-wrap gap-1.5">
+                <span class="text-xs text-slate-600">No bots running</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="monitor-card hidden min-w-0 px-3.5 py-2.5 sm:block sm:px-4">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="section-eyebrow text-emerald-300">Today</p>
+                <h2 class="mt-1 text-lg font-semibold text-white">Session Net</h2>
+              </div>
+              <span class="text-xl text-emerald-300">📈</span>
+            </div>
+            <div class="mt-3"><span id="summary-today-net" class="value-transition">$0.00</span></div>
+            <div class="mt-2.5 flex flex-wrap gap-2.5 text-[11px]">
+              <span class="text-emerald-400">✓ <span id="summary-today-wins">0</span></span>
+              <span class="text-red-400">✗ <span id="summary-today-losses">0</span></span>
+            </div>
+          </div>
+
+          <div class="monitor-card hidden min-w-0 px-3.5 py-2.5 sm:block sm:px-4">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="section-eyebrow text-cyan-300">Realized</p>
+                <h2 class="mt-1 text-lg font-semibold text-white">Closed PnL</h2>
+              </div>
+              <span class="text-xl text-cyan-300">💠</span>
+            </div>
+            <div class="mt-3"><span id="summary-realized-pnl" class="value-transition">$0.00</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="milestone-banner" class="milestone-banner hidden rounded-2xl border border-emerald-400/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+        <span id="milestone-banner-text">Milestone update</span>
+      </div>
+
+      <!-- Activity Strip: detail relocated from KPI cards -->
+      <div class="activity-strip">
+        <div class="dashboard-card hidden sm:block">
+          <div class="flex flex-col gap-1.5">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="section-eyebrow text-slate-400" style="margin:0">Running Now</span>
+                <div id="direction-change-alert"
+                  class="hidden text-[9px] font-semibold text-red-400 px-1.5 py-0.5 rounded border border-red-500/30 bg-red-900/20"></div>
+              </div>
+              <label class="flex items-center gap-1 cursor-pointer select-none">
+                <input type="checkbox" id="auto-stop-direction"
+                  class="w-3 h-3 rounded border-slate-600 text-red-500 focus:ring-red-500 focus:ring-offset-slate-900">
+                <span class="text-[9px] text-red-400/80">Dir guard</span>
+              </label>
+            </div>
+            <div id="running-bots-list" class="flex flex-wrap gap-1.5">
+              <span class="text-xs text-slate-600">No bots running</span>
+            </div>
+          </div>
+        </div>
+        <div class="dashboard-card">
+          <div class="flex flex-col gap-1">
+            <p class="section-eyebrow text-slate-400 cursor-pointer hover:text-cyan-400 transition-colors group" style="margin:0" onclick="openAllPnlModal()" title="Click to view all closed PnL history">Recent Closed PnL <span class="text-[8px] text-slate-600 group-hover:text-cyan-500 ml-0.5 transition-colors">View All ›</span></p>
+            <div class="relative max-h-[160px] overflow-y-auto custom-scrollbar">
+              <table class="w-full text-[10px]">
+                <thead class="sticky top-0" style="background:var(--surface-1,#0f172a)">
+                  <tr class="text-slate-500">
+                    <th class="pb-1 text-left font-medium">Time</th>
+                    <th class="pb-1 text-left font-medium">Symbol</th>
+                    <th class="pb-1 text-right font-medium">PnL</th>
+                    <th class="pb-1 text-right font-medium">Balance</th>
+                    <th class="pb-1 text-right font-medium">Mode</th>
+                  </tr>
+                </thead>
+                <tbody id="assets-recent-pnl">
+                  <tr><td colspan="5" class="py-2 text-center text-slate-600">No trades yet</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="dashboard-card">
+          <div class="flex flex-col gap-1">
+            <div class="flex items-center justify-between gap-2">
+              <span class="section-eyebrow text-emerald-400" style="margin:0">Ready To Trade</span>
+              <div id="ready-mode-filters" class="flex flex-wrap gap-1"></div>
+            </div>
+            <div id="emergency-ready-list" class="text-xs text-slate-300 max-h-[160px] overflow-y-auto">No setups ready</div>
+          </div>
+        </div>
+      </div>
+
+      <section class="dashboard-workspace-grid">
+
+    <!-- PRIMARY: Active Bots -->
+    <section id="active-bots-table-section" class="workspace-slot workspace-slot--bots bots-terminal-panel">
+      <div class="bots-terminal__inner">
+      <div class="lower-section-header px-4 py-3 flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+        <div class="flex items-center space-x-3">
+          <h2 class="text-lg font-semibold text-white">Active Bots</h2>
+          <span class="lower-toolbar-chip border-emerald-400/25 bg-emerald-500/10 text-emerald-200">
+            <span class="inline-block w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1 live-pulse"></span>
+            LIVE
+          </span>
+          <span id="active-bots-stale-indicator" class="hidden lower-toolbar-chip border-amber-400/30 bg-amber-500/10 text-amber-100" title="">
+            Snapshot stale
+          </span>
+        </div>
+        <div class="flex items-center space-x-3">
+          <input id="active-bots-search" type="text" placeholder="SEARCH" oninput="filterBotListBySearch(this.value)" style="width:180px;padding:6px 12px;font-size:11px;text-transform:uppercase;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:6px;color:#e2e8f0;outline:none;height:32px;" />
+          <button onclick="clearActiveBotSearch()" class="lower-console-button lower-console-button--accent" style="height:32px;line-height:1;padding:6px 12px;">Clear</button>
+          <button onclick="removeAllBots()" class="lower-console-button lower-console-button--danger">🗑 Remove
+            All</button>
+        </div>
+      </div>
+      <div class="bots-terminal-layout">
+        <div class="bots-terminal-summary bots-terminal-summary--glance">
+          <div class="bots-summary-kpis">
+            <button onclick="filterBotList('all')" class="bot-filter-chip lower-toolbar-chip" data-filter="all">All <strong id="active-bots-total">0</strong></button>
+            <button onclick="filterBotList('running')" class="bot-filter-chip bot-filter-chip--active lower-toolbar-chip text-cyan-100" data-filter="running">Working Now <strong id="active-bots-running">0</strong></button>
+            <button onclick="filterBotList('ready')" class="bot-filter-chip lower-toolbar-chip text-emerald-100" data-filter="ready"><strong id="active-bots-ready">0</strong> ready now</button>
+            <button onclick="filterBotList('trigger')" class="bot-filter-chip lower-toolbar-chip text-emerald-200" data-filter="trigger">Trigger <strong id="active-bots-trigger">0</strong></button>
+            <button onclick="filterBotList('armed')" class="bot-filter-chip lower-toolbar-chip text-cyan-100" data-filter="armed">Armed <strong id="active-bots-armed">0</strong></button>
+            <button onclick="filterBotList('watch')" class="bot-filter-chip lower-toolbar-chip text-amber-100" data-filter="watch">Watch <strong id="active-bots-watch">0</strong></button>
+            <button onclick="filterBotList('blocked')" class="bot-filter-chip lower-toolbar-chip text-rose-100" data-filter="blocked">Blocked <strong id="active-bots-blocked">0</strong></button>
+            <button onclick="filterBotList('limited')" class="bot-filter-chip lower-toolbar-chip text-slate-300" data-filter="limited">Preview/Stale <strong id="active-bots-limited">0</strong></button>
+            <button onclick="filterBotList('recent_stopped')" class="bot-filter-chip lower-toolbar-chip text-slate-400" data-filter="recent_stopped">Recent Stops <strong id="active-bots-recent-stopped">0</strong></button>
+          </div>
+        </div>
+        <div id="active-bots-list" class="bots-ops-list">
+          <div class="ops-empty-state">
+            <strong>No bots configured</strong>
+            Add a bot from the workbench.
+          </div>
+        </div>
+      </div>
+      </div>
+    </section>
+
+    <!-- SIDEBAR: Intelligence panels stacked vertically -->
+    <div class="workspace-slot workspace-slot--sidebar workspace-sidebar">
+
+      <div class="hidden" aria-hidden="true">
+        <span id="summary-available-balance">0.00</span>
+        <span id="summary-funding-balance">0.00</span>
+        <span id="pos-wallet-balance">$0.00</span>
+        <span id="summary-positions-count">0</span>
+        <span id="summary-positions-longs">0</span>
+        <span id="summary-positions-shorts">0</span>
+      </div>
+
+      <!-- 1. Exposure Monitor (Open Positions) -->
+      <section id="active-bots-section" class="workspace-slot workspace-slot--positions positions-terminal bg-slate-900/80 rounded-xl border border-slate-800 backdrop-blur overflow-hidden">
+        <div class="positions-terminal__inner">
+        <div class="px-3 py-2 border-b border-slate-800/90">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <h2 class="text-sm font-semibold text-white">Positions</h2>
+              <span id="pos-total-pnl" class="text-sm font-semibold text-cyan-300">$0.00</span>
+            </div>
+            <button onclick="refreshPositions()" class="positions-refresh-btn text-[10px] px-2 py-1">↻</button>
+          </div>
+          <!-- Hidden elements for JS compatibility -->
+          <span id="pos-total-count" class="hidden">0</span>
+          <span id="pos-long-count" class="hidden">0</span>
+          <span id="pos-short-count" class="hidden">0</span>
+          <span id="pos-profit-sum" class="hidden">0.00</span>
+          <span id="pos-loss-sum" class="hidden">0.00</span>
+        </div>
+        <div class="positions-terminal__body">
+          <div id="positions-board" class="positions-board">
+            <div class="positions-empty-state">
+              <strong>Loading positions</strong>
+              Waiting for bridge data.
+            </div>
+          </div>
+        </div>
+        </div>
+      </section>
+
+      <!-- Neutral Scanner (under positions) -->
+      <section class="workspace-slot workspace-slot--scanner">
+        <div id="neutral-scanner-section" class="bg-slate-900/80 rounded-xl border border-slate-800 backdrop-blur overflow-hidden">
+          <div class="px-3 py-2 border-b border-slate-800/90">
+            <div class="flex items-center justify-between gap-2">
+              <h2 class="text-sm font-semibold text-white">Neutral Scanner</h2>
+            </div>
+            <div class="flex items-center gap-2 mt-2">
+              <input type="text" id="scanner-symbols" placeholder="BTCUSDT, ETHUSDT, ..."
+                class="select-all-on-click flex-1 px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-xs placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+              <button type="button" id="btn-scan-neutral"
+                class="px-4 py-1.5 text-xs font-semibold rounded bg-cyan-600 hover:bg-cyan-500 text-white transition whitespace-nowrap">Scan</button>
+            </div>
+            <div class="flex items-center gap-1 flex-wrap mt-1.5">
+              <span class="text-[10px] text-slate-500">Recent:</span>
+              <div id="recent-scans-container" class="flex items-center gap-1 flex-wrap">
+                <span class="text-slate-500 text-[10px]">No recent scans</span>
+              </div>
+              <button type="button" onclick="clearRecentScans()" class="text-[10px] text-slate-600 hover:text-slate-400" title="Clear">✕</button>
+            </div>
+          </div>
+          <div class="p-2">
+            <div id="scanner-body" class="scanner-results-board">
+              <div class="scanner-empty-state"><strong>Click Scan to find opportunities</strong></div>
+            </div>
+            <div id="entry-zone-card" class="hidden px-3 py-2 border-t border-slate-800"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Market Heat Map -->
+      <section class="workspace-slot workspace-slot--heatmap">
+        <div class="bg-slate-900/80 rounded-xl border border-slate-800 backdrop-blur overflow-hidden">
+          <div class="px-3 py-2 border-b border-slate-800/90 flex items-center justify-between">
+            <h2 class="text-sm font-semibold text-white">Market Heat Map</h2>
+            <div class="flex items-center gap-2">
+              <span id="heatmap-updated" class="text-[9px] text-slate-500"></span>
+              <button onclick="refreshHeatMap()" class="positions-refresh-btn text-[10px] px-2 py-1">↻</button>
+            </div>
+          </div>
+          <div id="symbol-heat-map" class="p-2">
+            <div class="text-center text-slate-500 text-xs py-4">Loading heat map...</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- (Ready To Trade section removed — consolidated into emergency/restart cards) -->
+      <!-- (Realized Flow section removed — accessible via "Recent Closed PnL" click → allPnlModal) -->
+
+      <!-- 4. Signal Desk (Predictions) -->
+      <section class="workspace-slot workspace-slot--predictions">
+        <div class="bg-slate-900/80 rounded-xl border border-slate-800 backdrop-blur overflow-hidden">
+        <div class="px-3 py-2 border-b border-slate-800/90 flex items-center justify-between">
+          <h2 class="text-sm font-semibold text-white">Predictions</h2>
+          <button onclick="refreshPredictions()" class="positions-refresh-btn text-[10px] px-2 py-1">
+            <span id="predictions-loading" class="hidden">⏳</span>
+            <span>↻</span>
+          </button>
+        </div>
+        <div id="predictions-container" class="predictions-terminal__body">
+          <div class="predictions-terminal__inner">
+            <div id="predictions-empty" class="predictions-empty-state">
+              <span class="predictions-empty-state__icon">◌</span>
+              <strong>No running bots to analyze</strong>
+              Start a bot to populate this panel.
+            </div>
+            <div id="predictions-grid" class="hidden predictions-card-grid">
+              <!-- Prediction cards will be inserted here -->
+            </div>
+          </div>
+        </div>
+        </div>
+      </section>
+
+      <!-- 5. Side Intelligence (Scalp Safety) -->
+      <section class="workspace-slot workspace-slot--scalp">
+        <div class="bg-slate-900/80 rounded-xl border border-slate-800 backdrop-blur overflow-hidden">
+          <div class="px-3 py-2 border-b border-slate-800/90">
+            <h2 class="text-sm font-semibold text-white">Scalp Safety</h2>
+          </div>
+          <div class="scalp-safety-panel__body">
+            <div class="scalp-safety-panel__grid">
+              <div class="scalp-safety-metric">
+                <div class="scalp-safety-metric__label">Adaptive Min</div>
+                <div id="scalp-guard-min-profit" class="scalp-safety-metric__value">$-</div>
+                <div class="scalp-safety-metric__hint">Current minimum profit floor after volatility and scalp guard adjustments.</div>
+              </div>
+              <div class="scalp-safety-metric">
+                <div class="scalp-safety-metric__label">Status</div>
+                <div id="scalp-guard-status" class="scalp-safety-metric__value text-slate-200">-</div>
+                <div class="scalp-safety-metric__hint">Guard state and whether scalp exits are currently relaxed, normal, or defensive.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- WORKBENCH: Bot Configuration + Neutral Scanner (full width) -->
+    <section class="workspace-slot workspace-slot--workbench lower-workbench-grid">
+      <!-- Bot Configuration Form -->
+      <div class="config-workbench">
+        <div class="lower-section-header px-4 py-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p class="section-eyebrow text-emerald-300">Control Surface</p>
+              <h2 class="mt-1 text-lg font-semibold text-white">Bot Configuration</h2>
+            </div>
+            <span class="lower-toolbar-chip text-emerald-100">Primary workbench</span>
+          </div>
+        </div>
+        <div class="workbench-body">
+        <form id="bot-form" class="space-y-4 config-panel-shell">
+          <input type="hidden" id="bot-id" />
+          <input type="hidden" id="bot-settings-version" />
+
+          <section id="bot-preset-section" class="rounded-xl border border-cyan-400/20 bg-cyan-500/8 p-3">
+            <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h3 id="bot-preset-heading" class="text-sm font-semibold text-white">New Bot Presets</h3>
+                <p id="bot-preset-subtitle" class="mt-1 text-[11px] text-cyan-100/80"></p>
+              </div>
+              <div class="flex w-full flex-col gap-2 sm:flex-row lg:w-auto">
+                <select id="bot-preset-select"
+                  class="w-full min-w-[220px] px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                  <option value="manual_blank">Manual Blank</option>
+                </select>
+                <button type="button" id="bot-preset-auto-recommend"
+                  class="px-3 py-2 rounded-lg border border-cyan-400/30 bg-cyan-500/14 text-sm font-medium text-cyan-100 hover:bg-cyan-500/20 transition">
+                  Auto Recommend
+                </button>
+                <button type="button" id="bot-preset-rename-selected"
+                  class="hidden px-3 py-2 rounded-lg border border-slate-600 bg-slate-800/70 text-sm font-medium text-slate-100 hover:bg-slate-700 transition">
+                  Rename Preset
+                </button>
+                <button type="button" id="bot-preset-delete-selected"
+                  class="hidden px-3 py-2 rounded-lg border border-rose-400/30 bg-rose-500/10 text-sm font-medium text-rose-100 hover:bg-rose-500/16 transition">
+                  Delete Preset
+                </button>
+              </div>
+            </div>
+            <div id="bot-preset-summary" class="mt-3 rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-3 text-sm text-slate-300">
+              <div class="text-[11px] uppercase tracking-[0.18em] text-cyan-200/80">Preset Summary</div>
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                <div id="bot-preset-summary-name" class="text-sm font-semibold text-white">Manual Blank</div>
+                <span id="bot-preset-summary-confidence" class="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/80 px-2 py-1 text-[11px] font-semibold text-slate-200">LOW</span>
+              </div>
+              <div id="bot-preset-summary-meta" class="mt-1 text-[11px] text-slate-400"></div>
+              <div id="bot-preset-summary-reason" class="mt-1 text-[12px] text-cyan-100/80">Editable baseline defaults with no forced preset.</div>
+              <div id="bot-preset-sizing-warning" class="mt-2 hidden rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-100"></div>
+              <div id="bot-preset-summary-reasons" class="mt-2 flex flex-wrap gap-2"></div>
+              <div id="bot-preset-summary-signals" class="mt-2 flex flex-wrap gap-2"></div>
+              <div id="bot-preset-summary-fields" class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2"></div>
+              <div id="bot-preset-summary-alternatives" class="mt-3 text-[11px] text-slate-400"></div>
+            </div>
+          </section>
+
+          <div>
+            <label class="block text-sm font-medium text-slate-400 mb-1">Symbol</label>
+            <input type="text" id="bot-symbol" placeholder="BTCUSDT"
+              class="select-all-on-click w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-sm font-medium text-slate-400 mb-1">Lower Price</label>
+              <input type="number" id="bot-lower" step="any" inputmode="decimal" placeholder="0.00"
+                class="select-all-on-click w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white font-mono placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-400 mb-1">Upper Price</label>
+              <input type="number" id="bot-upper" step="any" inputmode="decimal" placeholder="0.00"
+                class="select-all-on-click w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white font-mono placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-sm font-medium text-slate-400 mb-1">Investment (USDT)</label>
+              <input type="number" id="bot-investment" step="any" placeholder="Auto from balance"
+                class="select-all-on-click w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+              <p id="min-investment-display" class="text-[11px] text-slate-500 mt-1"></p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-400 mb-1">Leverage</label>
+              <input type="number" id="bot-leverage" step="1" value="3" min="1" max="100"
+                class="select-all-on-click w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-sm font-medium text-slate-400 mb-1">Configured Mode</label>
+              <select id="bot-mode"
+                class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                <option value="neutral">Neutral</option>
+                <option value="neutral_classic_bybit">Neutral Classic (Bybit)</option>
+                <option value="long">Long</option>
+                <option value="short">Short</option>
+                <option value="scalp_pnl">💰 Scalp PnL</option>
+                <option value="scalp_market">⚡ Scalp Market</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-400 mb-1">Profile</label>
+              <select id="bot-profile"
+                class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                <option value="normal">Normal</option>
+                <option value="scalp">Scalp</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label class="block text-sm font-medium text-slate-400 mb-1">Mode Policy</label>
+              <select id="bot-mode-policy"
+                class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                <option value="locked">Locked</option>
+                <option value="suggest_only">Suggest Only</option>
+                <option value="runtime_auto_switch_non_persistent">Runtime Auto Switch</option>
+              </select>
+            </div>
+            <div class="sm:col-span-2 rounded-xl border border-slate-800 bg-slate-900/35 px-3 py-3">
+              <div class="text-[11px] uppercase tracking-[0.18em] text-slate-500">Runtime View</div>
+              <div id="bot-mode-runtime-summary" class="mt-1 text-sm font-medium text-white">Saved mode stays authoritative.</div>
+              <div id="bot-mode-runtime-comparison" class="mt-2 text-[11px] leading-relaxed text-slate-400"></div>
+            </div>
+          </div>
+
+          <!-- Scalp PnL Info Panel (shown when scalp_pnl mode selected) -->
+          <div id="scalp-pnl-info" class="hidden p-3 bg-amber-900/30 border border-amber-700/50 rounded-lg">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-lg">💰</span>
+              <span class="text-sm font-medium text-amber-400">Scalp Unrealized PnL Mode</span>
+            </div>
+          </div>
+
+          <!-- Scalp Market Info Panel (shown when scalp_market mode selected) -->
+          <div id="scalp-market-info" class="hidden p-3 bg-cyan-900/30 border border-cyan-700/50 rounded-lg">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-lg">⚡</span>
+              <span class="text-sm font-medium text-cyan-400">Market Order Scalping</span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-sm font-medium text-slate-400 mb-1">Range Mode</label>
+              <select id="bot-range-mode"
+                class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                <option value="fixed">Fixed</option>
+                <option value="dynamic">Dynamic</option>
+                <option value="trailing">Trailing</option>
+              </select>
+            </div>
+              <!-- Grid Distribution (Smart Feature) -->
+              <div>
+                <label class="block text-xs text-slate-500 mb-1">Grid Distribution</label>
+                <select id="bot-grid-distribution"
+                  class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white text-sm">
+                  <option value="clustered">Smart (concentrated near price)</option>
+                  <option value="balanced">Equal spacing</option>
+                  <option value="buy_heavy">Buy-heavy (more buy levels)</option>
+                  <option value="sell_heavy">Sell-heavy (more sell levels)</option>
+                </select>
+              </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-400 mb-1">Grid Count</label>
+              <input type="number" id="bot-grids" step="1" min="3" max="500" value="10"
+                class="select-all-on-click w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+              <p id="grid-space-display" class="text-[11px] text-slate-500 mt-1"></p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-sm font-medium text-slate-400 mb-1">Auto Stop (USDT)</label>
+              <input type="number" id="bot-auto-stop" step="any" placeholder="Optional"
+                class="select-all-on-click w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+            </div>
+            <div>
+              <label for="bot-tp-pct" class="block text-sm font-medium text-slate-400 mb-1">Global TP %</label>
+              <input type="number" id="bot-tp-pct" step="0.1" min="0" placeholder="e.g. 1.5"
+                class="select-all-on-click w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+              <p id="tp-usdt-display" class="text-[11px] text-emerald-400 mt-1 font-medium"></p>
+            </div>
+          </div>
+
+          <div>
+            <label for="bot-balance-target" class="block text-sm font-medium text-slate-400 mb-1">Balance Target
+              (USDT)</label>
+            <input type="number" id="bot-balance-target" step="0.1" min="0" placeholder="e.g. 25.0"
+              class="select-all-on-click w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+          </div>
+
+          <section id="bot-session-timer-section" class="rounded-xl border border-slate-800 bg-slate-900/35 p-3">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <h3 class="text-sm font-semibold text-white">Trading Session Timer</h3>
+              </div>
+              <label class="flex items-center gap-2 text-sm text-slate-300">
+                <input type="checkbox" id="bot-session-timer-enabled"
+                  class="w-4 h-4 bg-slate-800 border-slate-700 rounded text-cyan-500 focus:ring-cyan-500" />
+                <span>Enabled</span>
+              </label>
+            </div>
+
+            <div id="bot-session-timer-fields" class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label for="bot-session-start-at" class="block text-xs font-medium text-slate-400 mb-1">Starts At</label>
+                <input type="datetime-local" id="bot-session-start-at"
+                  class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+              </div>
+              <div>
+                <label for="bot-session-stop-at" class="block text-xs font-medium text-slate-400 mb-1">Ends At</label>
+                <input type="datetime-local" id="bot-session-stop-at"
+                  class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+              </div>
+              <div>
+                <label for="bot-session-no-new-entries-before-stop-min" class="block text-xs font-medium text-slate-400 mb-1">No New Entries Before Stop (min)</label>
+                <input type="number" id="bot-session-no-new-entries-before-stop-min" step="1" min="0" placeholder="15"
+                  class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+              </div>
+              <div>
+                <label for="bot-session-end-mode" class="block text-xs font-medium text-slate-400 mb-1">End Mode</label>
+                <select id="bot-session-end-mode"
+                  class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                  <option value="hard_stop">Hard Stop</option>
+                  <option value="soft_stop">Soft Stop</option>
+                  <option value="green_grace_then_stop">Green Grace Then Stop</option>
+                </select>
+              </div>
+              <div id="bot-session-green-grace-row">
+                <label for="bot-session-green-grace-min" class="block text-xs font-medium text-slate-400 mb-1">Green Grace (min)</label>
+                <input type="number" id="bot-session-green-grace-min" step="1" min="0" placeholder="5"
+                  class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+              </div>
+              <div>
+                <label for="bot-session-force-close-max-loss-pct" class="block text-xs font-medium text-slate-400 mb-1">Force-Close Max Loss %</label>
+                <input type="number" id="bot-session-force-close-max-loss-pct" step="0.1" min="0" placeholder="Optional"
+                  class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+              </div>
+            </div>
+
+            <div class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <label class="flex items-center gap-2 text-sm text-slate-300">
+                <input type="checkbox" id="bot-session-cancel-pending-orders-on-end"
+                  class="w-4 h-4 bg-slate-800 border-slate-700 rounded text-cyan-500 focus:ring-cyan-500" />
+                <span>Cancel pending opening orders on end</span>
+              </label>
+              <label class="flex items-center gap-2 text-sm text-slate-300">
+                <input type="checkbox" id="bot-session-reduce-only-on-end"
+                  class="w-4 h-4 bg-slate-800 border-slate-700 rounded text-cyan-500 focus:ring-cyan-500" />
+                <span>Reduce-only on end</span>
+              </label>
+            </div>
+
+            <div id="bot-session-runtime-summary" class="mt-3 grid grid-cols-2 gap-2 text-[11px] text-slate-400 sm:grid-cols-3">
+              <div class="rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2">
+                <div class="text-[10px] uppercase tracking-[0.12em] text-slate-500">State</div>
+                <div id="bot-session-runtime-state" class="mt-1 text-sm font-semibold text-white">Inactive</div>
+              </div>
+              <div class="rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2">
+                <div class="text-[10px] uppercase tracking-[0.12em] text-slate-500">Starts</div>
+                <div id="bot-session-runtime-starts" class="mt-1 text-sm font-semibold text-white">-</div>
+              </div>
+              <div class="rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2">
+                <div class="text-[10px] uppercase tracking-[0.12em] text-slate-500">Ends</div>
+                <div id="bot-session-runtime-ends" class="mt-1 text-sm font-semibold text-white">-</div>
+              </div>
+              <div class="rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2">
+                <div class="text-[10px] uppercase tracking-[0.12em] text-slate-500">No New Entries</div>
+                <div id="bot-session-runtime-no-new" class="mt-1 text-sm font-semibold text-white">Inactive</div>
+              </div>
+              <div class="rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2">
+                <div class="text-[10px] uppercase tracking-[0.12em] text-slate-500">End Mode</div>
+                <div id="bot-session-runtime-end-mode" class="mt-1 text-sm font-semibold text-white">Hard Stop</div>
+              </div>
+              <div class="rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2">
+                <div class="text-[10px] uppercase tracking-[0.12em] text-slate-500">Grace / Complete</div>
+                <div id="bot-session-runtime-grace" class="mt-1 text-sm font-semibold text-white">-</div>
+              </div>
+            </div>
+          </section>
+
+          <div class="flex flex-col gap-2">
+            <div class="section-eyebrow mt-1" style="font-size:var(--fs-2xs); color:rgb(148 163 184);">Intelligence</div>
+            <div id="bot-auto-direction-row" class="flex items-center space-x-2">
+              <input type="checkbox" id="bot-auto-direction"
+                class="w-4 h-4 bg-slate-800 border-slate-700 rounded text-purple-500 focus:ring-purple-500" />
+              <label for="bot-auto-direction" class="text-sm text-slate-400 cursor-pointer">Auto Direction
+                (Multi-Signal Trend Engine)</label>
+            </div>
+
+            <div id="bot-breakout-confirmed-entry-row" class="flex items-start justify-between gap-3">
+              <div class="flex items-start space-x-2">
+                <input type="checkbox" id="bot-breakout-confirmed-entry"
+                  class="mt-0.5 w-4 h-4 bg-slate-800 border-slate-700 rounded text-emerald-500 focus:ring-emerald-500" />
+                <div>
+                  <label for="bot-breakout-confirmed-entry" class="text-sm text-slate-400 cursor-pointer">
+                    Breakout-confirmed entry
+                  </label>
+                </div>
+              </div>
+              <span class="pt-0.5 text-[10px] text-slate-500 whitespace-nowrap">Long/Short only</span>
+            </div>
+
+            <!-- Auto-Pilot (Feature #20) -->
+            <div class="flex items-center space-x-2">
+              <input type="checkbox" id="bot-auto-pilot" 
+                class="w-4 h-4 bg-slate-800 border-slate-700 rounded text-indigo-500 focus:ring-indigo-500" />
+              <label for="bot-auto-pilot"
+                class="text-sm font-bold text-indigo-400 cursor-pointer flex items-center gap-1">
+                <span>🤖 Auto-Pilot Mode</span>
+                <span class="px-1.5 py-0.5 rounded-full bg-indigo-500/20 text-[10px] uppercase">Smart</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Auto-Pilot Info Panel -->
+          <div id="autopilot-info" class="hidden p-3 bg-indigo-900/30 border border-indigo-700/50 rounded-lg">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-lg">🤖</span>
+              <span class="text-sm font-medium text-indigo-400">Auto-Pilot Active</span>
+            </div>
+            <div class="mb-3">
+              <label for="bot-auto-pilot-universe-mode" class="block text-xs font-medium text-indigo-300 mb-1">
+                Auto-Pilot Universe Mode
+              </label>
+              <select id="bot-auto-pilot-universe-mode"
+                class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <option value="default_safe">Default Safe (current production behavior)</option>
+                <option value="aggressive_full">Aggressive Full (high-risk monitoring/trading)</option>
+              </select>
+            </div>
+            <!-- description removed — heading is self-explanatory -->
+          </div>
+
+          <!-- Market Entry on Start -->
+          <div id="bot-initial-entry-row" class="border-t border-slate-800 mt-3 pt-3">
+            <div class="section-eyebrow" style="font-size:var(--fs-2xs); color:rgb(148 163 184);">Entry</div>
+            <div class="flex items-center justify-between mt-2">
+              <div class="flex items-center space-x-2">
+                <input type="checkbox" id="bot-initial-entry"
+                  class="w-4 h-4 bg-slate-800 border-slate-700 rounded text-amber-500 focus:ring-amber-500" />
+                <label for="bot-initial-entry" class="text-sm text-slate-400 cursor-pointer"
+                  title="Place 1 grid slot as a market order on bot start">Market Entry on Start</label>
+              </div>
+            </div>
+            <div class="flex items-center justify-between mt-1.5">
+              <div class="flex items-center space-x-2 ml-6">
+                <input type="checkbox" id="bot-initial-entry-auto-trend" checked
+                  class="w-3.5 h-3.5 bg-slate-800 border-slate-700 rounded text-amber-500 focus:ring-amber-500" />
+                <label for="bot-initial-entry-auto-trend" class="text-xs text-slate-500 cursor-pointer"
+                  title="Auto-enable market entry when Entry Gate detects a strong trend (setup quality &ge; 72)">Auto on strong trend</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="border-t border-slate-800 mt-3 pt-3">
+            <div class="section-eyebrow" style="font-size:var(--fs-2xs); color:rgb(148 163 184);">Protection</div>
+          </div>
+          <!-- Trailing Stop-Loss (Smart Feature #14) -->
+          <div id="bot-trailing-sl-row" class="flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              <input type="checkbox" id="bot-trailing-sl" checked
+                class="w-4 h-4 bg-slate-800 border-slate-700 rounded text-green-500 focus:ring-green-500" />
+              <label for="bot-trailing-sl" class="text-sm text-slate-400 cursor-pointer">Trailing Stop-Loss (lock in
+                profits)</label>
+            </div>
+            <div class="flex items-center space-x-1">
+              <label for="bot-trailing-sl-activation" class="text-[10px] text-slate-500"
+                title="Activation Profit % (empty = default 0.5%)">Act%</label>
+              <input type="number" id="bot-trailing-sl-activation" step="0.01" min="0" placeholder="0.5"
+                class="w-12 px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-white text-[10px] focus:ring-1 focus:ring-green-500" />
+              <label for="bot-trailing-sl-distance" class="text-[10px] text-slate-500"
+                title="Trail Distance % (empty = default 0.3%)">Dist%</label>
+              <input type="number" id="bot-trailing-sl-distance" step="0.01" min="0" placeholder="0.3"
+                class="w-12 px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-white text-[10px] focus:ring-1 focus:ring-green-500" />
+            </div>
+          </div>
+
+          <!-- Quick Profit Mode -->
+          <div id="bot-quick-profit-row" class="flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              <input type="checkbox" id="bot-quick-profit-enabled" checked
+                class="w-4 h-4 bg-slate-800 border-slate-700 rounded text-cyan-500 focus:ring-cyan-500" />
+              <label for="bot-quick-profit-enabled" class="text-sm text-slate-400 cursor-pointer"
+                title="Close partial position when unrealized profit reaches target">
+                Quick Profit (partial close on small wins)
+              </label>
+            </div>
+            <div class="flex items-center space-x-2">
+              <label class="text-[10px] text-slate-500">Target$</label>
+              <input type="number" id="bot-quick-profit-target" step="0.01" min="0.05" placeholder="0.15"
+                title="Unrealized profit threshold in USDT"
+                class="w-14 px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-white text-[10px]" />
+              <label class="text-[10px] text-slate-500">Close%</label>
+              <input type="number" id="bot-quick-profit-close-pct" step="5" min="10" max="100" placeholder="50"
+                title="Percentage of position to close"
+                class="w-12 px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-white text-[10px]" />
+              <label class="text-[10px] text-slate-500">CD</label>
+              <input type="number" id="bot-quick-profit-cooldown" step="10" min="10" placeholder="60"
+                title="Cooldown seconds between quick profits"
+                class="w-12 px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-white text-[10px]" />
+            </div>
+          </div>
+
+          <!-- Volatility Gate -->
+          <div id="bot-volatility-gate-row" class="flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              <input type="checkbox" id="bot-volatility-gate-enabled" checked
+                class="w-4 h-4 bg-slate-800 border-slate-700 rounded text-orange-500 focus:ring-orange-500" />
+              <label for="bot-volatility-gate-enabled" class="text-sm text-slate-400 cursor-pointer">Volatility Gate
+                (ATR Guard)</label>
+            </div>
+            <div class="flex items-center space-x-1">
+              <label for="bot-volatility-gate-threshold" class="text-xs text-slate-500">ATR%</label>
+              <input type="number" id="bot-volatility-gate-threshold" step="0.1" value="5.0"
+                class="w-16 px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-white text-xs focus:ring-1 focus:ring-orange-500" />
+            </div>
+          </div>
+          <p id="bot-mode-scope-note" class="hidden text-[10px] text-slate-500 leading-tight"></p>
+
+          <!-- Smart Bot Recovery (Auto-Healing) -->
+          <div class="flex items-center space-x-2 pt-1">
+            <input type="checkbox" id="bot-recovery-enabled" checked
+              class="w-4 h-4 bg-slate-800 border-slate-700 rounded text-emerald-500 focus:ring-emerald-500" />
+            <label for="bot-recovery-enabled" class="text-sm text-slate-400 cursor-pointer"
+              title="Automatically roll ranges or scale out of bad trades">Smart Recovery</label>
+          </div>
+
+          <!-- Entry Gate (Momentum + Structure) -->
+          <div class="flex items-center space-x-2 pt-1 border-t border-slate-800 mt-2">
+            <input type="checkbox" id="bot-entry-gate-enabled"
+              class="w-4 h-4 bg-slate-800 border-slate-700 rounded text-blue-500 focus:ring-blue-500" />
+            <label for="bot-entry-gate-enabled" class="text-sm text-slate-400 cursor-pointer"
+              title="Block entries when a strong adverse support/resistance level is too close. The optional momentum gate still follows the global strategy config.">Entry Gate (Safety)</label>
+          </div>
+
+          <!-- BTC Correlation Filter -->
+          <div class="flex items-center space-x-2 pt-1">
+            <input type="checkbox" id="bot-btc-corr-filter" checked
+              class="w-4 h-4 bg-slate-800 border-slate-700 rounded text-blue-500 focus:ring-blue-500" />
+            <label for="bot-btc-corr-filter" class="text-sm text-slate-400 cursor-pointer"
+              title="Block new entries when this coin is highly correlated with BTC during strong BTC trends. Recommended ON for neutral, optional for directional modes.">BTC Corr Filter</label>
+          </div>
+
+          <!-- Hidden: keep fields so existing bots don't lose settings on save -->
+          <input type="checkbox" id="bot-auto-stoploss-enabled" checked class="hidden" />
+          <input type="checkbox" id="bot-auto-takeprofit-enabled" checked class="hidden" />
+          <input type="checkbox" id="bot-trend-protection-enabled" checked class="hidden" />
+          <input type="checkbox" id="bot-danger-zone-enabled" checked class="hidden" />
+          <input type="checkbox" id="bot-auto-neutral-mode-enabled" class="hidden" />
+
+          <div id="bot-risk-info" class="text-xs text-slate-500 p-2 bg-slate-800/50 rounded"></div>
+
+          <div class="flex flex-wrap gap-2 sm:gap-3">
+            <button type="button" id="btn-save-bot"
+              class="flex-1 min-w-[100px] px-3 sm:px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm sm:text-base font-medium rounded-lg transition">
+              Save Bot
+            </button>
+            <button type="button" id="btn-save-start-bot"
+              class="flex-1 min-w-[100px] px-3 sm:px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-sm sm:text-base font-medium rounded-lg transition">
+              Save &amp; Start
+            </button>
+            <button type="button" id="btn-backtest-form" onclick="runBacktestFromForm()"
+              class="px-3 sm:px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm sm:text-base font-medium rounded-lg transition">
+              Backtest
+            </button>
+            <button type="button" id="btn-reset-bot"
+              class="px-3 sm:px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm sm:text-base font-medium rounded-lg transition">
+              Reset
+            </button>
+            <button type="button" id="btn-save-custom-preset"
+              class="hidden px-3 sm:px-4 py-2 bg-cyan-700 hover:bg-cyan-600 text-white text-sm sm:text-base font-medium rounded-lg transition">
+              Save as Custom Preset
+            </button>
+          </div>
+        </form>
+        </div>
+      </div>
+
+    </section>
+
+    <section id="watchdog-center-hub" class="mt-5 space-y-3 rounded-2xl border border-slate-800 bg-slate-950/75 px-3 py-3 shadow-[0_18px_60px_rgba(2,6,23,0.32)] backdrop-blur">
+      <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+        <div>
+          <p class="section-eyebrow text-amber-300">Observability</p>
+          <h2 class="mt-1 text-xl font-semibold text-white">Watchdog Center</h2>
+          <!-- verbose description removed for cleaner UI -->
+        </div>
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+          <span id="watchdog-hub-last-updated" class="lower-toolbar-chip text-slate-200">Last updated: never</span>
+          <label class="lower-toolbar-chip flex cursor-pointer items-center gap-2 text-slate-200">
+            <input id="watchdog-filter-active-only" type="checkbox" class="h-3.5 w-3.5 rounded border-slate-600 bg-slate-900 text-amber-400 focus:ring-amber-500" />
+            <span>Active only</span>
+          </label>
+          <button id="btn-refresh-watchdog-hub" type="button" class="lower-console-button lower-console-button--accent">↻ Refresh</button>
+        </div>
+      </div>
+
+      <div class="rounded-xl border border-slate-800 bg-slate-900/65 p-2.5">
+        <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div class="text-[11px] uppercase tracking-[0.18em] text-slate-400">Export Actions</div>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button
+              id="btn-export-ai-layer"
+              type="button"
+              class="lower-console-button lower-console-button--accent"
+              data-export-endpoint="/export/ai-layer"
+              data-export-label="AI Layer"
+              data-export-loading-label="Preparing AI Layer JSON..."
+            >Download AI Layer JSON</button>
+            <button
+              id="btn-export-watchdog"
+              type="button"
+              class="lower-console-button"
+              data-export-endpoint="/export/watchdog"
+              data-export-label="Watchdog"
+              data-export-loading-label="Preparing Watchdog JSON..."
+            >Download Watchdog JSON</button>
+            <button
+              id="btn-export-all-diagnostics"
+              type="button"
+              class="lower-console-button"
+              data-export-endpoint="/export/all-diagnostics"
+              data-export-label="All Diagnostics"
+              data-export-loading-label="Preparing All Diagnostics JSON..."
+            >Download All Diagnostics JSON</button>
+          </div>
+        </div>
+        <div id="diagnostics-export-status" class="mt-2 text-xs text-slate-400">No diagnostics export requested yet.</div>
+      </div>
+
+      <div class="rounded-xl border border-cyan-400/15 bg-cyan-500/6 p-2.5">
+        <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div class="text-[11px] uppercase tracking-[0.18em] text-cyan-200/80">Performance Baseline</div>
+            <div id="performance-baseline-summary" class="mt-1 text-xs text-slate-400">Baseline: legacy full-history view</div>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button id="btn-reset-performance-baseline" type="button" class="lower-console-button lower-console-button--accent">Reset Performance Baseline</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2 xl:grid-cols-6">
+        <div class="rounded-xl border border-rose-400/20 bg-rose-500/8 px-2.5 py-2">
+          <div class="text-[10px] uppercase tracking-[0.18em] text-rose-200/80">Active issues</div>
+          <div id="watchdog-summary-active" class="mt-1 text-xl font-semibold text-white">0</div>
+        </div>
+        <div class="rounded-xl border border-rose-400/20 bg-rose-500/8 px-2.5 py-2">
+          <div class="text-[10px] uppercase tracking-[0.18em] text-rose-200/80">Critical / High</div>
+          <div id="watchdog-summary-critical-high" class="mt-1 text-xl font-semibold text-white">0</div>
+        </div>
+        <div class="rounded-xl border border-amber-400/20 bg-amber-500/8 px-2.5 py-2">
+          <div class="text-[10px] uppercase tracking-[0.18em] text-amber-200/80">Medium</div>
+          <div id="watchdog-summary-medium" class="mt-1 text-xl font-semibold text-white">0</div>
+        </div>
+        <div class="rounded-xl border border-cyan-400/20 bg-cyan-500/8 px-2.5 py-2">
+          <div class="text-[10px] uppercase tracking-[0.18em] text-cyan-200/80">Affected bots</div>
+          <div id="watchdog-summary-bots" class="mt-1 text-xl font-semibold text-white">0</div>
+        </div>
+        <div class="rounded-xl border border-indigo-400/20 bg-indigo-500/8 px-2.5 py-2">
+          <div class="text-[10px] uppercase tracking-[0.18em] text-indigo-200/80">Top blocker</div>
+          <div id="watchdog-summary-blocker" class="mt-1 text-sm font-semibold text-white">None</div>
+        </div>
+        <div class="rounded-xl border border-slate-700 bg-slate-900/70 px-2.5 py-2">
+          <div class="text-[10px] uppercase tracking-[0.18em] text-slate-300/80">Most noisy</div>
+          <div id="watchdog-summary-noisy" class="mt-1 text-sm font-semibold text-white">Quiet</div>
+        </div>
+      </div>
+
+      <section id="runtime-integrity-panel" class="rounded-xl border border-slate-800 bg-slate-900/65 p-2.5">
+        <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div class="text-[11px] uppercase tracking-[0.18em] text-slate-400">Runtime Integrity</div>
+            <div id="runtime-integrity-status" class="mt-1 text-sm text-slate-200">Waiting for runtime state.</div>
+          </div>
+          <div id="runtime-integrity-badges" class="flex flex-wrap gap-2"></div>
+        </div>
+        <div class="mt-2 grid grid-cols-2 gap-2 xl:grid-cols-4">
+          <div class="rounded-lg border border-slate-800 bg-slate-950/70 px-2.5 py-2">
+            <div class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Source</div>
+            <div id="runtime-integrity-source" class="mt-1 text-sm font-semibold text-white">Unknown</div>
+          </div>
+          <div class="rounded-lg border border-slate-800 bg-slate-950/70 px-2.5 py-2">
+            <div class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Freshness</div>
+            <div id="runtime-integrity-freshness" class="mt-1 text-sm font-semibold text-white">n/a</div>
+          </div>
+          <div class="rounded-lg border border-slate-800 bg-slate-950/70 px-2.5 py-2">
+            <div class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Start Lifecycle</div>
+            <div id="runtime-integrity-startup" class="mt-1 text-sm font-semibold text-white">No pending starts</div>
+          </div>
+          <div class="rounded-lg border border-slate-800 bg-slate-950/70 px-2.5 py-2">
+            <div class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Recovery</div>
+            <div id="runtime-integrity-recovery" class="mt-1 text-sm font-semibold text-white">Not requested</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="opportunity-funnel-panel" class="rounded-xl border border-slate-800 bg-slate-900/65 p-2.5">
+        <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div class="text-[11px] uppercase tracking-[0.18em] text-emerald-300/80">Execution Funnel</div>
+            <h3 class="mt-1 text-base font-semibold text-white">Opportunity Funnel</h3>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+            <span id="opportunity-funnel-context" class="lower-toolbar-chip text-slate-200">Live now · recent flow waiting</span>
+            <span id="opportunity-funnel-rate" class="lower-toolbar-chip text-slate-200">T→E n/a</span>
+          </div>
+        </div>
+
+        <div class="mt-2 grid grid-cols-2 gap-2 xl:grid-cols-5">
+          <div class="rounded-lg border border-slate-800 bg-slate-950/60 px-2.5 py-2">
+            <div class="text-[10px] uppercase tracking-[0.18em] text-slate-400">Watch</div>
+            <div id="opportunity-funnel-watch" class="mt-1 text-xl font-semibold text-white">0</div>
+          </div>
+          <div class="rounded-lg border border-cyan-400/20 bg-cyan-500/8 px-2.5 py-2">
+            <div class="text-[10px] uppercase tracking-[0.18em] text-cyan-200/80">Armed</div>
+            <div id="opportunity-funnel-armed" class="mt-1 text-xl font-semibold text-white">0</div>
+          </div>
+          <div class="rounded-lg border border-emerald-400/20 bg-emerald-500/8 px-2.5 py-2">
+            <div class="text-[10px] uppercase tracking-[0.18em] text-emerald-200/80">Trigger</div>
+            <div id="opportunity-funnel-trigger-ready" class="mt-1 text-xl font-semibold text-white">0</div>
+          </div>
+          <div class="rounded-lg border border-emerald-400/20 bg-emerald-500/8 px-2.5 py-2">
+            <div class="text-[10px] uppercase tracking-[0.18em] text-emerald-200/80">Executed</div>
+            <div id="opportunity-funnel-executed" class="mt-1 text-xl font-semibold text-white">0</div>
+          </div>
+          <div class="rounded-lg border border-amber-400/20 bg-amber-500/8 px-2.5 py-2">
+            <div class="text-[10px] uppercase tracking-[0.18em] text-amber-200/80">Blocked</div>
+            <div id="opportunity-funnel-blocked" class="mt-1 text-xl font-semibold text-white">0</div>
+          </div>
+        </div>
+
+        <div class="mt-2 grid gap-2 xl:grid-cols-3">
+          <div class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2">
+            <div class="text-[10px] uppercase tracking-[0.18em] text-slate-400">Top blockers</div>
+            <div id="opportunity-funnel-blockers" class="mt-2 flex flex-wrap gap-2 text-xs text-slate-200">
+              <span class="text-slate-500">No recent blockers</span>
+            </div>
+          </div>
+          <div class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2">
+            <div class="text-[10px] uppercase tracking-[0.18em] text-slate-400">Repeat fails</div>
+            <div id="opportunity-funnel-repeat-failures" class="mt-2 flex flex-wrap gap-2 text-xs text-slate-200">
+              <span class="text-slate-500">No repeat failures</span>
+            </div>
+          </div>
+          <div class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2">
+            <div class="text-[10px] uppercase tracking-[0.18em] text-slate-400">Poor fit</div>
+            <div id="opportunity-funnel-structural" class="mt-2 flex flex-wrap gap-2 text-xs text-slate-200">
+              <span class="text-slate-500">No structural mismatches</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="bot-triage-panel" class="rounded-xl border border-slate-800 bg-slate-900/65 p-2.5">
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div class="text-[11px] uppercase tracking-[0.18em] text-cyan-300/80">Operator Actions</div>
+            <h3 class="mt-1 text-base font-semibold text-white">Bot Triage</h3>
+          </div>
+          <span id="bot-triage-last-updated" class="lower-toolbar-chip text-slate-200">Last updated: never</span>
+        </div>
+
+        <div class="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
+          <div class="rounded-lg border border-rose-400/20 bg-rose-500/8 px-2.5 py-2">
+            <div class="text-[10px] uppercase tracking-[0.18em] text-rose-200/80">Pause</div>
+            <div id="bot-triage-summary-pause" class="mt-1 text-xl font-semibold text-white">0</div>
+          </div>
+          <div class="rounded-lg border border-amber-400/20 bg-amber-500/8 px-2.5 py-2">
+            <div class="text-[10px] uppercase tracking-[0.18em] text-amber-200/80">Reduce</div>
+            <div id="bot-triage-summary-reduce" class="mt-1 text-xl font-semibold text-white">0</div>
+          </div>
+          <div class="rounded-lg border border-cyan-400/20 bg-cyan-500/8 px-2.5 py-2">
+            <div class="text-[10px] uppercase tracking-[0.18em] text-cyan-200/80">Review</div>
+            <div id="bot-triage-summary-review" class="mt-1 text-xl font-semibold text-white">0</div>
+          </div>
+          <div class="rounded-lg border border-emerald-400/20 bg-emerald-500/8 px-2.5 py-2">
+            <div class="text-[10px] uppercase tracking-[0.18em] text-emerald-200/80">Keep</div>
+            <div id="bot-triage-summary-keep" class="mt-1 text-xl font-semibold text-white">0</div>
+          </div>
+        </div>
+
+        <div id="bot-triage-list" class="mt-3 space-y-2">
+          <div class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-3 text-sm text-slate-400">
+            Waiting for triage data.
+          </div>
+        </div>
+      </section>
+
+      <section id="bot-config-advisor-panel" class="rounded-xl border border-slate-800 bg-slate-900/65 p-2.5">
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div class="text-[11px] uppercase tracking-[0.18em] text-indigo-300/80">Config Advisor</div>
+            <h3 class="mt-1 text-base font-semibold text-white">Bot Config Advisor</h3>
+          </div>
+          <span id="bot-config-advisor-last-updated" class="lower-toolbar-chip text-slate-200">Last updated: never</span>
+        </div>
+
+        <div class="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
+          <div class="rounded-lg border border-rose-400/20 bg-rose-500/8 px-2.5 py-2">
+            <div class="text-[10px] uppercase tracking-[0.18em] text-rose-200/80">Reduce Risk</div>
+            <div id="bot-config-advisor-summary-reduce" class="mt-1 text-xl font-semibold text-white">0</div>
+          </div>
+          <div class="rounded-lg border border-amber-400/20 bg-amber-500/8 px-2.5 py-2">
+            <div class="text-[10px] uppercase tracking-[0.18em] text-amber-200/80">Widen</div>
+            <div id="bot-config-advisor-summary-widen" class="mt-1 text-xl font-semibold text-white">0</div>
+          </div>
+          <div class="rounded-lg border border-cyan-400/20 bg-cyan-500/8 px-2.5 py-2">
+            <div class="text-[10px] uppercase tracking-[0.18em] text-cyan-200/80">Review</div>
+            <div id="bot-config-advisor-summary-review" class="mt-1 text-xl font-semibold text-white">0</div>
+          </div>
+          <div class="rounded-lg border border-emerald-400/20 bg-emerald-500/8 px-2.5 py-2">
+            <div class="text-[10px] uppercase tracking-[0.18em] text-emerald-200/80">Keep</div>
+            <div id="bot-config-advisor-summary-keep" class="mt-1 text-xl font-semibold text-white">0</div>
+          </div>
+        </div>
+
+        <div id="bot-config-advisor-list" class="mt-3 space-y-2">
+          <div class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-3 text-sm text-slate-400">
+            Waiting for config advisor data.
+          </div>
+        </div>
+      </section>
+
+      <div class="grid grid-cols-1 gap-2 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
+        <div class="rounded-xl border border-slate-800 bg-slate-900/65 p-2.5">
+          <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div class="text-[11px] uppercase tracking-[0.18em] text-slate-400">Filters</div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 md:grid-cols-4">
+              <select id="watchdog-filter-severity" class="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-white focus:border-amber-400 focus:outline-none">
+                <option value="">All severities</option>
+              </select>
+              <select id="watchdog-filter-type" class="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-white focus:border-amber-400 focus:outline-none">
+                <option value="">All watchdogs</option>
+              </select>
+              <select id="watchdog-filter-bot" class="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-white focus:border-amber-400 focus:outline-none">
+                <option value="">All bots</option>
+              </select>
+              <select id="watchdog-filter-symbol" class="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-white focus:border-amber-400 focus:outline-none">
+                <option value="">All symbols</option>
+              </select>
+            </div>
+          </div>
+          <div id="watchdog-insights" class="mt-2 flex flex-wrap gap-2"></div>
+        </div>
+
+        <div id="watchdog-detail-panel" class="rounded-xl border border-slate-800 bg-slate-900/65 p-2.5">
+          <div class="text-[11px] uppercase tracking-[0.18em] text-slate-400">Detail</div>
+          <div id="watchdog-detail-body" class="mt-1 text-sm text-slate-400">
+            Select an active issue, watchdog card, or recent event to inspect its evidence.
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 gap-2 2xl:grid-cols-[minmax(0,1.25fr)_minmax(0,0.9fr)]">
+        <div class="space-y-2">
+          <section class="rounded-xl border border-slate-800 bg-slate-900/65 p-2.5">
+            <div class="flex items-center justify-between gap-2">
+              <div>
+                <div class="text-[10px] uppercase tracking-[0.18em] text-emerald-300/80">Active now</div>
+                <h3 class="mt-0.5 text-sm font-semibold text-white">Active Issues</h3>
+              </div>
+              <span id="watchdog-active-count-chip" class="lower-toolbar-chip border-emerald-400/20 bg-emerald-500/10 text-emerald-100">0 active</span>
+            </div>
+            <div id="watchdog-active-issues" class="mt-2 space-y-2">
+              <div class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-3 text-sm text-slate-400">
+                No active watchdog issues right now.
+              </div>
+            </div>
+          </section>
+
+          <section class="rounded-xl border border-slate-800 bg-slate-900/65 p-2.5">
+            <div class="flex items-center justify-between gap-2">
+              <div>
+                <div class="text-[10px] uppercase tracking-[0.18em] text-indigo-300/80">Watchdog status</div>
+                <h3 class="mt-0.5 text-sm font-semibold text-white">Watchdog Cards</h3>
+              </div>
+              <span class="lower-toolbar-chip text-slate-200">Passive only</span>
+            </div>
+            <div id="watchdog-cards-grid" class="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+              <div class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-3 text-sm text-slate-400">
+                Waiting for watchdog data.
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <section class="rounded-xl border border-slate-800 bg-slate-900/65 p-2.5">
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <div class="text-[10px] uppercase tracking-[0.18em] text-cyan-300/80">Recent / Historical</div>
+              <h3 class="mt-0.5 text-sm font-semibold text-white">Recent Timeline</h3>
+            </div>
+            <span id="watchdog-timeline-count-chip" class="lower-toolbar-chip text-cyan-100">0 events</span>
+          </div>
+          <div id="watchdog-recent-timeline" class="mt-2 space-y-2">
+            <div class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-3 text-sm text-slate-400">
+              No recent watchdog events in the selected window.
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+      </section>
+    </section>
+
+  </main>
+
+  <!-- Bot Status/Log Modal -->
+  <div id="botModal" class="fixed inset-0 z-[100] hidden">
+    <!-- Overlay -->
+    <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="closeBotModal()"></div>
+    <!-- Modal Content -->
+    <div class="relative flex items-center justify-center min-h-screen p-2 sm:p-4" onclick="if(event.target===this)closeBotModal()">
+      <div class="relative bot-modal__shell">
+        <!-- Modal Header -->
+        <div class="bot-modal__header">
+          <div class="flex items-center gap-2 sm:gap-3 min-w-0 flex-wrap">
+            <h3 class="text-base sm:text-lg font-semibold text-white whitespace-nowrap">Bot Status</h3>
+            <span id="botModalLiveIndicator"
+              class="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-xs font-medium rounded-full inline-flex items-center">
+              <span class="inline-block w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1.5 live-pulse"></span>
+              Live
+            </span>
+            <span id="runnerStatusBadge"
+              class="px-2 py-0.5 text-xs font-medium rounded-full bg-slate-700 text-slate-400">
+              Checking...
+            </span>
+          </div>
+          <button id="botModalClose" onclick="closeBotModal()"
+            class="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700/60 rounded-lg transition">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+        <!-- Tab Bar -->
+        <div class="bot-modal__tab-bar">
+          <button id="tabBtnStatus" onclick="switchBotModalTab('status')"
+            class="bot-modal__tab">
+            Status
+          </button>
+          <button id="tabBtnLog" onclick="switchBotModalTab('log')"
+            class="bot-modal__tab bot-modal__tab--active">
+            Runner Log
+          </button>
+        </div>
+        <!-- Modal Body -->
+        <div class="bot-modal__body">
+          <!-- Status Tab -->
+          <div id="tabContentStatus" style="display:none;flex:1;flex-direction:column;">
+            <pre id="botStatusBox"
+              class="bg-slate-800/50 rounded-lg p-4 text-sm text-slate-300 font-mono whitespace-pre-wrap overflow-auto max-h-[65vh]">Loading...</pre>
+          </div>
+          <!-- Log Tab -->
+          <div id="tabContentLog" class="flex flex-col flex-1 min-h-0">
+            <!-- Controls -->
+            <div class="log-controls">
+              <div class="log-controls__row">
+                <div class="log-controls__group">
+                  <label class="text-xs text-slate-400 flex items-center gap-1.5">
+                    Lines
+                    <select id="logLinesSelect" onchange="loadBotLog()"
+                      class="px-2 py-1 bg-slate-800 border border-slate-600 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                      <option value="50">50</option>
+                      <option value="100" selected>100</option>
+                      <option value="200">200</option>
+                      <option value="500">500</option>
+                    </select>
+                  </label>
+                  <label class="text-xs text-slate-400 flex items-center gap-1.5">
+                    Scope
+                    <select id="logScopeSelect" onchange="loadBotLog()"
+                      class="px-2 py-1 bg-slate-800 border border-slate-600 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                      <option value="all" selected>All Logs</option>
+                      <option value="running">Running Only</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="log-controls__group">
+                  <button id="btnStartRunner" onclick="startRunner()"
+                    class="px-3 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-md transition inline-flex items-center gap-1">
+                    <span>&#x1F680;</span> Start
+                  </button>
+                  <button id="btnRestartRunner" data-runner-action="restart" onclick="confirmRestartServices()"
+                    class="px-3 py-1.5 text-xs bg-amber-600 hover:bg-amber-500 text-white font-medium rounded-md transition inline-flex items-center gap-1">
+                    <span>&#x1F504;</span> Restart
+                  </button>
+                  <span class="log-controls__divider"></span>
+                  <button id="btnStopRunner" data-runner-action="stop" onclick="confirmStopServices()"
+                    class="px-3 py-1.5 text-xs bg-red-600 hover:bg-red-500 text-white font-medium rounded-md transition inline-flex items-center gap-1">
+                    <span>&#x1F6D1;</span> Stop
+                  </button>
+                  <button onclick="loadBotLog()"
+                    class="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-md transition">
+                    &#x21BB; Refresh
+                  </button>
+                </div>
+              </div>
+            </div>
+            <!-- Filter Chips -->
+            <div id="logFilterBar" class="log-filter-bar"></div>
+            <!-- Toolbar: search, toggles, copy -->
+            <div class="log-toolbar">
+              <div class="log-search-wrap">
+                <input id="logSearchInput" type="text" class="log-search" placeholder="Search logs... (symbol, message, error)" autocomplete="off" spellcheck="false">
+              </div>
+              <span id="logSearchCount" class="log-search-count"></span>
+              <button id="logImportantToggle" class="log-toggle-btn" onclick="toggleImportantOnly()" title="Show only errors, warnings, risk, and order events">&#x26A0;&#xFE0F; Important</button>
+              <button id="logAutoScrollToggle" class="log-toggle-btn log-toggle-btn--on" onclick="toggleLogAutoScroll()" title="Auto-scroll to latest log lines">&#x2193; Auto-scroll</button>
+              <button id="logPauseToggle" class="log-toggle-btn" onclick="toggleLogPause()" title="Pause/resume live log updates">&#x23F8;&#xFE0F; Pause</button>
+              <button class="log-toggle-btn" onclick="copyVisibleLogs()" title="Copy all visible log lines to clipboard">&#x1F4CB; Copy</button>
+            </div>
+            <!-- Log Viewer -->
+            <div id="botLogBox" class="log-viewer" style="position:relative">
+              <div class="log-row"><span class="log-row__message" style="color:#64748b">Loading...</span></div>
+              <span id="logCopyToast" class="log-copy-toast">Copied</span>
+            </div>
+          </div>
+        </div>
+        <!-- Modal Footer -->
+        <div class="bot-modal__footer">
+          <span id="botModalLastUpdate">Last updated: -</span>
+          <span>Press <kbd class="px-1 py-0.5 bg-slate-700 rounded text-slate-400">Esc</kbd> to close</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bot Detail Modal -->
+  <div id="botDetailModal" class="fixed inset-0 z-[100] hidden">
+    <!-- Backdrop -->
+    <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="closeBotDetailModal()"></div>
+    <!-- Modal Content -->
+    <div class="relative flex items-center justify-center min-h-screen p-2 sm:p-4" onclick="if(event.target===this)closeBotDetailModal()">
+      <div
+        class="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-[95vw] sm:max-w-4xl max-h-[90vh] overflow-hidden">
+        <!-- Modal Header -->
+        <div class="flex items-center justify-between px-3 sm:px-5 py-3 sm:py-4 border-b border-slate-700">
+          <div class="flex items-center space-x-2 sm:space-x-3">
+            <h3 class="text-base sm:text-lg font-semibold text-white">
+              <span id="botDetailSymbol">BTCUSDT</span> <span class="hidden sm:inline">Details</span>
+            </h3>
+            <span id="botDetailStatus"
+              class="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-xs font-medium rounded-full">running</span>
+          </div>
+          <button onclick="closeBotDetailModal()" class="text-slate-400 hover:text-white text-xl">&times;</button>
+        </div>
+        <!-- Modal Body -->
+        <div class="p-5 overflow-y-auto max-h-[calc(90vh-140px)]">
+          <div class="mb-4 rounded-lg border border-cyan-400/15 bg-cyan-500/6 px-4 py-3">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div class="text-[11px] uppercase tracking-[0.18em] text-cyan-200/80">Bot Measurement Baseline</div>
+                <div id="botDetailBaselineMeta" class="mt-1 text-sm text-slate-300">Using legacy full-history performance.</div>
+              </div>
+              <button id="btn-reset-bot-baseline" type="button" class="lower-console-button">Reset Bot Baseline</button>
+            </div>
+          </div>
+          <!-- Summary Cards -->
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div class="bg-slate-800/50 rounded-lg p-4">
+              <div class="text-xs text-slate-400 uppercase mb-1">Baseline Net P&L</div>
+              <div id="botDetailNetPnl" class="text-xl font-bold text-emerald-400">$0.00</div>
+              <div id="botDetailWinRate" class="text-xs text-slate-500">0 trades, 0% win</div>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4">
+              <div class="text-xs text-slate-400 uppercase mb-1">Baseline Profit</div>
+              <div id="botDetailProfit" class="text-xl font-bold text-emerald-400">$0.00</div>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4">
+              <div class="text-xs text-slate-400 uppercase mb-1">Baseline Loss</div>
+              <div id="botDetailLoss" class="text-xl font-bold text-red-400">$0.00</div>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4">
+              <div class="text-xs text-slate-400 uppercase mb-1">Bot PnL (this config)</div>
+              <div id="botDetailBotPnl" class="text-xl font-bold text-white">$0.00</div>
+            </div>
+          </div>
+
+          <!-- Bot Configuration -->
+          <div class="bg-slate-800/30 rounded-lg p-4 mb-6">
+            <h4 class="text-sm font-medium text-white mb-3">📋 Current Configuration</h4>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <div><span class="text-slate-400">Configured Mode:</span> <span id="botDetailConfiguredMode" class="text-white">neutral</span>
+              </div>
+              <div><span class="text-slate-400">Runtime View:</span> <span id="botDetailRuntimeMode" class="text-white">neutral</span></div>
+              <div><span class="text-slate-400">Profile:</span> <span id="botDetailProfile"
+                  class="text-white">normal</span></div>
+              <div><span class="text-slate-400">Mode Policy:</span> <span id="botDetailModePolicy"
+                  class="text-white">locked</span></div>
+              <div><span class="text-slate-400">Investment:</span> <span id="botDetailInvest"
+                  class="text-white">$0</span></div>
+              <div><span class="text-slate-400">Leverage:</span> <span id="botDetailLeverage"
+                  class="text-white">1x</span></div>
+              <div><span class="text-slate-400">Grids:</span> <span id="botDetailGrids" class="text-white">0</span>
+              </div>
+              <div><span class="text-slate-400">Range:</span> <span id="botDetailRange" class="text-white">-</span>
+              </div>
+              <div><span class="text-slate-400">TP%:</span> <span id="botDetailTp" class="text-white">-</span></div>
+              <div><span class="text-slate-400">Auto-Stop:</span> <span id="botDetailAutoStop"
+                  class="text-white">-</span></div>
+            </div>
+          </div>
+
+          <div id="botDetailTruthSection" class="bg-slate-800/30 rounded-lg p-4 mb-6">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <h4 class="text-sm font-medium text-white">🛡 Exchange Truth</h4>
+              </div>
+            </div>
+            <div id="botDetailTruthBody" class="mt-3 space-y-3 text-sm text-slate-300">Loading exchange truth…</div>
+          </div>
+
+          <div id="botDetailProfitProtectionSection" class="bg-slate-800/30 rounded-lg p-4 mb-6">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <h4 class="text-sm font-medium text-white">🪙 Profit Protection</h4>
+              </div>
+            </div>
+            <div id="botDetailProfitProtectionBody" class="mt-3 space-y-3 text-sm text-slate-300">Loading profit protection…</div>
+          </div>
+
+          <div id="botDetailModeMatrixSection" class="bg-slate-800/30 rounded-lg p-4 mb-6">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <h4 class="text-sm font-medium text-white">🧭 Mode Readiness Comparison</h4>
+              </div>
+            </div>
+            <div id="botDetailModeMatrix" class="mt-3 space-y-2 text-sm text-slate-300"></div>
+          </div>
+
+          <!-- Auto-Direction Signals -->
+          <div id="botDetailSignalsSection" class="bg-slate-800/30 rounded-lg p-4 mb-6 hidden">
+            <div class="flex items-center justify-between mb-3">
+              <h4 class="text-sm font-medium text-white">📊 Auto-Direction Signals</h4>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-slate-400">Total Score:</span>
+                <span id="botDetailDirectionScore"
+                  class="px-2 py-0.5 text-sm font-bold rounded bg-slate-700 text-white">0</span>
+                <span id="botDetailDirectionMode"
+                  class="px-2 py-0.5 text-xs rounded-full bg-slate-600 text-slate-300">NEUTRAL</span>
+              </div>
+            </div>
+            <div id="botDetailSignalsGrid" class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <!-- Signals will be rendered here by JavaScript -->
+            </div>
+            <div id="botDetailSignalsSummary" class="mt-3 text-xs text-slate-500 border-t border-slate-700 pt-2">
+              <!-- Summary text -->
+            </div>
+          </div>
+
+          <!-- Recent Logs -->
+          <div class="bg-slate-800/30 rounded-lg p-4 mb-6">
+            <div class="flex items-center justify-between mb-3">
+              <h4 class="text-sm font-medium text-white">📜 Recent Logs</h4>
+              <button onclick="refreshBotDetailLogs()" class="text-xs text-slate-400 hover:text-white transition">↻
+                Refresh</button>
+            </div>
+            <pre id="botDetailLogsBox"
+              class="bg-slate-950 rounded p-3 text-xs font-mono text-slate-300 h-48 overflow-auto whitespace-pre-wrap">Loading logs...</pre>
+            <div class="mt-2 text-[10px] text-slate-500 flex items-center justify-between">
+              <span>Showing recent system logs for this bot</span>
+            </div>
+          </div>
+
+          <!-- Trade History -->
+          <div class="bg-slate-800/30 rounded-lg p-4">
+            <h4 class="text-sm font-medium text-white mb-1">📈 Bot Trade History (Bot-only: <span
+                id="botDetailHistorySymbol">BTCUSDT</span>)</h4>
+            <div class="overflow-x-auto max-h-64 overflow-y-auto">
+              <table class="w-full text-xs">
+                <thead class="bg-slate-700/50 sticky top-0">
+                  <tr>
+                    <th class="px-3 py-2 text-left text-slate-400">Time</th>
+                    <th class="px-3 py-2 text-left text-slate-400">Side</th>
+                    <th class="px-3 py-2 text-right text-slate-400">P&L</th>
+                    <th class="px-3 py-2 text-left text-slate-400">Bot</th>
+                  </tr>
+                </thead>
+                <tbody id="botDetailTradesBody" class="divide-y divide-slate-700">
+                  <tr>
+                    <td colspan="4" class="px-3 py-4 text-center text-slate-500">No trades yet</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <!-- Modal Footer -->
+        <div class="flex items-center justify-between px-5 py-3 border-t border-slate-700 text-xs text-slate-500">
+          <span id="botDetailFirstTrade">First trade: -</span>
+          <span id="botDetailLastTrade">Last trade: -</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- All Closed PnL Modal -->
+  <div id="allPnlModal" class="fixed inset-0 z-[100] hidden">
+    <!-- Backdrop -->
+    <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="closeAllPnlModal()"></div>
+    <!-- Modal Content -->
+    <div class="relative flex items-center justify-center min-h-screen p-2 sm:p-4" onclick="if(event.target===this)closeAllPnlModal()">
+      <div class="allpnl-modal__shell w-full max-w-[98vw] sm:max-w-6xl">
+
+        <!-- ZONE 1: Header -->
+        <div class="allpnl-modal__header">
+          <div class="flex items-center gap-2 min-w-0">
+            <h3 class="text-sm sm:text-lg font-semibold text-white whitespace-nowrap">Closed PnL</h3>
+            <span id="allPnlRecordCount"
+              class="px-2 py-0.5 bg-blue-500/20 text-blue-400 text-[10px] font-medium rounded-full whitespace-nowrap">0 records</span>
+          </div>
+          <div class="flex items-center gap-2 ml-auto">
+            <button id="profit-rain-toggle"
+              class="px-2 py-1 text-[10px] font-semibold rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 transition"
+              type="button" onclick="toggleProfitRain()" title="Enable or disable realized-profit visual effects">
+              Profit FX On
+            </button>
+            <label class="flex items-center gap-1 text-[10px] text-slate-400">
+              <span class="hidden sm:inline">FX Min</span>
+              <select id="profit-rain-threshold"
+                class="rounded-full border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-200 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+                <option value="1">+$1</option>
+                <option value="3">+$3</option>
+                <option value="5">+$5</option>
+                <option value="10">+$10</option>
+              </select>
+            </label>
+            <button onclick="closeAllPnlModal()" class="text-slate-400 hover:text-white text-xl ml-2">&times;</button>
+          </div>
+        </div>
+
+        <!-- ZONE 2: Summary Stats -->
+        <div class="allpnl-modal__summary" id="allPnlSummary">
+          <div class="metric-box">
+            <div class="metric-box__label">Total PnL</div>
+            <div class="metric-box__value" id="allPnlTotalPnl">$0.00</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-box__label">Trades</div>
+            <div class="metric-box__value text-white" id="allPnlTotalTrades">0</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-box__label">Wins</div>
+            <div class="metric-box__value text-emerald-400" id="allPnlWins">0</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-box__label">Losses</div>
+            <div class="metric-box__value text-red-400" id="allPnlLosses">0</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-box__label">Win Rate</div>
+            <div class="metric-box__value text-white" id="allPnlWinRate">0%</div>
+          </div>
+        </div>
+
+        <!-- ZONE 3: Filters -->
+        <div class="allpnl-modal__filters">
+          <div class="flex items-center gap-2">
+            <label class="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">From</label>
+            <input type="date" id="allPnlStartDate"
+              class="px-2 py-1 text-xs bg-slate-800 border border-slate-600 rounded-md text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30">
+          </div>
+          <div class="flex items-center gap-2">
+            <label class="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">To</label>
+            <input type="date" id="allPnlEndDate"
+              class="px-2 py-1 text-xs bg-slate-800 border border-slate-600 rounded-md text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30">
+          </div>
+          <div class="flex items-center gap-2">
+            <label class="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">Symbol</label>
+            <input type="text" id="allPnlSymbolFilter" placeholder="e.g. BTCUSDT"
+              class="px-2 py-1 text-xs bg-slate-800 border border-slate-600 rounded-md text-white w-28 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30">
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="refreshAllPnlModal(true)"
+              class="px-3 py-1 text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white rounded-md transition">
+              Apply
+            </button>
+            <button onclick="clearAllPnlFilters()"
+              class="px-3 py-1 text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-md transition">
+              Clear
+            </button>
+          </div>
+        </div>
+
+        <!-- ZONE 4: Content Body -->
+        <div class="allpnl-modal__body" id="allPnlBody">
+          <!-- Desktop Table -->
+          <div class="allpnl-table-wrap">
+            <table class="w-full text-xs">
+              <thead class="sticky top-0 z-10" style="background: rgba(15, 23, 42, 0.95);">
+                <tr>
+                  <th class="px-3 py-2.5 text-left text-slate-500 text-[10px] font-bold uppercase tracking-wider">Time</th>
+                  <th class="px-3 py-2.5 text-left text-slate-500 text-[10px] font-bold uppercase tracking-wider">Symbol</th>
+                  <th class="px-3 py-2.5 text-left text-slate-500 text-[10px] font-bold uppercase tracking-wider">Side</th>
+                  <th class="px-3 py-2.5 text-right text-slate-500 text-[10px] font-bold uppercase tracking-wider">PnL</th>
+                  <th class="px-3 py-2.5 text-right text-slate-500 text-[10px] font-bold uppercase tracking-wider">Balance</th>
+                  <th class="px-3 py-2.5 text-right text-slate-500 text-[10px] font-bold uppercase tracking-wider">Invest</th>
+                  <th class="px-3 py-2.5 text-center text-slate-500 text-[10px] font-bold uppercase tracking-wider">Lev</th>
+                  <th class="px-3 py-2.5 text-center text-slate-500 text-[10px] font-bold uppercase tracking-wider">Mode</th>
+                  <th class="px-3 py-2.5 text-center text-slate-500 text-[10px] font-bold uppercase tracking-wider">Range</th>
+                  <th class="px-3 py-2.5 text-left text-slate-500 text-[10px] font-bold uppercase tracking-wider">Bot</th>
+                </tr>
+              </thead>
+              <tbody id="allPnlTableBody" class="divide-y divide-slate-800/60">
+                <tr><td colspan="10" class="px-3 py-8 text-center text-slate-500">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <!-- Mobile Cards -->
+          <div class="allpnl-cards-wrap" id="allPnlCardsBody">
+            <div class="px-3 py-8 text-center text-slate-500 text-sm">Loading...</div>
+          </div>
+        </div>
+
+        <!-- ZONE 5: Footer -->
+        <div class="allpnl-modal__footer">
+          <div class="flex items-center gap-2">
+            <button id="allPnlPrevPage" onclick="allPnlChangePage(-1)"
+              class="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled>Prev</button>
+            <span id="allPnlPageInfo" class="text-xs text-slate-400">Page 1 of 1</span>
+            <button id="allPnlNextPage" onclick="allPnlChangePage(1)"
+              class="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled>Next</button>
+          </div>
+          <div class="flex items-center gap-3 text-[10px] text-slate-500">
+            <div class="flex items-center gap-1.5" id="allPnlLiveIndicator">
+              <span class="allpnl-live-dot" id="allPnlLiveDot"></span>
+              <span id="allPnlLastUpdated">Updated just now</span>
+            </div>
+            <label class="flex items-center gap-1 cursor-pointer select-none" title="Toggle auto-refresh">
+              <input type="checkbox" id="allPnlAutoRefresh" checked
+                class="w-3 h-3 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500/30 focus:ring-offset-0 accent-emerald-500"
+                onchange="toggleAllPnlAutoRefresh()">
+              <span>Auto</span>
+            </label>
+            <span class="hidden sm:inline text-slate-600">Press <kbd class="px-1 py-0.5 bg-slate-700 rounded text-slate-400">Esc</kbd> to close</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="max-w-[1800px] mx-auto px-4 py-6 text-center text-slate-600 text-sm">
+    Bybit Futures Control Center • Use at your own risk • <span class="text-emerald-500">Live updates every 3s</span>
+  </footer>
+
+  <!-- Quick Config Modal -->
+  <div id="quick-edit-panel" class="fixed inset-0 z-[110] hidden items-end justify-center overflow-y-auto p-3 sm:items-center sm:p-4" onclick="if(event.target===this)hideQuickEdit()">
+    <div
+      class="quick-edit-modal-shell relative w-full max-w-5xl overflow-hidden rounded-2xl border border-slate-700/90 bg-slate-900/95 shadow-2xl shadow-black/50 backdrop-blur">
+      <div class="flex flex-wrap items-start justify-between gap-4 border-b border-slate-800 px-4 py-4 sm:px-6">
+        <div class="min-w-0">
+          <p class="section-eyebrow text-cyan-300">Quick Configuration</p>
+          <h3 class="mt-1 text-lg font-semibold text-white">Bot Configuration</h3>
+          <p id="quick-edit-summary" class="mt-1 text-sm text-slate-400"></p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" id="quick-edit-open-full-btn"
+            class="rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-cyan-400/45 hover:text-white">
+            Open Full Form
+          </button>
+          <button type="button" onclick="hideQuickEdit()"
+            class="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700 bg-slate-800 text-slate-300 transition hover:border-slate-500 hover:text-white"
+            aria-label="Close quick configuration">
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18 18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="quick-edit-modal-scroll max-h-[72vh] overflow-y-auto px-4 py-4 sm:px-6">
+        <input type="hidden" id="quick-bot-id" />
+        <input type="hidden" id="quick-bot-settings-version" />
+        <div class="grid gap-4 xl:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)]">
+          <div class="space-y-4">
+            <section id="quick-preset-context-card" class="rounded-2xl border border-cyan-400/20 bg-cyan-500/8 p-4">
+              <h4 id="quick-preset-context-title" class="text-sm font-semibold text-white">Preset Context</h4>
+              <p id="quick-preset-context-summary" class="mt-1 text-xs text-cyan-100/80">Creation presets are applied before the first save. Existing bots show read-only origin context here.</p>
+              <p id="quick-preset-context-note" class="mt-3 text-[11px] leading-relaxed text-slate-300">Manual configuration. Open the full form to create or apply a new preset.</p>
+            </section>
+
+            <section class="rounded-2xl border border-slate-800 bg-slate-950/45 p-4">
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <h4 class="text-sm font-semibold text-white">Core Setup</h4>
+                  <!-- description removed -->
+                </div>
+                <label class="flex items-center gap-2 rounded-full border border-indigo-500/25 bg-indigo-500/10 px-3 py-1.5 text-xs font-semibold text-indigo-200">
+                  <input type="checkbox" id="quick-bot-auto-pilot"
+                    class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-indigo-500 focus:ring-indigo-400">
+                  <span>Auto-Pilot</span>
+                </label>
+              </div>
+
+              <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-slate-400">Symbol</label>
+                  <input type="text" id="quick-bot-symbol" placeholder="BTCUSDT"
+                    class="select-all-on-click w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-slate-400">Auto-Pilot Universe</label>
+                  <select id="quick-bot-auto-pilot-universe-mode"
+                    class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    <option value="default_safe">Default Safe</option>
+                    <option value="aggressive_full">Aggressive Full</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-slate-400">Configured Mode</label>
+                  <select id="quick-bot-mode"
+                    class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    <option value="neutral">Neutral</option>
+                    <option value="neutral_classic_bybit">Neutral Classic (Bybit)</option>
+                    <option value="long">Long</option>
+                    <option value="short">Short</option>
+                    <option value="scalp_pnl">Scalp PnL</option>
+                    <option value="scalp_market">Scalp Market</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-slate-400">Profile</label>
+                  <select id="quick-bot-profile"
+                    class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    <option value="normal">Normal</option>
+                    <option value="scalp">Scalp</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-slate-400">Mode Policy</label>
+                  <select id="quick-bot-mode-policy"
+                    class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    <option value="locked">Locked</option>
+                    <option value="suggest_only">Suggest Only</option>
+                    <option value="runtime_auto_switch_non_persistent">Runtime Auto Switch</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-slate-400">Range Mode</label>
+                  <select id="quick-bot-range-mode"
+                    class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    <option value="fixed">Fixed</option>
+                    <option value="dynamic">Dynamic</option>
+                    <option value="trailing">Trailing</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-slate-400">Grid Distribution</label>
+                  <select id="quick-bot-grid-distribution"
+                    class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    <option value="clustered">Smart</option>
+                    <option value="balanced">Equal spacing</option>
+                    <option value="buy_heavy">Buy-heavy</option>
+                    <option value="sell_heavy">Sell-heavy</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-slate-400">Lower Price</label>
+                  <input type="number" id="quick-bot-lower" step="any" inputmode="decimal"
+                    class="select-all-on-click w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-slate-400">Upper Price</label>
+                  <input type="number" id="quick-bot-upper" step="any" inputmode="decimal"
+                    class="select-all-on-click w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-slate-400">Grid Count</label>
+                  <input type="number" id="quick-bot-grids" step="1" min="3" max="500"
+                    class="select-all-on-click w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                </div>
+              </div>
+
+              <p id="quick-autopilot-info" class="mt-3 hidden rounded-xl border border-indigo-500/20 bg-indigo-500/10 px-3 py-2 text-xs text-indigo-200">
+                Auto-Pilot keeps symbol and range assignment under runtime control while preserving your chosen capital and safety settings.
+              </p>
+              <p id="quick-bot-auto-pilot-universe-help" class="mt-3 text-[11px] text-slate-500"></p>
+              <div class="mt-3 rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-3">
+                <div class="text-[11px] uppercase tracking-[0.18em] text-slate-500">Runtime View</div>
+                <div id="quick-bot-mode-runtime-summary" class="mt-1 text-sm font-medium text-white">Saved mode stays authoritative.</div>
+                <div id="quick-bot-mode-runtime-comparison" class="mt-2 text-[11px] leading-relaxed text-slate-400"></div>
+              </div>
+              <p id="quick-bot-mode-scope-note" class="mt-3 hidden text-[11px] leading-relaxed text-slate-500"></p>
+            </section>
+
+            <section class="rounded-2xl border border-slate-800 bg-slate-950/45 p-4">
+              <h4 class="text-sm font-semibold text-white">Capital And Targets</h4>
+              <!-- description removed -->
+
+              <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-slate-400">Investment (USDT)</label>
+                  <input type="number" id="quick-bot-investment" step="any"
+                    class="select-all-on-click w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-slate-400">Leverage</label>
+                  <input type="number" id="quick-bot-leverage" step="1" min="1" max="100"
+                    class="select-all-on-click w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-slate-400">Global TP %</label>
+                  <input type="number" id="quick-bot-tp-pct" step="0.1" min="0"
+                    class="select-all-on-click w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-slate-400">Auto Stop (USDT)</label>
+                  <input type="number" id="quick-bot-auto-stop" step="any"
+                    class="select-all-on-click w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-rose-500" />
+                </div>
+              </div>
+
+              <div class="mt-3">
+                <label class="mb-1 block text-sm font-medium text-slate-400">Balance Target (USDT)</label>
+                <input type="number" id="quick-bot-balance-target" step="0.1" min="0"
+                  class="select-all-on-click w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-amber-500" />
+              </div>
+
+              <div id="quick-scalp-pnl-info" class="mt-4 hidden rounded-xl border border-amber-700/50 bg-amber-900/20 px-3 py-3 text-xs text-amber-200">
+                Scalp PnL uses a faster profit-taking flow. This modal keeps the live settings editable without leaving the table context.
+              </div>
+              <div id="quick-scalp-market-info" class="mt-4 hidden rounded-xl border border-cyan-700/50 bg-cyan-900/20 px-3 py-3 text-xs text-cyan-200">
+                Scalp Market prioritizes instant entries and tighter reaction speed. Range mode stays dynamic while this mode is selected.
+              </div>
+            </section>
+          </div>
+
+          <div class="space-y-4">
+            <section id="quick-bot-safety-card" class="rounded-2xl border border-slate-800 bg-slate-950/45 p-4">
+              <h4 class="text-sm font-semibold text-white">Safety Toggles</h4>
+              <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label class="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-3">
+                  <span class="text-sm text-slate-300">Recovery</span>
+                  <input type="checkbox" id="quick-bot-recovery-enabled"
+                    class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500">
+                </label>
+                <label class="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-3">
+                  <span class="text-sm text-slate-300">Entry Gate</span>
+                  <input type="checkbox" id="quick-bot-entry-gate-enabled"
+                    class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500">
+                </label>
+                <label class="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-3">
+                  <span class="text-sm text-slate-300">BTC Corr Filter</span>
+                  <input type="checkbox" id="quick-bot-btc-corr-filter" checked
+                    class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500">
+                </label>
+                <label class="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-3">
+                  <span class="text-sm text-slate-300">Auto Neutral Mode</span>
+                  <input type="checkbox" id="quick-bot-auto-neutral-mode-enabled"
+                    class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500">
+                </label>
+              </div>
+            </section>
+
+            <section class="rounded-2xl border border-slate-800 bg-slate-950/45 p-4">
+              <h4 class="text-sm font-semibold text-white">Automation And Protection</h4>
+
+              <div class="mt-4 space-y-3">
+                <div id="quick-bot-auto-direction-row" class="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-3">
+                  <label class="flex items-center justify-between gap-3">
+                    <span class="text-sm text-slate-300">Auto Direction</span>
+                    <input type="checkbox" id="quick-bot-auto-direction"
+                      class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500">
+                  </label>
+                </div>
+
+                <div id="quick-bot-breakout-confirmed-entry-row" class="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-3">
+                  <label class="flex items-center justify-between gap-3">
+                    <span class="text-sm text-slate-300">Breakout Confirmed Entry</span>
+                    <input type="checkbox" id="quick-bot-breakout-confirmed-entry"
+                      class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500">
+                  </label>
+                </div>
+
+                <div id="quick-bot-trailing-sl-row" class="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-3">
+                  <div class="flex items-center justify-between gap-3">
+                    <label class="flex items-center gap-3">
+                      <input type="checkbox" id="quick-bot-trailing-sl"
+                        class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500">
+                      <span class="text-sm text-slate-300">Trailing Stop Loss</span>
+                    </label>
+                  </div>
+                  <div class="mt-3 grid grid-cols-2 gap-3">
+                    <div>
+                      <label class="mb-1 block text-[11px] font-medium uppercase tracking-[0.16em] text-slate-500">Activation %</label>
+                      <input type="number" id="quick-bot-trailing-sl-activation" step="0.01" min="0" placeholder="0.5"
+                        class="select-all-on-click w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                    </div>
+                    <div>
+                      <label class="mb-1 block text-[11px] font-medium uppercase tracking-[0.16em] text-slate-500">Distance %</label>
+                      <input type="number" id="quick-bot-trailing-sl-distance" step="0.01" min="0" placeholder="0.3"
+                        class="select-all-on-click w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                    </div>
+                  </div>
+                </div>
+
+                <div id="quick-bot-quick-profit-row" class="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-3">
+                  <div class="flex items-center justify-between gap-3">
+                    <label class="flex items-center gap-3">
+                      <input type="checkbox" id="quick-bot-quick-profit-enabled"
+                        class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500">
+                      <span class="text-sm text-slate-300">Quick Profit</span>
+                    </label>
+                  </div>
+                  <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div>
+                      <label class="mb-1 block text-[11px] font-medium uppercase tracking-[0.16em] text-slate-500">Target $</label>
+                      <input type="number" id="quick-bot-quick-profit-target" step="0.01" min="0.05" placeholder="0.15"
+                        class="select-all-on-click w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                    </div>
+                    <div>
+                      <label class="mb-1 block text-[11px] font-medium uppercase tracking-[0.16em] text-slate-500">Close %</label>
+                      <input type="number" id="quick-bot-quick-profit-close-pct" step="5" min="10" max="100" placeholder="50"
+                        class="select-all-on-click w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                    </div>
+                    <div>
+                      <label class="mb-1 block text-[11px] font-medium uppercase tracking-[0.16em] text-slate-500">Cooldown s</label>
+                      <input type="number" id="quick-bot-quick-profit-cooldown" step="10" min="10" placeholder="60"
+                        class="select-all-on-click w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                    </div>
+                  </div>
+                </div>
+
+                <div id="quick-bot-volatility-gate-row" class="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-3">
+                  <div class="flex items-center justify-between gap-3">
+                    <label class="flex items-center gap-3">
+                      <input type="checkbox" id="quick-bot-volatility-gate-enabled"
+                        class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500">
+                      <span class="text-sm text-slate-300">Volatility Gate</span>
+                    </label>
+                  </div>
+                  <div class="mt-3">
+                    <label class="mb-1 block text-[11px] font-medium uppercase tracking-[0.16em] text-slate-500">Threshold %</label>
+                    <input type="number" id="quick-bot-volatility-gate-threshold" step="0.1"
+                      class="select-all-on-click w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 bg-slate-900/95 px-4 py-4 sm:px-6">
+        <p id="quick-form-limitation-note" class="text-xs text-slate-500 hidden"></p>
+        <div class="flex flex-wrap items-center gap-2">
+          <button type="button" onclick="hideQuickEdit()"
+            class="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-slate-500 hover:text-white">
+            Cancel
+          </button>
+          <button id="quick-edit-save-btn" type="button" onclick="saveQuickEdit()"
+            class="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500">
+            Save Changes
+          </button>
+          <button id="quick-edit-save-start-btn" type="button" onclick="saveQuickEditAndStart()"
+            class="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-500">
+            Save &amp; Start
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="quick-edit-backdrop" onclick="hideQuickEdit()" class="quick-edit-backdrop fixed inset-0 z-[109] hidden bg-black/70 backdrop-blur-sm"></div>
+
+  <!-- Analytics Modal -->
+  <div id="analyticsModal" class="fixed inset-0 z-[60] hidden overflow-y-auto bg-slate-950/80 backdrop-blur-sm"
+    onclick="if(event.target===this)closeAnalyticsModal()">
+    <div class="flex min-h-full items-center justify-center p-2 sm:p-4" onclick="if(event.target===this)closeAnalyticsModal()">
+      <div
+        class="w-full max-w-[98vw] sm:max-w-6xl rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden">
+        <!-- Modal Header -->
+        <div
+          class="flex flex-col sm:flex-row sm:items-center justify-between px-3 sm:px-6 py-3 sm:py-4 border-b border-slate-800 bg-slate-900/50 gap-2 sm:gap-0">
+          <div class="flex items-center gap-2 sm:gap-3">
+            <span class="text-xl sm:text-2xl">📈</span>
+            <div>
+              <h3 class="text-base sm:text-xl font-bold text-white">Analytics</h3>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 sm:gap-3 flex-wrap">
+            <!-- Filters -->
+            <select id="analytics-symbol-filter" onchange="loadAnalytics(currentAnalyticsPeriod)"
+              class="bg-slate-800 text-xs text-slate-300 border border-slate-700 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-500 max-w-[120px]">
+              <option value="">All Symbols</option>
+            </select>
+            <select id="analytics-bot-filter" onchange="loadAnalytics(currentAnalyticsPeriod)"
+              class="bg-slate-800 text-xs text-slate-300 border border-slate-700 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-500 max-w-[140px]">
+              <option value="">All Bots</option>
+            </select>
+            <!-- Period Selector -->
+            <div class="flex p-1 bg-slate-800 rounded-lg">
+              <button onclick="loadAnalytics('today')" id="analytics-today"
+                class="px-3 py-1 text-xs font-medium rounded-md transition-all text-slate-400 hover:text-slate-200">1D</button>
+              <button onclick="loadAnalytics('7d')" id="analytics-7d"
+                class="px-3 py-1 text-xs font-medium rounded-md transition-all text-slate-400 hover:text-slate-200">7D</button>
+              <button onclick="loadAnalytics('30d')" id="analytics-30d"
+                class="px-3 py-1 text-xs font-medium rounded-md transition-all text-slate-400 hover:text-slate-200">30D</button>
+              <button onclick="loadAnalytics('all')" id="analytics-all"
+                class="px-3 py-1 text-xs font-medium rounded-md bg-emerald-600 text-white shadow-lg">ALL</button>
+            </div>
+            <button onclick="closeAnalyticsModal()"
+              class="p-2 hover:bg-slate-800 rounded-full transition text-slate-400 hover:text-white">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Modal Content -->
+        <div class="p-3 sm:p-6 max-h-[85vh] overflow-y-auto">
+
+          <!-- Loading State -->
+          <div id="ana-loading" class="hidden flex items-center justify-center py-16">
+            <div class="flex items-center gap-3">
+              <div class="w-5 h-5 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin"></div>
+              <span class="text-sm text-slate-400">Loading analytics...</span>
+            </div>
+          </div>
+          <!-- Error State -->
+          <div id="ana-error" class="hidden text-center py-16">
+            <p class="text-red-400 text-sm">Failed to load analytics data</p>
+            <button onclick="loadAnalytics(currentAnalyticsPeriod)"
+              class="mt-3 px-4 py-1.5 text-xs bg-slate-800 text-slate-300 rounded-lg hover:bg-slate-700 transition">Retry</button>
+          </div>
+          <!-- Empty State -->
+          <div id="ana-empty" class="hidden text-center py-16">
+            <span class="text-3xl block mb-2">📊</span>
+            <p class="text-slate-400 text-sm">No trades found for this period</p>
+          </div>
+
+          <!-- Main Content (hidden until data loaded) -->
+          <div id="ana-content" class="hidden space-y-4 sm:space-y-5">
+
+            <!-- Row 1: Primary Metrics -->
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+              <div class="bg-slate-800/40 p-2.5 sm:p-4 rounded-xl border border-slate-700/50">
+                <p class="text-[10px] sm:text-xs text-slate-400 uppercase tracking-wider mb-1"
+                  title="Total realized profit and loss for the period (net of trading fees)">Net PnL</p>
+                <p id="ana-net-pnl" class="text-lg sm:text-2xl font-bold">$0.00</p>
+              </div>
+              <div class="bg-slate-800/40 p-2.5 sm:p-4 rounded-xl border border-slate-700/50">
+                <p class="text-[10px] sm:text-xs text-slate-400 uppercase tracking-wider mb-1"
+                  title="Total number of closed trades in the period">Total Trades</p>
+                <p id="ana-total-trades" class="text-lg sm:text-2xl font-bold text-white">0</p>
+              </div>
+              <div class="bg-slate-800/40 p-2.5 sm:p-4 rounded-xl border border-slate-700/50">
+                <p class="text-[10px] sm:text-xs text-slate-400 uppercase tracking-wider mb-1"
+                  title="Percentage of trades that were profitable">Win Rate</p>
+                <p id="ana-win-rate" class="text-lg sm:text-2xl font-bold">0.0%</p>
+              </div>
+              <div class="bg-slate-800/40 p-2.5 sm:p-4 rounded-xl border border-slate-700/50">
+                <p class="text-[10px] sm:text-xs text-slate-400 uppercase tracking-wider mb-1"
+                  title="Ratio of gross profit to gross loss. Above 1.0 means profitable overall">Profit Factor</p>
+                <p id="ana-profit-factor" class="text-lg sm:text-2xl font-bold text-blue-400">0.00</p>
+              </div>
+            </div>
+
+            <!-- Row 2: Trade Quality -->
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+              <div class="bg-slate-800/40 p-2.5 sm:p-4 rounded-xl border border-slate-700/50">
+                <p class="text-[10px] sm:text-xs text-slate-400 uppercase tracking-wider mb-1"
+                  title="Average profit on winning trades">Avg Win</p>
+                <p id="ana-avg-win" class="text-lg sm:text-2xl font-bold text-emerald-400">$0.00</p>
+              </div>
+              <div class="bg-slate-800/40 p-2.5 sm:p-4 rounded-xl border border-slate-700/50">
+                <p class="text-[10px] sm:text-xs text-slate-400 uppercase tracking-wider mb-1"
+                  title="Average loss on losing trades">Avg Loss</p>
+                <p id="ana-avg-loss" class="text-lg sm:text-2xl font-bold text-red-400">$0.00</p>
+              </div>
+              <div class="bg-slate-800/40 p-2.5 sm:p-4 rounded-xl border border-slate-700/50">
+                <p class="text-[10px] sm:text-xs text-slate-400 uppercase tracking-wider mb-1"
+                  title="Ratio of average win to average loss. Higher means winners are larger than losers">Payoff Ratio</p>
+                <p id="ana-payoff-ratio" class="text-lg sm:text-2xl font-bold text-blue-400">0.00</p>
+              </div>
+              <div class="bg-slate-800/40 p-2.5 sm:p-4 rounded-xl border border-slate-700/50">
+                <p class="text-[10px] sm:text-xs text-slate-400 uppercase tracking-wider mb-1"
+                  title="Expected profit per trade = (win% × avg win) − (loss% × avg loss). Negative means losing money per trade on average">Expectancy</p>
+                <p id="ana-expectancy" class="text-lg sm:text-2xl font-bold">$0.00</p>
+              </div>
+            </div>
+
+            <!-- Row 3: Risk & Records -->
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+              <div class="bg-slate-800/40 p-2.5 sm:p-4 rounded-xl border border-slate-700/50">
+                <p class="text-[10px] sm:text-xs text-slate-400 uppercase tracking-wider mb-1"
+                  title="Largest peak-to-trough decline in cumulative PnL during the period">Max Drawdown</p>
+                <p id="ana-mdd" class="text-lg sm:text-2xl font-bold text-red-400">$0.00</p>
+                <p id="ana-mdd-pct" class="text-[10px] text-slate-500"></p>
+              </div>
+              <div class="bg-slate-800/40 p-2.5 sm:p-4 rounded-xl border border-slate-700/50">
+                <p class="text-[10px] sm:text-xs text-slate-400 uppercase tracking-wider mb-1"
+                  title="Most profitable single day in the period">Best Day</p>
+                <p id="ana-best-day" class="text-lg sm:text-2xl font-bold text-emerald-400">-</p>
+                <p id="ana-best-day-date" class="text-[10px] text-slate-500"></p>
+              </div>
+              <div class="bg-slate-800/40 p-2.5 sm:p-4 rounded-xl border border-slate-700/50">
+                <p class="text-[10px] sm:text-xs text-slate-400 uppercase tracking-wider mb-1"
+                  title="Worst single day in the period">Worst Day</p>
+                <p id="ana-worst-day" class="text-lg sm:text-2xl font-bold text-red-400">-</p>
+                <p id="ana-worst-day-date" class="text-[10px] text-slate-500"></p>
+              </div>
+              <div class="bg-slate-800/40 p-2.5 sm:p-4 rounded-xl border border-slate-700/50">
+                <p class="text-[10px] sm:text-xs text-slate-400 uppercase tracking-wider mb-1"
+                  title="Current consecutive win or loss streak (W = wins, L = losses)">Streak</p>
+                <p id="ana-streak" class="text-lg sm:text-2xl font-bold text-slate-400">-</p>
+              </div>
+            </div>
+
+            <!-- Loss Asymmetry Diagnostic -->
+            <div id="ana-diagnostic" class="hidden bg-amber-900/20 border border-amber-700/40 rounded-xl px-4 py-3">
+              <div class="flex items-start gap-2.5">
+                <span class="text-amber-400 text-sm mt-0.5">&#9888;</span>
+                <div id="ana-diagnostic-text" class="text-xs text-amber-200/90 leading-relaxed space-y-1"></div>
+              </div>
+            </div>
+
+            <!-- Charts Section -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+              <!-- Equity Curve -->
+              <div class="bg-slate-800/40 p-4 sm:p-5 rounded-xl border border-slate-700/50 space-y-3">
+                <h4 class="text-sm font-semibold text-slate-300">Equity Curve & Drawdown</h4>
+                <div class="h-[280px] sm:h-[300px] w-full">
+                  <canvas id="equityChart"></canvas>
+                </div>
+              </div>
+              <!-- Daily PnL -->
+              <div class="bg-slate-800/40 p-4 sm:p-5 rounded-xl border border-slate-700/50 space-y-3">
+                <h4 class="text-sm font-semibold text-slate-300">Daily PnL Breakdown</h4>
+                <div class="h-[280px] sm:h-[300px] w-full">
+                  <canvas id="dailyPnlChart"></canvas>
+                </div>
+              </div>
+            </div>
+
+          </div><!-- /ana-content -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Asset Transfer Modal -->
+  <div id="transferModal" class="fixed inset-0 z-[100] hidden">
+    <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="closeTransferModal()"></div>
+    <div class="relative flex items-center justify-center min-h-screen p-4" onclick="if(event.target===this)closeTransferModal()">
+      <div class="relative bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md p-6">
+        <div class="flex items-center justify-between mb-6">
+          <h3 class="text-lg font-bold text-white flex items-center gap-2">
+            <span>🔄</span> Asset Transfer
+          </h3>
+          <button onclick="closeTransferModal()" class="text-slate-400 hover:text-white transition">✕</button>
+        </div>
+
+        <form id="transfer-form" class="space-y-4">
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">From Account</label>
+            <select id="transfer-from"
+              class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+              <option value="UNIFIED">Unified Trading Account</option>
+              <option value="FUND">Funding Account</option>
+            </select>
+          </div>
+
+          <div class="flex justify-center -my-2 relative z-10">
+            <button type="button" onclick="swapTransferDirection()"
+              class="bg-slate-700 hover:bg-slate-600 text-white p-1 rounded-full border border-slate-600 transition shadow-lg">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"></path>
+              </svg>
+            </button>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">To Account</label>
+            <select id="transfer-to"
+              class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+              <option value="FUND">Funding Account</option>
+              <option value="UNIFIED">Unified Trading Account</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">Asset</label>
+            <select id="transfer-coin"
+              class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+              <option value="USDT">USDT</option>
+              <option value="USDC">USDC</option>
+            </select>
+          </div>
+
+          <div>
+            <div class="flex justify-between mb-1">
+              <label class="block text-xs font-medium text-slate-400">Amount</label>
+              <span class="text-[10px] text-slate-500 cursor-pointer hover:text-emerald-400"
+                onclick="setMaxTransferAmount()">Max: <span id="transfer-max-amount">0.00</span></span>
+            </div>
+            <input type="number" id="transfer-amount" step="any" placeholder="0.00"
+              class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+          </div>
+
+          <div class="pt-2">
+            <button type="button" id="btn-confirm-transfer" onclick="submitTransfer()"
+              class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition shadow-lg shadow-emerald-900/20 flex items-center justify-center gap-2">
+              <span id="transfer-btn-text">Confirm Transfer</span>
+              <span id="transfer-spinner" class="hidden animate-spin">↻</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div id="serviceActionModal" class="fixed inset-0 z-[110] hidden">
+    <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="closeServiceActionModal()"></div>
+    <div class="relative flex items-center justify-center min-h-screen p-4" onclick="if(event.target===this)closeServiceActionModal()">
+      <div class="relative w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
+        <div class="flex items-start justify-between gap-4 border-b border-slate-800 px-6 py-5">
+          <div>
+            <p id="serviceActionEyebrow" class="section-eyebrow text-amber-400">Service Control</p>
+            <h3 id="serviceActionTitle" class="mt-1 text-lg font-semibold text-white">Restart Runner</h3>
+            <p id="serviceActionMessage" class="mt-2 text-sm leading-6 text-slate-300">
+              This will stop the runner process, then start it again.
+            </p>
+          </div>
+          <button onclick="closeServiceActionModal()"
+            class="rounded-lg p-2 text-slate-400 transition hover:bg-slate-800 hover:text-white"
+            title="Close service action dialog">
+            ✕
+          </button>
+        </div>
+        <div class="px-6 py-5">
+          <div id="serviceActionWarning"
+            class="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            Active positions will remain open while the runner is unavailable.
+          </div>
+        </div>
+        <div class="flex items-center justify-end gap-3 border-t border-slate-800 px-6 py-4">
+          <button id="serviceActionCancel" onclick="closeServiceActionModal()"
+            class="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800 hover:text-white">
+            Cancel
+          </button>
+          <button id="serviceActionConfirm" onclick="executeServiceAction()"
+            class="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-500">
+            <span id="serviceActionConfirmText">Restart Runner</span>
+            <span id="serviceActionConfirmSpinner" class="hidden animate-spin">↻</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <button id="floating-active-bots-button" type="button" class="floating-scroll-button floating-scroll-button--secondary"
+    aria-label="Scroll to Active Bots">
+    <span class="floating-scroll-button__icon" aria-hidden="true">
+      <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7h16M4 12h16M4 17h16" />
+      </svg>
+    </span>
+    <span class="min-w-0">
+      <span class="block text-sm font-semibold text-white">Bots</span>
+      <span class="block text-[11px] text-slate-400">Jump to Active Bots</span>
+    </span>
+  </button>
+
+  <button id="floating-scroll-button" type="button" class="floating-scroll-button" data-target="scanner"
+    aria-label="Scroll to Neutral Scanner">
+    <span class="floating-scroll-button__icon" aria-hidden="true">
+      <svg id="floating-scroll-icon" class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 5v14m0 0 6-6m-6 6-6-6" />
+      </svg>
+    </span>
+    <span class="min-w-0">
+      <span id="floating-scroll-label" class="block text-sm font-semibold text-white">Scanner</span>
+      <span id="floating-scroll-subtitle" class="block text-[11px] text-slate-400">Jump to Neutral Scanner</span>
+    </span>
+  </button>
+
+  <div id="profit-rain-layer" aria-hidden="true"></div>
+  <div id="celebration-layer" aria-hidden="true"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    // app_lf.js is the primary client; app_v5.js is loaded only for shared globals/helpers.
+    window.__DASHBOARD_PRIMARY_SCRIPT__ = "app_lf";
+  </script>
+  <script src="{{ url_for('static', filename='js/app_v5.min.js') }}?v=20260317bridge"></script>
+  <script src="{{ url_for('static', filename='js/app_lf.min.js') }}?v=20260317bridge"></script>
+</body>
+
+</html>

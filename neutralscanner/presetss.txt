@@ -1,0 +1,41 @@
+(() => {
+  const preset = {
+    name: "Default - All Coins",
+    sortLevels: [{ col: "symbol", dir: "asc" }],
+    filterRules: [],
+    combineMode: "AND"
+  };
+  const current = JSON.parse(localStorage.getItem("scanner_presets_v1") || "[]");
+  const map = new Map(current.map(p => [p.name, p]));
+  map.set(preset.name, preset);
+  localStorage.setItem("scanner_presets_v1", JSON.stringify([...map.values()]));
+  location.reload();
+})();
+
+
+(async () => {
+  const incoming = await (await fetch('./presets/presets_all.json')).json();
+  const current = JSON.parse(localStorage.getItem('scanner_presets_v1') || '[]');
+  const map = new Map(current.map(p => [p.name, p]));
+  incoming.forEach(p => map.set(p.name, p)); // overwrite by name
+  localStorage.setItem('scanner_presets_v1', JSON.stringify([...map.values()]));
+  location.reload();
+})();
+
+(() => {
+  const preset = {
+    name: "Blank - Custom",
+    sortLevels: [],
+    filterRules: [],
+    combineMode: "AND"
+  };
+
+  const key = "scanner_presets_v1";
+  const current = JSON.parse(localStorage.getItem(key) || "[]");
+
+  const map = new Map(current.map(p => [p.name, p]));
+  map.set(preset.name, preset);
+
+  localStorage.setItem(key, JSON.stringify([...map.values()]));
+  location.reload();
+})();

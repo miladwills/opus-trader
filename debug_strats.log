@@ -1,0 +1,16 @@
+1. Setup Engine
+INFO:services.grid_bot_service:Open Interest service initialized
+INFO:services.grid_bot_service:Order Book service initialized
+INFO:services.grid_bot_service:Liquidation service initialized
+INFO:services.grid_bot_service:Session service initialized
+INFO:services.grid_bot_service:Mean Reversion service initialized
+INFO:services.grid_bot_service:Whale Detection service initialized
+2. Setup Bot
+INFO:services.backtest.engine:Bot setup complete: backtest_bot_BTCUSDT
+   Bot: {'id': 'backtest_bot_BTCUSDT', 'symbol': 'BTCUSDT', 'status': 'running', 'type': 'neutral', 'capital': 100.0, 'leverage': 5, 'grid_lines': 5, 'grid_step_pct': 0.005, 'created_at': 1767862017.4641845, 'trading_env': 'BACKTEST', 'upnl_stoploss_enabled': False, 'auto_margin': {'enabled': False}, 'trend_watch': False, 'rsi_filter': False, 'dynamic_range': False, 'mode': 'neutral'}
+3. Swapping client manually (simulating run_bot_cycle)
+4. Calling _run_neutral_classic_bybit directly...
+ERROR:services.neutral_grid_service:[BTCUSDT] HEDGE_MODE_REQUIRED: position mode is one-way for symbol
+   Result: {'id': 'backtest_bot_BTCUSDT', 'symbol': 'BTCUSDT', 'status': 'error', 'type': 'neutral', 'capital': 100.0, 'leverage': 5, 'grid_lines': 5, 'grid_step_pct': 0.005, 'created_at': 1767862017.4641845, 'trading_env': 'BACKTEST', 'upnl_stoploss_enabled': False, 'auto_margin': {'enabled': False}, 'trend_watch': False, 'rsi_filter': False, 'dynamic_range': False, 'mode': 'neutral', 'last_error': 'HEDGE_MODE_REQUIRED: position mode is one-way for symbol', 'last_run_at': '2026-01-08T08:46:57.464243+00:00', 'error_code': 'HEDGE_MODE_REQUIRED'}
+5. Orders placed: 0
+   Open orders: 0

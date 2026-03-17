@@ -1,0 +1,48 @@
+openapi: 3.0.0
+info:
+  title: Unified to Funding Transfer API
+  version: 1.0.0
+paths:
+  /api/account/overview:
+    get:
+      summary: Get account overview with balances for all relevant account types.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  equity: { type: number }
+                  available_balance: { type: number }
+                  funding_balance: { type: number }
+                  realized_pnl: { type: number }
+                  unrealized_pnl: { type: number }
+
+  /api/transfer:
+    post:
+      summary: Execute an internal asset transfer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount: { type: number }
+                from_type: { type: string }
+                to_type: { type: string }
+                coin: { type: string }
+      responses:
+        '200':
+          description: Transfer successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  transfer_id: { type: string }
+        '400':
+          description: Transfer failed

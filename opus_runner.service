@@ -1,0 +1,15 @@
+[Unit]
+Description=Opus Trader Bot Runner
+After=network.target
+
+[Service]
+User=root
+Group=root
+WorkingDirectory=/var/www/opus_trader
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/var/www/opus_trader/venv/bin/python runner.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

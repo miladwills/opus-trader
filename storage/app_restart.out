@@ -1,0 +1,6 @@
+[2026-03-17 02:55:42 +0100] [79309] [ERROR] connection to ('0.0.0.0', 8000) failed: [Errno 1] Operation not permitted
+[2026-03-17 02:55:43 +0100] [79309] [ERROR] connection to ('0.0.0.0', 8000) failed: [Errno 1] Operation not permitted
+[2026-03-17 02:55:44 +0100] [79309] [ERROR] connection to ('0.0.0.0', 8000) failed: [Errno 1] Operation not permitted
+[2026-03-17 02:55:45 +0100] [79309] [ERROR] connection to ('0.0.0.0', 8000) failed: [Errno 1] Operation not permitted
+[2026-03-17 02:55:46 +0100] [79309] [ERROR] connection to ('0.0.0.0', 8000) failed: [Errno 1] Operation not permitted
+[2026-03-17 02:55:47 +0100] [79309] [ERROR] Can't connect to ('0.0.0.0', 8000)

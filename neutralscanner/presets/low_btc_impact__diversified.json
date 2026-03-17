@@ -1,0 +1,50 @@
+{
+  "name": "Low BTC Impact - Diversified",
+  "sortLevels": [
+    {
+      "col": "btc_impact",
+      "dir": "desc"
+    },
+    {
+      "col": "btc_corr",
+      "dir": "asc"
+    },
+    {
+      "col": "vol24h",
+      "dir": "desc"
+    },
+    {
+      "col": "speed_pct",
+      "dir": "asc"
+    }
+  ],
+  "filterRules": [
+    {
+      "col": "btc_impact",
+      "op": "!=",
+      "val": "high",
+      "val2": ""
+    },
+    {
+      "col": "btc_impact",
+      "op": "!=",
+      "val": "medium",
+      "val2": ""
+    },
+    {
+      "col": "btc_impact",
+      "op": "!=",
+      "val": "unknown",
+      "val2": ""
+    },
+    {
+      "col": "vol24h",
+      "op": ">=",
+      "val": "8000000",
+      "val2": ""
+    }
+  ],
+  "combineMode": "AND",
+  "createdAt": "2026-01-09T00:00:00Z",
+  "updatedAt": "2026-01-09T00:00:00Z"
+}

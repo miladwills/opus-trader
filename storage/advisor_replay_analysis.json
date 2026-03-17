@@ -1,0 +1,331 @@
+{
+  "by_mode": [],
+  "by_symbol": [],
+  "error": null,
+  "metadata": {
+    "bucket_seconds": 900,
+    "comparison_policy": "validated_replay_windows_only",
+    "global_baseline_started_at": "2026-03-12T17:45:14.297518+00:00",
+    "live_review_source": "storage/ai_advisor_review.json",
+    "replay_window_requirement": "validation grade must not be INSUFFICIENT_DATA",
+    "runs_root": "storage/backtest_runs"
+  },
+  "recent": [],
+  "runs": [],
+  "summary": {
+    "comparative_subset": {
+      "agreement_buckets": {
+        "live": {},
+        "replay": {}
+      },
+      "confidence_buckets": {
+        "high": {
+          "count": 0,
+          "live": {
+            "avg_pnl": null,
+            "count": 0,
+            "net_pnl": 0.0,
+            "payoff_ratio": 0.0,
+            "profit_factor": 0.0,
+            "win_rate": 0.0
+          },
+          "replay": {
+            "avg_pnl": null,
+            "count": 0,
+            "net_pnl": 0.0,
+            "payoff_ratio": 0.0,
+            "profit_factor": 0.0,
+            "win_rate": 0.0
+          }
+        },
+        "low": {
+          "count": 0,
+          "live": {
+            "avg_pnl": null,
+            "count": 0,
+            "net_pnl": 0.0,
+            "payoff_ratio": 0.0,
+            "profit_factor": 0.0,
+            "win_rate": 0.0
+          },
+          "replay": {
+            "avg_pnl": null,
+            "count": 0,
+            "net_pnl": 0.0,
+            "payoff_ratio": 0.0,
+            "profit_factor": 0.0,
+            "win_rate": 0.0
+          }
+        },
+        "mid": {
+          "count": 0,
+          "live": {
+            "avg_pnl": null,
+            "count": 0,
+            "net_pnl": 0.0,
+            "payoff_ratio": 0.0,
+            "profit_factor": 0.0,
+            "win_rate": 0.0
+          },
+          "replay": {
+            "avg_pnl": null,
+            "count": 0,
+            "net_pnl": 0.0,
+            "payoff_ratio": 0.0,
+            "profit_factor": 0.0,
+            "win_rate": 0.0
+          }
+        },
+        "unknown": {
+          "count": 0,
+          "live": {
+            "avg_pnl": null,
+            "count": 0,
+            "net_pnl": 0.0,
+            "payoff_ratio": 0.0,
+            "profit_factor": 0.0,
+            "win_rate": 0.0
+          },
+          "replay": {
+            "avg_pnl": null,
+            "count": 0,
+            "net_pnl": 0.0,
+            "payoff_ratio": 0.0,
+            "profit_factor": 0.0,
+            "win_rate": 0.0
+          }
+        }
+      },
+      "live": {
+        "approve": {
+          "avg_pnl": null,
+          "count": 0,
+          "net_pnl": 0.0,
+          "payoff_ratio": 0.0,
+          "profit_factor": 0.0,
+          "win_rate": 0.0
+        },
+        "caution": {
+          "avg_pnl": null,
+          "count": 0,
+          "net_pnl": 0.0,
+          "payoff_ratio": 0.0,
+          "profit_factor": 0.0,
+          "win_rate": 0.0
+        },
+        "reject": {
+          "avg_pnl": null,
+          "count": 0,
+          "net_pnl": 0.0,
+          "payoff_ratio": 0.0,
+          "profit_factor": 0.0,
+          "win_rate": 0.0
+        }
+      },
+      "matched_decision_count": 0,
+      "matched_validation_run_count": 0,
+      "replay": {
+        "approve": {
+          "avg_pnl": null,
+          "count": 0,
+          "net_pnl": 0.0,
+          "payoff_ratio": 0.0,
+          "profit_factor": 0.0,
+          "win_rate": 0.0
+        },
+        "caution": {
+          "avg_pnl": null,
+          "count": 0,
+          "net_pnl": 0.0,
+          "payoff_ratio": 0.0,
+          "profit_factor": 0.0,
+          "win_rate": 0.0
+        },
+        "reject": {
+          "avg_pnl": null,
+          "count": 0,
+          "net_pnl": 0.0,
+          "payoff_ratio": 0.0,
+          "profit_factor": 0.0,
+          "win_rate": 0.0
+        }
+      }
+    },
+    "comparison_unit": "live advisor-reviewed decision matched to same symbol/mode/decision_type within a validated replay run and the same 15m decision bucket",
+    "correlational_only": true,
+    "live_overall": {
+      "blocked_or_skipped_counts": {
+        "approve": 0,
+        "caution": 0,
+        "reject": 0
+      },
+      "confidence_buckets": {
+        "high": {
+          "count": 0,
+          "live": {
+            "avg_pnl": null,
+            "count": 0,
+            "net_pnl": 0.0,
+            "payoff_ratio": 0.0,
+            "profit_factor": 0.0,
+            "win_rate": 0.0
+          },
+          "replay": {
+            "avg_pnl": null,
+            "count": 0,
+            "net_pnl": 0.0,
+            "payoff_ratio": 0.0,
+            "profit_factor": 0.0,
+            "win_rate": 0.0
+          }
+        },
+        "low": {
+          "count": 0,
+          "live": {
+            "avg_pnl": null,
+            "count": 0,
+            "net_pnl": 0.0,
+            "payoff_ratio": 0.0,
+            "profit_factor": 0.0,
+            "win_rate": 0.0
+          },
+          "replay": {
+            "avg_pnl": null,
+            "count": 0,
+            "net_pnl": 0.0,
+            "payoff_ratio": 0.0,
+            "profit_factor": 0.0,
+            "win_rate": 0.0
+          }
+        },
+        "mid": {
+          "count": 0,
+          "live": {
+            "avg_pnl": null,
+            "count": 0,
+            "net_pnl": 0.0,
+            "payoff_ratio": 0.0,
+            "profit_factor": 0.0,
+            "win_rate": 0.0
+          },
+          "replay": {
+            "avg_pnl": null,
+            "count": 0,
+            "net_pnl": 0.0,
+            "payoff_ratio": 0.0,
+            "profit_factor": 0.0,
+            "win_rate": 0.0
+          }
+        },
+        "unknown": {
+          "count": 0,
+          "live": {
+            "avg_pnl": null,
+            "count": 0,
+            "net_pnl": 0.0,
+            "payoff_ratio": 0.0,
+            "profit_factor": 0.0,
+            "win_rate": 0.0
+          },
+          "replay": {
+            "avg_pnl": null,
+            "count": 0,
+            "net_pnl": 0.0,
+            "payoff_ratio": 0.0,
+            "profit_factor": 0.0,
+            "win_rate": 0.0
+          }
+        }
+      },
+      "executed_after_verdict_counts": {
+        "approve": 0,
+        "caution": 0,
+        "reject": 0
+      },
+      "live": {
+        "approve": {
+          "avg_pnl": null,
+          "count": 0,
+          "net_pnl": 0.0,
+          "payoff_ratio": 0.0,
+          "profit_factor": 0.0,
+          "win_rate": 0.0
+        },
+        "caution": {
+          "avg_pnl": null,
+          "count": 0,
+          "net_pnl": 0.0,
+          "payoff_ratio": 0.0,
+          "profit_factor": 0.0,
+          "win_rate": 0.0
+        },
+        "reject": {
+          "avg_pnl": null,
+          "count": 0,
+          "net_pnl": 0.0,
+          "payoff_ratio": 0.0,
+          "profit_factor": 0.0,
+          "win_rate": 0.0
+        }
+      },
+      "replay": {
+        "approve": {
+          "avg_pnl": null,
+          "count": 0,
+          "net_pnl": 0.0,
+          "payoff_ratio": 0.0,
+          "profit_factor": 0.0,
+          "win_rate": 0.0
+        },
+        "caution": {
+          "avg_pnl": null,
+          "count": 0,
+          "net_pnl": 0.0,
+          "payoff_ratio": 0.0,
+          "profit_factor": 0.0,
+          "win_rate": 0.0
+        },
+        "reject": {
+          "avg_pnl": null,
+          "count": 0,
+          "net_pnl": 0.0,
+          "payoff_ratio": 0.0,
+          "profit_factor": 0.0,
+          "win_rate": 0.0
+        }
+      },
+      "total_advisor_reviewed_decisions": 0,
+      "verdict_counts": {
+        "approve": 0,
+        "caution": 0,
+        "reject": 0
+      }
+    },
+    "posture_assessment": "too_permissive_or_not_separating",
+    "quality_flags": {
+      "avg_validation_score": null,
+      "live_review_count": 0,
+      "matched_replay_count": 0,
+      "replay_match_status_counts": {},
+      "unmatched_live_review_count": 0,
+      "validation_grades": {}
+    },
+    "usefulness": {
+      "avg_validation_score": null,
+      "grade": "INSUFFICIENT_DATA",
+      "live_gap": {
+        "avg_pnl_gap": null,
+        "profit_factor_gap": 0.0,
+        "win_rate_gap": 0.0
+      },
+      "reason": "not_enough_matched_live_replay_outcomes",
+      "replay_gap": {
+        "avg_pnl_gap": null,
+        "profit_factor_gap": 0.0,
+        "win_rate_gap": 0.0
+      }
+    }
+  },
+  "updated_at": "2026-03-13T05:24:14.750237+00:00",
+  "version": 1
+}

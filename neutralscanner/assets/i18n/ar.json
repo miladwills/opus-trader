@@ -1,0 +1,117 @@
+{
+    "app": {
+        "title": "ماسح الفيوتشرز النيوترال برو - Bybit (15m + 1h)",
+        "subtitle": "الصف الأخضر = عملة متاحة للنيوترال (رينجي على 15m وغير ترند على 1h). الصف الأحمر = عملة ترند على فريم الساعة (ADX 1h >= 25)."
+    },
+    "table": {
+        "headers": {
+            "index": "#",
+            "alert": "تنبيه",
+            "symbol": "الرمز",
+            "state": "الحالة",
+            "recommendation": "التوصية",
+            "price": "السعر",
+            "adx15": "ADX 15m",
+            "adx1h": "ADX 1h",
+            "rsi15": "RSI 15m",
+            "rsi1h": "RSI 1h",
+            "bbw15": "BBW% 15m",
+            "bbw1h": "BBW% 1h",
+            "atrPct15": "ATR% 15m",
+            "atrPct1h": "ATR% 1h",
+            "vol24h": "حجم 24h",
+            "speed": "السرعة %",
+            "direction": "الاتجاه",
+            "btcCorr": "ارتباط BTC",
+            "btcBeta": "بيتا BTC",
+            "btcImpact": "التأثير",
+            "actions": "إجراءات"
+        }
+    },
+    "states": {
+        "NEUTRAL": "نيوترال",
+        "TREND_UP": "ترند صاعد",
+        "TREND_DOWN": "ترند هابط",
+        "TRANSITION": "انتقالي",
+        "VOLATILE": "متقلب"
+    },
+    "recommendations": {
+        "neutral_fixed": "نيوترال / ثابت",
+        "neutral_trailing": "نيوترال / متتبع",
+        "long_fixed": "شراء / ثابت",
+        "long_trailing": "شراء / متتبع",
+        "short_fixed": "بيع / ثابت",
+        "short_trailing": "بيع / متتبع",
+        "volatile_avoid": "متقلب / تجنب",
+        "transition_wait": "انتقالي / انتظر"
+    },
+    "directions": {
+        "flat_range": "رينجي بحت",
+        "neutral_up": "نيوترال صعود",
+        "neutral_down": "نيوترال هبوط",
+        "unclear": "غير واضح",
+        "unknown": "غير معروف"
+    },
+    "impacts": {
+        "high": "عالي",
+        "medium": "متوسط",
+        "low": "منخفض",
+        "weak": "ضعيف",
+        "unknown": "غير معروف"
+    },
+    "btc_risk": {
+        "title": "مستوى خطر البيتكوين",
+        "CALM": "هادئ",
+        "LOW": "منخفض",
+        "MED": "متوسط",
+        "HIGH": "مرتفع",
+        "top_corr": "الأعلى ارتباطاً",
+        "weak_corr": "الأضعف ارتباطاً"
+    },
+    "sort": {
+        "title": "الترتيب متعدد المستويات",
+        "level": "المستوى",
+        "column": "العمود",
+        "direction": "الاتجاه",
+        "asc": "تصاعدي",
+        "desc": "تنازلي",
+        "apply": "تطبيق الترتيب",
+        "reset": "إعادة تعيين",
+        "addLevel": "إضافة مستوى",
+        "none": "بدون"
+    },
+    "filter": {
+        "title": "منشئ الفلاتر",
+        "addRule": "إضافة قاعدة",
+        "apply": "تطبيق الفلاتر",
+        "reset": "إعادة تعيين",
+        "combineMode": "طريقة الدمج",
+        "and": "و",
+        "or": "أو"
+    },
+    "presets": {
+        "title": "الإعدادات المحفوظة",
+        "namePlaceholder": "اسم الإعداد (مثال: نيوترال، ترند شراء)",
+        "save": "حفظ الإعداد",
+        "hint": "احفظ إعدادات الترتيب + الفلاتر باسم، ثم اضغط على الزر لتطبيق الإعداد المحفوظ.",
+        "none": "لا توجد إعدادات محفوظة بعد.",
+        "nameRequired": "اكتب اسم الإعداد أولاً.",
+        "confirmOverwrite": "هذا الاسم موجود بالفعل. هل تريد الاستبدال؟",
+        "confirmDelete": "حذف هذا الإعداد؟"
+    },
+    "common": {
+        "lastUpdate": "آخر تحديث",
+        "addSymbol": "إضافة عملة",
+        "add": "إضافة",
+        "delete": "حذف",
+        "enable": "تفعيل",
+        "disable": "إيقاف",
+        "soundAlert": "صوت التنبيه",
+        "language": "اللغة",
+        "loading": "جاري تحميل البيانات...",
+        "noData": "لا توجد بيانات متاحة. تأكد من الاتصال بالإنترنت ورموز Bybit."
+    },
+    "footer": {
+        "thresholds": "شروط النيوترال: 15m: ADX بين 12 و 30، RSI بين 30 و 70، BBW% حد أقصى ~25، ATR% حد أقصى ~3%. 1h: ADX >= 25 يعني ترند (صف أحمر)."
+    }
+}

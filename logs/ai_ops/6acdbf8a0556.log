@@ -1,0 +1,4 @@
+[2026-03-16T15:07:50] Starting fixer agent (model=sonnet, effort=high)
+[2026-03-16T15:07:50] Command: claude --print --dangerously-skip-permissions --model sonnet --effort high --no-session-persistence -p /fix-queue
+[2026-03-16T15:07:50] Agent process started (PID 1125136)
+[2026-03-16T15:08:50] Running... (60s elapsed, 0 lines captured)

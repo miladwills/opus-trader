@@ -1,0 +1,276 @@
+{
+  "symbol": "BNBUSDT",
+  "version": 1,
+  "created_at": "2026-03-14T12:11:19.439000+00:00",
+  "updated_at": "2026-03-17T14:02:48.262317+00:00",
+  "last_analysis_at": "2026-03-17T14:02:48.168435+00:00",
+  "total_trades": 4,
+  "training_hours": 7.3122,
+  "phase": "collecting",
+  "confidence_score": 0.0,
+  "processed_trade_ids": [
+    "27cd41ae-b99c-4576-8b2f-995c4a10b5d5",
+    "cfd225a0-baf4-41ce-b59e-46d5d4287ab7",
+    "ff121723-410a-467d-9d35-2580d44bbc33",
+    "e56ebb4b-5777-4013-9539-1a178f9ca8f0"
+  ],
+  "recent_outcomes": [
+    {
+      "id": "27cd41ae-b99c-4576-8b2f-995c4a10b5d5",
+      "time": "2026-03-14T12:11:19.439000+00:00",
+      "realized_pnl": -0.0831648,
+      "bot_investment": 36.49,
+      "mode": "long",
+      "range_mode": "trailing",
+      "bot_profile": "normal",
+      "effective_step_pct": 0.004597642944204505,
+      "runtime_open_order_cap_total": 6,
+      "fee_aware_min_step_pct": 0.0037,
+      "atr_5m_pct": 0.0008729994324247609,
+      "atr_15m_pct": 0.001839853919012184,
+      "regime_effective": "sideways",
+      "session_key": "european",
+      "day_of_week": 5,
+      "is_weekend": true,
+      "is_win": false
+    },
+    {
+      "id": "cfd225a0-baf4-41ce-b59e-46d5d4287ab7",
+      "time": "2026-03-14T18:34:53.624000+00:00",
+      "realized_pnl": -0.0827292,
+      "bot_investment": 36.37,
+      "mode": "neutral_classic_bybit",
+      "range_mode": "fixed",
+      "bot_profile": "normal",
+      "effective_step_pct": null,
+      "runtime_open_order_cap_total": null,
+      "fee_aware_min_step_pct": null,
+      "atr_5m_pct": 0.0007157905430709873,
+      "atr_15m_pct": 0.0014581482803485365,
+      "regime_effective": "sideways",
+      "session_key": "us",
+      "day_of_week": 5,
+      "is_weekend": true,
+      "is_win": false
+    },
+    {
+      "id": "ff121723-410a-467d-9d35-2580d44bbc33",
+      "time": "2026-03-14T18:41:07.362000+00:00",
+      "realized_pnl": -0.05648582,
+      "bot_investment": 36.37,
+      "mode": "neutral_classic_bybit",
+      "range_mode": "fixed",
+      "bot_profile": "normal",
+      "effective_step_pct": null,
+      "runtime_open_order_cap_total": null,
+      "fee_aware_min_step_pct": null,
+      "atr_5m_pct": 0.0006377090611730534,
+      "atr_15m_pct": 0.0014585952908575336,
+      "regime_effective": "sideways",
+      "session_key": "us",
+      "day_of_week": 5,
+      "is_weekend": true,
+      "is_win": false
+    },
+    {
+      "id": "e56ebb4b-5777-4013-9539-1a178f9ca8f0",
+      "time": "2026-03-14T19:30:03.267000+00:00",
+      "realized_pnl": -0.08842853,
+      "bot_investment": 36.37,
+      "mode": "neutral_classic_bybit",
+      "range_mode": "fixed",
+      "bot_profile": "normal",
+      "effective_step_pct": null,
+      "runtime_open_order_cap_total": null,
+      "fee_aware_min_step_pct": null,
+      "atr_5m_pct": 0.0006598864944676175,
+      "atr_15m_pct": 0.0014158098364831322,
+      "regime_effective": "sideways",
+      "session_key": "us",
+      "day_of_week": 5,
+      "is_weekend": true,
+      "is_win": false
+    }
+  ],
+  "trade_outcomes": {
+    "trades": 4,
+    "wins": 0,
+    "losses": 4,
+    "win_rate": 0.0,
+    "avg_pnl": -0.077702,
+    "avg_return": -0.002135,
+    "avg_win_pnl": 0.0,
+    "avg_loss_pnl": -0.077702,
+    "profit_factor": 0.0
+  },
+  "mode_performance": {
+    "long": {
+      "trades": 1,
+      "wins": 0,
+      "losses": 1,
+      "win_rate": 0.0,
+      "avg_pnl": -0.083165,
+      "avg_return": -0.002279,
+      "avg_win_pnl": 0.0,
+      "avg_loss_pnl": -0.083165,
+      "profit_factor": 0.0
+    },
+    "neutral_classic_bybit": {
+      "trades": 3,
+      "wins": 0,
+      "losses": 3,
+      "win_rate": 0.0,
+      "avg_pnl": -0.075881,
+      "avg_return": -0.002086,
+      "avg_win_pnl": 0.0,
+      "avg_loss_pnl": -0.075881,
+      "profit_factor": 0.0
+    }
+  },
+  "session_performance": {
+    "european": {
+      "trades": 1,
+      "wins": 0,
+      "losses": 1,
+      "win_rate": 0.0,
+      "avg_pnl": -0.083165,
+      "avg_return": -0.002279,
+      "avg_win_pnl": 0.0,
+      "avg_loss_pnl": -0.083165,
+      "profit_factor": 0.0
+    },
+    "us": {
+      "trades": 3,
+      "wins": 0,
+      "losses": 3,
+      "win_rate": 0.0,
+      "avg_pnl": -0.075881,
+      "avg_return": -0.002086,
+      "avg_win_pnl": 0.0,
+      "avg_loss_pnl": -0.075881,
+      "profit_factor": 0.0
+    }
+  },
+  "day_of_week": {
+    "5": {
+      "trades": 4,
+      "wins": 0,
+      "losses": 4,
+      "win_rate": 0.0,
+      "avg_pnl": -0.077702,
+      "avg_return": -0.002135,
+      "avg_win_pnl": 0.0,
+      "avg_loss_pnl": -0.077702,
+      "profit_factor": 0.0
+    }
+  },
+  "step_analysis": {
+    "samples": 1,
+    "buckets": [
+      {
+        "label": "0.0000-0.0030",
+        "trades": 0,
+        "win_rate": 0.0,
+        "avg_pnl": 0.0,
+        "avg_step_pct": null
+      },
+      {
+        "label": "0.0030-0.0050",
+        "trades": 1,
+        "win_rate": 0.0,
+        "avg_pnl": -0.083165,
+        "avg_step_pct": 0.00459764
+      },
+      {
+        "label": "0.0050-0.0080",
+        "trades": 0,
+        "win_rate": 0.0,
+        "avg_pnl": 0.0,
+        "avg_step_pct": null
+      },
+      {
+        "label": "0.0080-0.0120",
+        "trades": 0,
+        "win_rate": 0.0,
+        "avg_pnl": 0.0,
+        "avg_step_pct": null
+      },
+      {
+        "label": "0.0120+",
+        "trades": 0,
+        "win_rate": 0.0,
+        "avg_pnl": 0.0,
+        "avg_step_pct": null
+      }
+    ],
+    "optimal_step_pct": null,
+    "confidence": 0.0
+  },
+  "open_cap_analysis": {
+    "samples": 1,
+    "buckets": [
+      {
+        "label": "2-4",
+        "trades": 0,
+        "win_rate": 0.0,
+        "avg_pnl": 0.0,
+        "avg_open_cap": null
+      },
+      {
+        "label": "5-6",
+        "trades": 1,
+        "win_rate": 0.0,
+        "avg_pnl": -0.083165,
+        "avg_open_cap": 6.0
+      },
+      {
+        "label": "7-8",
+        "trades": 0,
+        "win_rate": 0.0,
+        "avg_pnl": 0.0,
+        "avg_open_cap": null
+      },
+      {
+        "label": "9-10",
+        "trades": 0,
+        "win_rate": 0.0,
+        "avg_pnl": 0.0,
+        "avg_open_cap": null
+      },
+      {
+        "label": "11+",
+        "trades": 0,
+        "win_rate": 0.0,
+        "avg_pnl": 0.0,
+        "avg_open_cap": null
+      }
+    ],
+    "optimal_open_cap": null,
+    "confidence": 0.0
+  },
+  "rolling_windows": {
+    "7d": {
+      "trades": 4,
+      "wins": 0,
+      "losses": 4,
+      "win_rate": 0.0,
+      "avg_pnl": -0.077702,
+      "avg_return": -0.002135,
+      "avg_win_pnl": 0.0,
+      "avg_loss_pnl": -0.077702,
+      "profit_factor": 0.0
+    },
+    "30d": {
+      "trades": 4,
+      "wins": 0,
+      "losses": 4,
+      "win_rate": 0.0,
+      "avg_pnl": -0.077702,
+      "avg_return": -0.002135,
+      "avg_win_pnl": 0.0,
+      "avg_loss_pnl": -0.077702,
+      "profit_factor": 0.0
+    }
+  },
+  "learned_parameters": {}
+}

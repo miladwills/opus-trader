@@ -1,0 +1,114 @@
+2026-03-17 02:55:42,368 [INFO] Logging to file: storage/runner.log
+2026-03-17 02:55:42,377 [WARNING] [1;32m[runner][0m Public stream error: [Errno -3] Temporary failure in name resolution
+2026-03-17 02:55:42,377 [WARNING] [1;32m[runner][0m Private stream error: [Errno -3] Temporary failure in name resolution
+2026-03-17 02:55:42,379 [ERROR] [Errno -3] Temporary failure in name resolution - goodbye
+2026-03-17 02:55:42,379 [ERROR] [Errno -3] Temporary failure in name resolution - goodbye
+2026-03-17 02:55:42,379 [WARNING] [1;32m[runner][0m Public stream closed: code=None message=None
+2026-03-17 02:55:42,379 [WARNING] [1;32m[runner][0m Private stream closed: code=None message=None
+2026-03-17 02:55:42,477 [INFO] [1;32m[TAOUSDT][0m Training analysis: phase=learning trades=147 confidence=0.68
+2026-03-17 02:55:42,486 [INFO] [0;37m[ETHUSDT][0m Training analysis: phase=collecting trades=18 confidence=0.00
+2026-03-17 02:55:42,499 [INFO] [0;93m[SOLUSDT][0m Training analysis: phase=collecting trades=41 confidence=0.00
+2026-03-17 02:55:42,516 [INFO] [1;32m[SUIUSDT][0m Training analysis: phase=collecting trades=20 confidence=0.00
+2026-03-17 02:55:42,533 [INFO] [0;37m[UNIUSDT][0m Training analysis: phase=collecting trades=46 confidence=0.00
+2026-03-17 02:55:42,544 [INFO] [0;37m[RESOLVUSDT][0m Training analysis: phase=collecting trades=25 confidence=0.00
+2026-03-17 02:55:42,557 [INFO] [0;96m[PIPPINUSDT][0m Training analysis: phase=learning trades=53 confidence=0.23
+2026-03-17 02:55:42,561 [INFO] [0;95m[TRXUSDT][0m Training analysis: phase=collecting trades=3 confidence=0.00
+2026-03-17 02:55:42,564 [INFO] [1;35m[UAIUSDT][0m Training analysis: phase=collecting trades=5 confidence=0.00
+2026-03-17 02:55:42,570 [INFO] [0;96m[BNBUSDT][0m Training analysis: phase=collecting trades=4 confidence=0.00
+2026-03-17 02:55:42,573 [INFO] [1;36m[DOTUSDT][0m Training analysis: phase=collecting trades=2 confidence=0.00
+2026-03-17 02:55:42,575 [INFO] [0;93m[1000PEPEUSDT][0m Training analysis: phase=collecting trades=1 confidence=0.00
+2026-03-17 02:55:42,578 [INFO] [0;91m[XPLUSDT][0m Training analysis: phase=collecting trades=8 confidence=0.00
+2026-03-17 02:55:42,582 [INFO] [1;34m[WLFIUSDT][0m Training analysis: phase=collecting trades=1 confidence=0.00
+2026-03-17 02:55:42,585 [INFO] [0;93m[AAVEUSDT][0m Training analysis: phase=collecting trades=3 confidence=0.00
+2026-03-17 02:55:42,587 [INFO] [1;33m[WIFUSDT][0m Training analysis: phase=collecting trades=3 confidence=0.00
+2026-03-17 02:55:42,595 [INFO] [0;96m[PIXELUSDT][0m Training analysis: phase=collecting trades=12 confidence=0.00
+2026-03-17 02:55:42,598 [INFO] [1;34m[LINKUSDT][0m Training analysis: phase=collecting trades=4 confidence=0.00
+2026-03-17 02:55:42,603 [INFO] [1;35m[XCNUSDT][0m Training analysis: phase=collecting trades=5 confidence=0.00
+2026-03-17 02:55:42,606 [INFO] [0;94m[CFXUSDT][0m Training analysis: phase=collecting trades=1 confidence=0.00
+2026-03-17 02:55:42,613 [INFO] [1;33m[ZECUSDT][0m Training analysis: phase=collecting trades=2 confidence=0.00
+2026-03-17 02:55:42,616 [INFO] [0;92m[BANUSDT][0m Training analysis: phase=collecting trades=3 confidence=0.00
+2026-03-17 02:55:42,618 [INFO] [0;96m[PUMPFUNUSDT][0m Training analysis: phase=collecting trades=1 confidence=0.00
+2026-03-17 02:55:42,625 [INFO] [0;37m[ENAUSDT][0m Training analysis: phase=collecting trades=2 confidence=0.00
+2026-03-17 02:55:42,625 [INFO] Training rebuild complete for 24 symbols from 410 trades
+2026-03-17 02:55:42,627 [INFO] Open Interest service initialized
+2026-03-17 02:55:42,628 [INFO] Order Book service initialized
+2026-03-17 02:55:42,628 [INFO] Liquidation service initialized
+2026-03-17 02:55:42,628 [INFO] Session service initialized
+2026-03-17 02:55:42,629 [INFO] Mean Reversion service initialized
+2026-03-17 02:55:42,629 [INFO] Whale Detection service initialized
+2026-03-17 02:55:42,629 [INFO] Micro Bias service initialized
+2026-03-17 02:55:42,632 [INFO] Order flow analysis service attached to stream
+2026-03-17 02:55:42,665 [INFO] Auto-Pilot memory rebuilt: 24 symbols, top=['TAOUSDT', 'UNIUSDT', 'PIXELUSDT']
+2026-03-17 02:55:42,665 [INFO] Auto-Pilot memory loaded with 24 symbols
+2026-03-17 02:55:42,666 [INFO] Market sentiment service attached (OI + L/S ratio + funding)
+2026-03-17 02:55:42,667 [INFO] Guardian self-healing service initialized (60s interval)
+2026-03-17 02:55:42,669 [INFO] ============================================================
+2026-03-17 02:55:42,674 [INFO] Bybit Grid Bot Runner Starting
+2026-03-17 02:55:42,677 [INFO] Environment: Bybit Trading Bot
+2026-03-17 02:55:42,697 [INFO] Auto-Pilot smart rotation active via GridBotService (ENABLE_SMART_ROTATION=1)
+2026-03-17 02:55:42,710 [INFO] Legacy RotationService disabled in runner (ENABLE_LEGACY_ROTATION=0)
+2026-03-17 02:55:42,727 [ERROR] Connection error: GET /v5/position/list - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/position/list?category=linear&settleCoin=USDT (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:42,728 [INFO] ============================================================
+2026-03-17 02:55:42,756 [INFO] Retrying GET /v5/position/list in 0.5s after connection error (attempt 1/3)
+2026-03-17 02:55:42,805 [ERROR] Connection error: GET /v5/order/realtime - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/order/realtime?category=linear&limit=200&symbol=ADAUSDT (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:42,806 [INFO] Retrying GET /v5/order/realtime in 0.5s after connection error (attempt 1/3)
+2026-03-17 02:55:42,809 [ERROR] Connection error: GET /v5/position/list - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/position/list?category=linear&settleCoin=USDT (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:42,809 [INFO] Retrying GET /v5/position/list in 0.5s after connection error (attempt 1/3)
+2026-03-17 02:55:43,258 [ERROR] Connection error: GET /v5/position/list - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/position/list?category=linear&settleCoin=USDT (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:43,258 [INFO] Retrying GET /v5/position/list in 1.0s after connection error (attempt 2/3)
+2026-03-17 02:55:43,308 [ERROR] Connection error: GET /v5/order/realtime - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/order/realtime?category=linear&limit=200&symbol=ADAUSDT (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:43,308 [INFO] Retrying GET /v5/order/realtime in 1.0s after connection error (attempt 2/3)
+2026-03-17 02:55:43,311 [ERROR] Connection error: GET /v5/position/list - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/position/list?category=linear&settleCoin=USDT (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:43,311 [INFO] Retrying GET /v5/position/list in 1.0s after connection error (attempt 2/3)
+2026-03-17 02:55:43,383 [WARNING] [1;32m[runner][0m Public stream error: [Errno -3] Temporary failure in name resolution
+2026-03-17 02:55:43,383 [ERROR] [Errno -3] Temporary failure in name resolution - goodbye
+2026-03-17 02:55:43,383 [WARNING] [1;32m[runner][0m Public stream closed: code=None message=None
+2026-03-17 02:55:43,418 [WARNING] [1;32m[runner][0m Private stream error: [Errno -3] Temporary failure in name resolution
+2026-03-17 02:55:43,418 [ERROR] [Errno -3] Temporary failure in name resolution - goodbye
+2026-03-17 02:55:43,418 [WARNING] [1;32m[runner][0m Private stream closed: code=None message=None
+2026-03-17 02:55:44,259 [ERROR] Connection error: GET /v5/position/list - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/position/list?category=linear&settleCoin=USDT (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:44,262 [ERROR] Connection error: GET /v5/order/realtime - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/order/realtime?category=linear&limit=200&settleCoin=USDT (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:44,262 [INFO] Retrying GET /v5/order/realtime in 0.5s after connection error (attempt 1/3)
+2026-03-17 02:55:44,310 [ERROR] Connection error: GET /v5/order/realtime - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/order/realtime?category=linear&limit=200&symbol=ADAUSDT (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:44,315 [ERROR] Connection error: GET /v5/position/list - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/position/list?category=linear&settleCoin=USDT (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:44,324 [ERROR] Connection error: GET /v5/account/wallet-balance - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/account/wallet-balance?accountType=UNIFIED (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:44,325 [INFO] Retrying GET /v5/account/wallet-balance in 0.5s after connection error (attempt 1/3)
+2026-03-17 02:55:44,345 [ERROR] Connection error: GET /v5/order/realtime - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/order/realtime?category=linear&limit=200&symbol=ADAUSDT (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:44,345 [INFO] Retrying GET /v5/order/realtime in 0.5s after connection error (attempt 1/3)
+2026-03-17 02:55:44,764 [ERROR] Connection error: GET /v5/order/realtime - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/order/realtime?category=linear&limit=200&settleCoin=USDT (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:44,764 [INFO] Retrying GET /v5/order/realtime in 1.0s after connection error (attempt 2/3)
+2026-03-17 02:55:44,826 [ERROR] Connection error: GET /v5/account/wallet-balance - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/account/wallet-balance?accountType=UNIFIED (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:44,826 [INFO] Retrying GET /v5/account/wallet-balance in 1.0s after connection error (attempt 2/3)
+2026-03-17 02:55:44,847 [ERROR] Connection error: GET /v5/order/realtime - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/order/realtime?category=linear&limit=200&symbol=ADAUSDT (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:44,847 [INFO] Retrying GET /v5/order/realtime in 1.0s after connection error (attempt 2/3)
+2026-03-17 02:55:45,384 [WARNING] [1;32m[runner][0m Public stream error: [Errno -3] Temporary failure in name resolution
+2026-03-17 02:55:45,384 [ERROR] [Errno -3] Temporary failure in name resolution - goodbye
+2026-03-17 02:55:45,384 [WARNING] [1;32m[runner][0m Public stream closed: code=None message=None
+2026-03-17 02:55:45,424 [WARNING] [1;32m[runner][0m Private stream error: [Errno -3] Temporary failure in name resolution
+2026-03-17 02:55:45,424 [ERROR] [Errno -3] Temporary failure in name resolution - goodbye
+2026-03-17 02:55:45,425 [WARNING] [1;32m[runner][0m Private stream closed: code=None message=None
+2026-03-17 02:55:45,766 [ERROR] Connection error: GET /v5/order/realtime - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/order/realtime?category=linear&limit=200&settleCoin=USDT (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:45,773 [ERROR] Connection error: GET /v5/execution/list - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/execution/list?category=linear&limit=100 (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:45,773 [INFO] Retrying GET /v5/execution/list in 0.5s after connection error (attempt 1/3)
+2026-03-17 02:55:45,828 [ERROR] Connection error: GET /v5/account/wallet-balance - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/account/wallet-balance?accountType=UNIFIED (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:45,853 [ERROR] Connection error: GET /v5/order/realtime - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/order/realtime?category=linear&limit=200&symbol=ADAUSDT (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:45,859 [ERROR] Connection error: GET /v5/account/wallet-balance - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/account/wallet-balance?accountType=UNIFIED (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:45,859 [INFO] Retrying GET /v5/account/wallet-balance in 0.5s after connection error (attempt 1/3)
+2026-03-17 02:55:45,948 [INFO] Startup exchange reconciliation completed for 1 bots
+2026-03-17 02:55:45,948 [INFO] Tick intervals: RISK=1s, GRID=2s
+2026-03-17 02:55:46,019 [INFO] Created Bybit client for MAINNET - paper_trading=False
+2026-03-17 02:55:46,070 [ERROR] Connection error: GET /v5/position/list - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/position/list?category=linear&symbol=ADAUSDT (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:46,070 [INFO] Retrying GET /v5/position/list in 0.5s after connection error (attempt 1/3)
+2026-03-17 02:55:46,275 [ERROR] Connection error: GET /v5/execution/list - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/execution/list?category=linear&limit=100 (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:46,275 [INFO] Retrying GET /v5/execution/list in 1.0s after connection error (attempt 2/3)
+2026-03-17 02:55:46,361 [ERROR] Connection error: GET /v5/account/wallet-balance - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/account/wallet-balance?accountType=UNIFIED (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:46,362 [INFO] Retrying GET /v5/account/wallet-balance in 1.0s after connection error (attempt 2/3)
+2026-03-17 02:55:46,572 [ERROR] Connection error: GET /v5/position/list - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/position/list?category=linear&symbol=ADAUSDT (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:46,572 [INFO] Retrying GET /v5/position/list in 1.0s after connection error (attempt 2/3)
+2026-03-17 02:55:47,277 [ERROR] Connection error: GET /v5/execution/list - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/execution/list?category=linear&limit=100 (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:47,363 [ERROR] Connection error: GET /v5/account/wallet-balance - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/account/wallet-balance?accountType=UNIFIED (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:47,430 [ERROR] Connection error: GET /v5/market/instruments-info - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/market/instruments-info?category=linear&status=Trading&limit=1000 (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:47,430 [INFO] Retrying GET /v5/market/instruments-info in 0.5s after connection error (attempt 1/3)
+2026-03-17 02:55:47,574 [ERROR] Connection error: GET /v5/position/list - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/position/list?category=linear&symbol=ADAUSDT (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:47,575 [ERROR] Connection error: GET /v5/account/info - HTTPSConnectionPool(host='api.bybit.com', port=443): Max retries exceeded with url: /v5/account/info (Caused by NameResolutionError("HTTPSConnection(host='api.bybit.com', port=443): Failed to resolve 'api.bybit.com' ([Errno -2] Name or service not known)"))
+2026-03-17 02:55:47,575 [INFO] Retrying GET /v5/account/info in 0.5s after connection error (attempt 1/3)

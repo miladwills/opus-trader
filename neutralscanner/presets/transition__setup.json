@@ -1,0 +1,56 @@
+{
+  "name": "Transition - Setup",
+  "sortLevels": [
+    {
+      "col": "state",
+      "dir": "asc"
+    },
+    {
+      "col": "bbw15",
+      "dir": "asc"
+    },
+    {
+      "col": "adx1h",
+      "dir": "desc"
+    },
+    {
+      "col": "vol24h",
+      "dir": "desc"
+    }
+  ],
+  "filterRules": [
+    {
+      "col": "state",
+      "op": "=",
+      "val": "TRANSITION",
+      "val2": ""
+    },
+    {
+      "col": "bbw15",
+      "op": "<=",
+      "val": "8",
+      "val2": ""
+    },
+    {
+      "col": "adx1h",
+      "op": ">=",
+      "val": "18",
+      "val2": ""
+    },
+    {
+      "col": "speed_pct",
+      "op": "<=",
+      "val": "45",
+      "val2": ""
+    },
+    {
+      "col": "vol24h",
+      "op": ">=",
+      "val": "10000000",
+      "val2": ""
+    }
+  ],
+  "combineMode": "AND",
+  "createdAt": "2026-01-09T00:00:00Z",
+  "updatedAt": "2026-01-09T00:00:00Z"
+}

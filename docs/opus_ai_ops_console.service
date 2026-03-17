@@ -1,0 +1,16 @@
+[Unit]
+Description=AI Ops Console (FastAPI/uvicorn)
+After=network.target
+
+[Service]
+User=claude
+Group=claude
+WorkingDirectory=/var/www
+EnvironmentFile=/var/www/.env
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/var/www/venv/bin/uvicorn ai_ops_console.app:app --host 127.0.0.1 --port 8001 --workers 1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

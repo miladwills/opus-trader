@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Incidents{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-4">
+    <h1 class="text-lg font-medium text-gray-200">Incidents</h1>
+    <div class="flex gap-2 text-xs">
+        <a href="/incidents" class="px-2 py-1 rounded bg-slate-800 text-gray-300 hover:bg-slate-700">All</a>
+        <button onclick="filterIncidents('open')" class="px-2 py-1 rounded bg-slate-800 text-gray-300 hover:bg-slate-700">Open</button>
+        <button onclick="filterIncidents('acknowledged')" class="px-2 py-1 rounded bg-slate-800 text-gray-300 hover:bg-slate-700">Ack</button>
+        <button onclick="filterIncidents('resolved')" class="px-2 py-1 rounded bg-slate-800 text-gray-300 hover:bg-slate-700">Resolved</button>
+    </div>
+</div>
+
+<div class="bg-slate-900 rounded-lg border border-slate-800">
+    {% if incidents %}
+    <table class="w-full text-sm">
+        <thead>
+            <tr class="border-b border-slate-800 text-xs text-gray-500 uppercase">
+                <th class="px-3 py-2 text-left">Sev</th>
+                <th class="px-3 py-2 text-left">Time</th>
+                <th class="px-3 py-2 text-left">Component</th>
+                <th class="px-3 py-2 text-left">Summary</th>
+                <th class="px-3 py-2 text-left">Hits</th>
+                <th class="px-3 py-2 text-left">Status</th>
+                <th class="px-3 py-2 text-left">Action</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-800" id="incident-body">
+            {% for inc in incidents %}
+            <tr class="incident-row hover:bg-slate-800/50 cursor-pointer" data-status="{{ inc.status }}" onclick="toggleDetail(this)">
+                <td class="px-3 py-2">
+                    <span class="inline-block w-2 h-2 rounded-full
+                        {% if inc.severity == 'critical' %}bg-red-500{% elif inc.severity == 'high' %}bg-orange-500{% elif inc.severity == 'medium' %}bg-yellow-500{% else %}bg-blue-500{% endif %}"></span>
+                    <span class="text-xs ml-1">{{ inc.severity }}</span>
+                </td>
+                <td class="px-3 py-2 text-xs text-gray-400">{{ time_ago(inc.opened_at) }}</td>
+                <td class="px-3 py-2 text-xs">
+                    <span class="px-1.5 py-0.5 rounded bg-slate-800 text-gray-400">{{ inc.component }}</span>
+                </td>
+                <td class="px-3 py-2 text-gray-300">{{ inc.summary }}</td>
+                <td class="px-3 py-2 text-xs text-gray-500">{{ inc.hit_count }}</td>
+                <td class="px-3 py-2">
+                    <span class="text-xs px-2 py-0.5 rounded-full
+                        {% if inc.status == 'open' %}bg-red-900/50 text-red-400{% elif inc.status == 'acknowledged' %}bg-yellow-900/50 text-yellow-400{% else %}bg-slate-800 text-gray-500{% endif %}">
+                        {{ inc.status }}
+                    </span>
+                </td>
+                <td class="px-3 py-2">
+                    {% if inc.status == 'open' %}
+                    <button onclick="event.stopPropagation(); ackIncident('{{ inc.incident_id }}')"
+                        class="text-xs px-2 py-0.5 rounded bg-slate-700 text-gray-300 hover:bg-slate-600">Ack</button>
+                    {% endif %}
+                </td>
+            </tr>
+            <tr class="hidden detail-row">
+                <td colspan="7" class="px-6 py-3 bg-slate-800/30">
+                    <div class="text-xs text-gray-400 space-y-1">
+                        <div><strong>ID:</strong> {{ inc.incident_id }}</div>
+                        <div><strong>Category:</strong> {{ inc.category }}</div>
+                        <div><strong>Pattern:</strong> {{ inc.pattern_key or 'n/a' }}</div>
+                        {% if inc.detail %}
+                        <div><strong>Detail:</strong> <pre class="mt-1 text-gray-500 overflow-x-auto">{{ inc.detail | tojson(indent=2) }}</pre></div>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="px-4 py-8 text-center text-gray-500 text-sm">No incidents</div>
+    {% endif %}
+</div>
+
+<script>
+function toggleDetail(row) {
+    const detail = row.nextElementSibling;
+    if (detail && detail.classList.contains('detail-row')) {
+        detail.classList.toggle('hidden');
+    }
+}
+
+function filterIncidents(status) {
+    document.querySelectorAll('.incident-row').forEach(row => {
+        const next = row.nextElementSibling;
+        if (status === 'all' || row.dataset.status === status) {
+            row.classList.remove('hidden');
+        } else {
+            row.classList.add('hidden');
+            if (next && next.classList.contains('detail-row')) next.classList.add('hidden');
+        }
+    });
+}
+
+async function ackIncident(id) {
+    const resp = await fetch(`/api/incidents/${id}/acknowledge`, {method: 'POST'});
+    if (resp.ok) location.reload();
+}
+</script>
+{% endblock %}

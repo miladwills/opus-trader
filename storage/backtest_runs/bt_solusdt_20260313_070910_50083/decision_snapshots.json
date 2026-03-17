@@ -1,0 +1,28 @@
+{
+  "error": null,
+  "metadata": {
+    "canonical_unit": "forensic_decision_id",
+    "correlational_only": true,
+    "event_limit": 3000,
+    "initializer_events": [
+      "decision",
+      "skip_blocked"
+    ],
+    "lookback_seconds": 315360000,
+    "recent_limit": 200,
+    "trade_context_join": "trade_context_id"
+  },
+  "snapshots": [],
+  "summary": {
+    "blocked_count": 0,
+    "by_bot": [],
+    "by_symbol": [],
+    "executed_count": 0,
+    "orphaned_count": 0,
+    "resolved_count": 0,
+    "total_snapshots": 0,
+    "unresolved_count": 0
+  },
+  "updated_at": "2026-03-13T07:09:10.114097+00:00",
+  "version": 1
+}

@@ -1,0 +1,39 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/var/www/.claude/hooks/block-sensitive-files.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/var/www/.claude/hooks/monitor-safety.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/var/www/.claude/hooks/python-sanity.sh"
+          },
+          {
+            "type": "command",
+            "command": "/var/www/.claude/hooks/ui-sanity.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

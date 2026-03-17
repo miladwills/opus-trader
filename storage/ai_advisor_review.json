@@ -1,0 +1,67 @@
+{
+  "calibration": {
+    "approve_count": 0,
+    "avg_pnl_by_verdict": {
+      "approve": null,
+      "caution": null,
+      "reject": null
+    },
+    "caution_count": 0,
+    "confidence_buckets": {},
+    "executed_after_approve_count": 0,
+    "executed_after_caution_count": 0,
+    "executed_after_reject_count": 0,
+    "linked_outcome_by_verdict": {
+      "approve": 0,
+      "caution": 0,
+      "reject": 0
+    },
+    "linked_outcome_count": 0,
+    "median_pnl_by_verdict": {
+      "approve": null,
+      "caution": null,
+      "reject": null
+    },
+    "reject_count": 0,
+    "win_rate_by_verdict": {
+      "approve": null,
+      "caution": null,
+      "reject": null
+    }
+  },
+  "error": null,
+  "metadata": {
+    "attribution_policy": "advisor_decision -> same bot/symbol follow-through audit event within execution window; realized outcome links to the first same bot/symbol closed trade before the next advisor decision or outcome-window cutoff",
+    "decision_limit": 1200,
+    "execution_window_seconds": 1800,
+    "global_baseline_started_at": "2026-03-12T17:45:14.297518+00:00",
+    "lookback_seconds": 604800,
+    "outcome_window_seconds": 86400,
+    "recent_limit": 200
+  },
+  "recent": [],
+  "reviews": [],
+  "summary": {
+    "attribution_policy": "advisor_decision -> same bot/symbol follow-through audit event within execution window; realized outcome links to the first same bot/symbol closed trade before the next advisor decision or outcome-window cutoff",
+    "by_bot": [],
+    "by_decision_type": [],
+    "by_symbol": [],
+    "correlational_only": true,
+    "error_code_counts": {},
+    "error_count": 0,
+    "escalation_count": 0,
+    "follow_through_counts": {},
+    "local_alignment_counts": {},
+    "model_usage_counts": {},
+    "ok_decisions": 0,
+    "outcome_status_counts": {},
+    "symbol_usefulness": {
+      "strongest": [],
+      "weakest": []
+    },
+    "timeout_count": 0,
+    "total_decisions": 0
+  },
+  "updated_at": "2026-03-13T05:24:14.737600+00:00",
+  "version": 1
+}

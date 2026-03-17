@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Opus Control — Emergency Panel</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            background: #0a0a0f;
+            color: #c8ccd4;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* Header */
+        .header {
+            width: 100%;
+            background: #12121a;
+            border-bottom: 1px solid #1e1e2e;
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h1 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #e2e4e9;
+            letter-spacing: 1px;
+        }
+        .header h1 span { color: #ef4444; }
+        .header .status-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        .header .status-dot.connected { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+        .header .status-dot.disconnected { background: #ef4444; }
+        .conn-label { font-size: 12px; color: #6b7280; }
+        .logout-btn {
+            background: none; border: 1px solid #374151; color: #9ca3af;
+            padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 11px;
+            font-family: inherit;
+        }
+        .logout-btn:hover { border-color: #ef4444; color: #ef4444; }
+
+        /* Login */
+        .login-container {
+            margin-top: 15vh;
+            background: #12121a;
+            border: 1px solid #1e1e2e;
+            border-radius: 8px;
+            padding: 40px;
+            width: 360px;
+            text-align: center;
+        }
+        .login-container h2 {
+            font-size: 14px;
+            color: #e2e4e9;
+            margin-bottom: 24px;
+            letter-spacing: 1px;
+        }
+        .login-container input {
+            width: 100%;
+            padding: 10px 14px;
+            margin-bottom: 12px;
+            background: #0a0a0f;
+            border: 1px solid #1e1e2e;
+            border-radius: 4px;
+            color: #e2e4e9;
+            font-family: inherit;
+            font-size: 13px;
+        }
+        .login-container input:focus { outline: none; border-color: #3b82f6; }
+        .login-btn {
+            width: 100%;
+            padding: 10px;
+            background: #1e40af;
+            border: none;
+            border-radius: 4px;
+            color: #fff;
+            font-family: inherit;
+            font-size: 13px;
+            cursor: pointer;
+            margin-top: 4px;
+        }
+        .login-btn:hover { background: #2563eb; }
+        .login-error {
+            color: #ef4444;
+            font-size: 11px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        /* Main panel */
+        .main { width: 100%; max-width: 700px; padding: 24px; display: none; }
+
+        /* Status cards */
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+        .status-card {
+            background: #12121a;
+            border: 1px solid #1e1e2e;
+            border-radius: 6px;
+            padding: 16px;
+            text-align: center;
+        }
+        .status-card .label {
+            font-size: 10px;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+        }
+        .status-card .value {
+            font-size: 28px;
+            font-weight: 700;
+            color: #e2e4e9;
+        }
+        .status-card .value.warn { color: #f59e0b; }
+        .status-card .value.danger { color: #ef4444; }
+        .status-card .value.safe { color: #22c55e; }
+
+        /* Emergency button */
+        .emergency-section {
+            background: #12121a;
+            border: 1px solid #1e1e2e;
+            border-radius: 8px;
+            padding: 32px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .emergency-section .subtitle {
+            font-size: 11px;
+            color: #6b7280;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+        .emergency-btn {
+            width: 100%;
+            max-width: 400px;
+            padding: 20px;
+            background: linear-gradient(135deg, #991b1b, #dc2626);
+            border: 2px solid #ef4444;
+            border-radius: 8px;
+            color: #fff;
+            font-family: inherit;
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: all 0.15s;
+        }
+        .emergency-btn:hover {
+            background: linear-gradient(135deg, #dc2626, #ef4444);
+            box-shadow: 0 0 30px rgba(239, 68, 68, 0.4);
+            transform: scale(1.02);
+        }
+        .emergency-btn:active { transform: scale(0.98); }
+        .emergency-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        /* Individual controls */
+        .controls-row {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .ctrl-btn {
+            padding: 12px;
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            transition: all 0.15s;
+        }
+        .ctrl-btn.orders {
+            background: #1e1e2e;
+            border: 1px solid #f59e0b;
+            color: #f59e0b;
+        }
+        .ctrl-btn.orders:hover { background: #f59e0b22; }
+        .ctrl-btn.positions {
+            background: #1e1e2e;
+            border: 1px solid #f97316;
+            color: #f97316;
+        }
+        .ctrl-btn.positions:hover { background: #f9731622; }
+        .ctrl-btn.runner {
+            background: #1e1e2e;
+            border: 1px solid #a855f7;
+            color: #a855f7;
+        }
+        .ctrl-btn.runner:hover { background: #a855f722; }
+        .ctrl-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* Confirmation modal */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.85);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: #12121a;
+            border: 2px solid #ef4444;
+            border-radius: 8px;
+            padding: 32px;
+            max-width: 440px;
+            width: 90%;
+            text-align: center;
+        }
+        .modal h3 {
+            color: #ef4444;
+            font-size: 16px;
+            margin-bottom: 16px;
+            letter-spacing: 1px;
+        }
+        .modal p {
+            color: #9ca3af;
+            font-size: 12px;
+            margin-bottom: 24px;
+            line-height: 1.6;
+        }
+        .modal .confirm-input {
+            width: 100%;
+            padding: 10px;
+            background: #0a0a0f;
+            border: 1px solid #374151;
+            border-radius: 4px;
+            color: #e2e4e9;
+            font-family: inherit;
+            font-size: 13px;
+            text-align: center;
+            margin-bottom: 16px;
+        }
+        .modal .confirm-input:focus { outline: none; border-color: #ef4444; }
+        .modal-actions {
+            display: flex;
+            gap: 12px;
+        }
+        .modal-actions button {
+            flex: 1;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .modal .cancel-btn {
+            background: #1e1e2e;
+            border: 1px solid #374151;
+            color: #9ca3af;
+        }
+        .modal .cancel-btn:hover { border-color: #6b7280; }
+        .modal .confirm-btn {
+            background: #991b1b;
+            border: 1px solid #ef4444;
+            color: #fff;
+        }
+        .modal .confirm-btn:hover { background: #dc2626; }
+        .modal .confirm-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* Log */
+        .log-section {
+            background: #12121a;
+            border: 1px solid #1e1e2e;
+            border-radius: 6px;
+            padding: 16px;
+        }
+        .log-section .label {
+            font-size: 10px;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 10px;
+        }
+        .log-entries {
+            max-height: 250px;
+            overflow-y: auto;
+            font-size: 11px;
+            line-height: 1.8;
+        }
+        .log-entries::-webkit-scrollbar { width: 4px; }
+        .log-entries::-webkit-scrollbar-track { background: #0a0a0f; }
+        .log-entries::-webkit-scrollbar-thumb { background: #374151; border-radius: 2px; }
+        .log-entry { padding: 2px 0; border-bottom: 1px solid #1e1e2e0a; }
+        .log-entry .ts { color: #4b5563; }
+        .log-entry.ok { color: #22c55e; }
+        .log-entry.err { color: #ef4444; }
+        .log-entry.warn { color: #f59e0b; }
+        .log-entry.info { color: #60a5fa; }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            .status-grid { grid-template-columns: 1fr; }
+            .controls-row { grid-template-columns: 1fr; }
+            .emergency-btn { font-size: 15px; padding: 16px; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Login Screen -->
+<div id="loginScreen" class="login-container">
+    <h2>OPUS CONTROL</h2>
+    <input type="text" id="loginUser" placeholder="Username" autocomplete="username">
+    <input type="password" id="loginPass" placeholder="Password" autocomplete="current-password">
+    <button class="login-btn" onclick="doLogin()">Authenticate</button>
+    <div id="loginError" class="login-error">Invalid credentials</div>
+</div>
+
+<!-- Main Panel (hidden until auth) -->
+<div id="mainPanel" style="display:none; width:100%;">
+    <div class="header">
+        <h1>OPUS <span>CONTROL</span></h1>
+        <div style="display:flex; align-items:center; gap:16px;">
+            <div>
+                <span class="status-dot" id="connDot"></span>
+                <span class="conn-label" id="connLabel">Checking...</span>
+            </div>
+            <button class="logout-btn" onclick="doLogout()">Logout</button>
+        </div>
+    </div>
+
+    <div class="main" id="mainContent" style="margin:0 auto;">
+
+        <!-- Status Cards -->
+        <div class="status-grid">
+            <div class="status-card">
+                <div class="label">Active Bots</div>
+                <div class="value" id="botCount">—</div>
+            </div>
+            <div class="status-card">
+                <div class="label">Open Positions</div>
+                <div class="value" id="posCount">—</div>
+            </div>
+            <div class="status-card">
+                <div class="label">Runner</div>
+                <div class="value" id="runnerStatus" style="font-size:14px;">—</div>
+            </div>
+        </div>
+
+        <!-- Emergency Button -->
+        <div class="emergency-section">
+            <div class="subtitle">
+                Cancels ALL open orders, closes ALL positions at market,<br>
+                and stops ALL bots immediately.
+            </div>
+            <button class="emergency-btn" id="emergencyBtn" onclick="showConfirm('emergency')">
+                Emergency Stop All
+            </button>
+        </div>
+
+        <!-- Individual Controls -->
+        <div class="controls-row">
+            <button class="ctrl-btn orders" onclick="showConfirm('orders')">Cancel All Orders</button>
+            <button class="ctrl-btn positions" onclick="showConfirm('positions')">Close All Positions</button>
+            <button class="ctrl-btn runner" onclick="showConfirm('runner')">Stop Runner</button>
+        </div>
+
+        <!-- Action Log -->
+        <div class="log-section">
+            <div class="label">Action Log</div>
+            <div class="log-entries" id="logEntries">
+                <div class="log-entry info"><span class="ts">[--:--:--]</span> Waiting for actions...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Confirmation Modal -->
+<div class="modal-overlay" id="confirmModal">
+    <div class="modal">
+        <h3 id="confirmTitle">CONFIRM ACTION</h3>
+        <p id="confirmDesc"></p>
+        <input class="confirm-input" id="confirmInput" placeholder='Type "CONFIRM" to proceed' autocomplete="off">
+        <div class="modal-actions">
+            <button class="cancel-btn" onclick="hideConfirm()">Cancel</button>
+            <button class="confirm-btn" id="confirmBtn" disabled onclick="executeAction()">Execute</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const API_BASE = 'https://madowlab.online';
+    let authToken = '';
+    let pendingAction = null;
+    let refreshTimer = null;
+
+    // --- Auth ---
+    function doLogin() {
+        const user = document.getElementById('loginUser').value.trim();
+        const pass = document.getElementById('loginPass').value;
+        if (!user || !pass) return;
+
+        const btn = document.querySelector('.login-btn');
+        btn.textContent = 'Authenticating...';
+        btn.disabled = true;
+        document.getElementById('loginError').style.display = 'none';
+
+        authToken = 'Basic ' + btoa(user + ':' + pass);
+
+        async function tryLogin(attempt) {
+            btn.textContent = attempt > 1 ? 'Retrying...' : 'Connecting...';
+            try {
+                const res = await apiFetch('/api/bots', { timeout: 45000 });
+                if (res.ok) {
+                    localStorage.setItem('opus_auth', authToken);
+                    showPanel();
+                    return true;
+                } else if (res.status === 401) {
+                    document.getElementById('loginError').textContent = 'Invalid credentials';
+                    document.getElementById('loginError').style.display = 'block';
+                    authToken = '';
+                    return true; // don't retry auth failures
+                } else {
+                    return false; // retry server errors
+                }
+            } catch (e) {
+                return false; // retry on network/timeout errors
+            }
+        }
+
+        tryLogin(1).then(done => {
+            if (!done) return tryLogin(2);
+            return true;
+        }).then(done => {
+            if (!done) {
+                document.getElementById('loginError').textContent = 'Server unreachable — try again in a moment';
+                document.getElementById('loginError').style.display = 'block';
+                authToken = '';
+            }
+        }).finally(() => {
+            btn.textContent = 'Authenticate';
+            btn.disabled = false;
+        });
+    }
+
+    function doLogout() {
+        localStorage.removeItem('opus_auth');
+        authToken = '';
+        clearInterval(refreshTimer);
+        document.getElementById('mainPanel').style.display = 'none';
+        document.getElementById('loginScreen').style.display = 'block';
+        document.getElementById('loginUser').value = '';
+        document.getElementById('loginPass').value = '';
+    }
+
+    // --- API (calls main domain with CORS) ---
+    function apiFetch(path, opts = {}) {
+        const { timeout, ...fetchOpts } = opts;
+        if (timeout && !fetchOpts.signal) {
+            const ctrl = new AbortController();
+            setTimeout(() => ctrl.abort(), timeout);
+            fetchOpts.signal = ctrl.signal;
+        }
+        return fetch(API_BASE + path, {
+            ...fetchOpts,
+            credentials: 'omit',
+            headers: {
+                'Authorization': authToken,
+                'Content-Type': 'application/json',
+                ...(fetchOpts.headers || {})
+            }
+        });
+    }
+
+    // --- Panel ---
+    function showPanel() {
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('mainPanel').style.display = 'block';
+        document.getElementById('mainContent').style.display = 'block';
+        refreshStatus();
+        refreshTimer = setInterval(refreshStatus, 15000);
+    }
+
+    async function refreshStatus() {
+        let anyOk = false;
+
+        // Run all three in parallel, each with its own 20s timeout
+        const [botsResult, posResult, rtResult] = await Promise.allSettled([
+            apiFetch('/api/bots', { timeout: 20000 }).then(async r => {
+                if (!r.ok) return;
+                const bots = await r.json();
+                const list = bots.bots || bots || [];
+                const active = list.filter(b =>
+                    b.status === 'running' || b.status === 'recovering' || b.status === 'paused'
+                );
+                const el = document.getElementById('botCount');
+                el.textContent = active.length;
+                el.className = 'value' + (active.length > 0 ? ' warn' : ' safe');
+                anyOk = true;
+            }),
+            apiFetch('/api/positions', { timeout: 20000 }).then(async r => {
+                if (!r.ok) return;
+                const posData = await r.json();
+                const positions = posData.positions || posData || [];
+                const open = positions.filter(p => parseFloat(p.size || p.qty || 0) > 0);
+                const el = document.getElementById('posCount');
+                el.textContent = open.length;
+                el.className = 'value' + (open.length > 0 ? ' warn' : ' safe');
+                anyOk = true;
+            }),
+            apiFetch('/api/bots/runtime', { timeout: 20000 }).then(async r => {
+                const runnerEl = document.getElementById('runnerStatus');
+                if (r.ok) {
+                    runnerEl.textContent = 'ONLINE';
+                    runnerEl.className = 'value safe';
+                } else {
+                    runnerEl.textContent = 'OFFLINE';
+                    runnerEl.className = 'value danger';
+                }
+                runnerEl.style.fontSize = '14px';
+                anyOk = true;
+            })
+        ]);
+
+        if (anyOk) {
+            document.getElementById('connDot').className = 'status-dot connected';
+            document.getElementById('connLabel').textContent = 'Connected';
+        } else {
+            document.getElementById('connDot').className = 'status-dot disconnected';
+            document.getElementById('connLabel').textContent = 'Disconnected';
+        }
+    }
+
+    // --- Confirmation ---
+    const ACTION_CONFIG = {
+        emergency: {
+            title: 'EMERGENCY STOP ALL',
+            desc: 'This will cancel ALL orders, close ALL positions at market price, and stop ALL bots. This action cannot be undone.',
+            exec: doEmergencyStop
+        },
+        orders: {
+            title: 'CANCEL ALL ORDERS',
+            desc: 'This will cancel all open orders across all symbols. Positions will remain open.',
+            exec: doCancelOrders
+        },
+        positions: {
+            title: 'CLOSE ALL POSITIONS',
+            desc: 'This will close all open positions at market price. Orders may remain.',
+            exec: doClosePositions
+        },
+        runner: {
+            title: 'STOP RUNNER',
+            desc: 'This will gracefully stop the execution runner. Bots will not execute new cycles. Existing orders/positions remain.',
+            exec: doStopRunner
+        }
+    };
+
+    function showConfirm(action) {
+        pendingAction = action;
+        const cfg = ACTION_CONFIG[action];
+        document.getElementById('confirmTitle').textContent = cfg.title;
+        document.getElementById('confirmDesc').textContent = cfg.desc;
+        document.getElementById('confirmInput').value = '';
+        document.getElementById('confirmBtn').disabled = true;
+        document.getElementById('confirmModal').classList.add('active');
+        document.getElementById('confirmInput').focus();
+    }
+
+    function hideConfirm() {
+        pendingAction = null;
+        document.getElementById('confirmModal').classList.remove('active');
+    }
+
+    document.getElementById('confirmInput').addEventListener('input', function() {
+        document.getElementById('confirmBtn').disabled = this.value.trim().toUpperCase() !== 'CONFIRM';
+    });
+
+    document.getElementById('confirmInput').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !document.getElementById('confirmBtn').disabled) {
+            executeAction();
+        } else if (e.key === 'Escape') {
+            hideConfirm();
+        }
+    });
+
+    function executeAction() {
+        if (!pendingAction) return;
+        const cfg = ACTION_CONFIG[pendingAction];
+        hideConfirm();
+        cfg.exec();
+    }
+
+    // --- Actions ---
+    async function doEmergencyStop() {
+        const btn = document.getElementById('emergencyBtn');
+        btn.disabled = true;
+        btn.textContent = 'EXECUTING...';
+        addLog('Initiating EMERGENCY STOP ALL — this may take up to 60s...', 'warn');
+
+        try {
+            const res = await apiFetch('/api/emergency-stop', { method: 'POST', timeout: 120000 });
+            const data = await res.json();
+
+            if (res.ok) {
+                addLog('Emergency stop completed successfully', 'ok');
+                if (data.results) {
+                    const successful = data.results.filter(r => r.status === 'success').length;
+                    const failed = data.results.filter(r => r.status !== 'success').length;
+                    addLog('Symbols processed: ' + successful + ' success, ' + failed + ' failed', successful === data.results.length ? 'ok' : 'warn');
+                }
+                if (data.bots_stopped !== undefined) {
+                    addLog('Bots stopped: ' + data.bots_stopped, 'ok');
+                }
+            } else {
+                addLog('Emergency stop returned error: ' + (data.error || res.status), 'err');
+            }
+        } catch (e) {
+            addLog('Emergency stop failed: ' + e.message, 'err');
+        }
+
+        btn.disabled = false;
+        btn.textContent = 'EMERGENCY STOP ALL';
+        refreshStatus();
+    }
+
+    async function doCancelOrders() {
+        addLog('Cancelling all orders — this may take up to 60s...', 'warn');
+        try {
+            const res = await apiFetch('/api/emergency-stop', { method: 'POST', timeout: 120000 });
+            const data = await res.json();
+            if (res.ok) {
+                addLog('All orders cancelled, positions closed, bots stopped', 'ok');
+            } else {
+                addLog('Cancel failed: ' + (data.error || res.status), 'err');
+            }
+        } catch (e) {
+            addLog('Cancel failed: ' + e.message, 'err');
+        }
+        refreshStatus();
+    }
+
+    async function doClosePositions() {
+        addLog('Closing all positions — this may take up to 60s...', 'warn');
+        try {
+            const res = await apiFetch('/api/emergency-stop', { method: 'POST', timeout: 120000 });
+            const data = await res.json();
+            if (res.ok) {
+                addLog('All positions closed, orders cancelled, bots stopped', 'ok');
+            } else {
+                addLog('Close failed: ' + (data.error || res.status), 'err');
+            }
+        } catch (e) {
+            addLog('Close failed: ' + e.message, 'err');
+        }
+        refreshStatus();
+    }
+
+    async function doStopRunner() {
+        addLog('Stopping runner...', 'warn');
+        try {
+            const res = await apiFetch('/api/runner/stop', { method: 'POST', timeout: 30000 });
+            const data = await res.json();
+            if (res.ok) {
+                addLog('Runner stop signal sent', 'ok');
+            } else {
+                addLog('Runner stop failed: ' + (data.error || res.status), 'err');
+            }
+        } catch (e) {
+            addLog('Runner stop failed: ' + e.message, 'err');
+        }
+        refreshStatus();
+    }
+
+    // --- Log ---
+    function addLog(msg, type = 'info') {
+        const container = document.getElementById('logEntries');
+        const now = new Date().toLocaleTimeString('en-GB');
+        const div = document.createElement('div');
+        div.className = 'log-entry ' + type;
+        div.innerHTML = '<span class="ts">[' + now + ']</span> ' + escapeHtml(msg);
+        container.prepend(div);
+        while (container.children.length > 50) {
+            container.removeChild(container.lastChild);
+        }
+    }
+
+    function escapeHtml(str) {
+        const d = document.createElement('div');
+        d.textContent = str;
+        return d.innerHTML;
+    }
+
+    // --- Init ---
+    document.addEventListener('DOMContentLoaded', () => {
+        const saved = localStorage.getItem('opus_auth');
+        if (saved) {
+            authToken = saved;
+            document.getElementById('loginScreen').style.display = 'none';
+            document.getElementById('mainPanel').style.display = 'block';
+            document.getElementById('mainContent').style.display = 'block';
+            document.getElementById('connDot').className = 'status-dot disconnected';
+            document.getElementById('connLabel').textContent = 'Connecting...';
+            // Try twice with generous timeout before giving up
+            apiFetch('/api/bots', { timeout: 45000 }).then(r => {
+                if (r.ok) { refreshStatus(); refreshTimer = setInterval(refreshStatus, 15000); }
+                else if (r.status === 401) doLogout();
+                else return apiFetch('/api/bots', { timeout: 45000 }).then(r2 => {
+                    if (r2.ok) { refreshStatus(); refreshTimer = setInterval(refreshStatus, 15000); }
+                    else doLogout();
+                });
+            }).catch(() => {
+                // Don't logout on timeout — just show disconnected, keep trying via refresh
+                refreshStatus();
+                refreshTimer = setInterval(refreshStatus, 15000);
+            });
+        }
+        document.getElementById('loginPass').addEventListener('keydown', e => {
+            if (e.key === 'Enter') doLogin();
+        });
+    });
+</script>
+
+</body>
+</html>

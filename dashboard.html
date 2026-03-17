@@ -1,0 +1,1519 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>Bt: $0.00</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #1e293b;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #64748b;
+    }
+
+    /* Animations */
+    @keyframes pulse-green {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.5;
+      }
+    }
+
+    .animate-pulse-green {
+      animation: pulse-green 2s infinite;
+    }
+
+    /* Table row hover */
+    .table-row:hover {
+      background-color: rgba(71, 85, 105, 0.3);
+    }
+
+    /* Flash animations for value changes */
+    @keyframes flash-green-bg {
+      0% {
+        background-color: rgba(16, 185, 129, 0.4);
+      }
+
+      100% {
+        background-color: transparent;
+      }
+    }
+
+    @keyframes flash-red-bg {
+      0% {
+        background-color: rgba(239, 68, 68, 0.4);
+      }
+
+      100% {
+        background-color: transparent;
+      }
+    }
+
+    @keyframes flash-neutral-bg {
+      0% {
+        background-color: rgba(148, 163, 184, 0.3);
+      }
+
+      100% {
+        background-color: transparent;
+      }
+    }
+
+    .flash-green {
+      animation: flash-green-bg 1s ease-out;
+    }
+
+    .flash-red {
+      animation: flash-red-bg 1s ease-out;
+    }
+
+    .flash-neutral {
+      animation: flash-neutral-bg 1s ease-out;
+    }
+
+    /* PnL flash for table cells */
+    .pnl-flash-green {
+      animation: flash-green-bg 1.5s ease-out;
+    }
+
+    .pnl-flash-red {
+      animation: flash-red-bg 1.5s ease-out;
+    }
+
+    /* Live indicator pulse */
+    @keyframes live-pulse {
+
+      0%,
+      100% {
+        opacity: 1;
+        transform: scale(1);
+      }
+
+      50% {
+        opacity: 0.6;
+        transform: scale(0.9);
+      }
+    }
+
+    .live-pulse {
+      animation: live-pulse 1.5s ease-in-out infinite;
+    }
+
+    /* Smooth transitions for values */
+    .value-transition {
+      transition: color 0.3s ease, background-color 0.3s ease;
+    }
+
+    /* Button click animation */
+    @keyframes button-click {
+      0% {
+        transform: scale(1);
+      }
+
+      50% {
+        transform: scale(0.92);
+        opacity: 0.7;
+      }
+
+      100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
+
+    .btn-click-animate {
+      animation: button-click 0.2s ease;
+    }
+
+    /* Active state for immediate feedback */
+    button:active {
+      transform: scale(0.95);
+      transition: transform 0.05s ease;
+    }
+  </style>
+</head>
+
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  <!-- Navbar -->
+  <nav class="bg-slate-900 border-b border-slate-800 fixed top-0 left-0 right-0 z-50">
+    <div class="max-w-[1800px] mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center space-x-4">
+        <h1 class="text-xl font-bold text-emerald-400">⚡ Bybit Futures Control Center</h1>
+      </div>
+      <div class="flex items-center space-x-4">
+        <div class="flex items-center space-x-2 text-xs text-slate-500">
+          <span>Updated:</span>
+          <span id="last-update-time" class="text-slate-400">-</span>
+        </div>
+        <button id="sound-toggle" onclick="toggleSound()"
+          class="px-2 py-1 text-xs font-medium rounded bg-slate-700 text-slate-400 hover:bg-slate-600 transition flex items-center"
+          title="Click to enable/disable sound alerts">
+          <span id="sound-icon">🔇</span>
+          <span id="sound-label" class="ml-1">Sound Off</span>
+        </button>
+        <button id="btnBotStatus"
+          class="px-2 py-1 text-xs font-medium rounded bg-indigo-600 hover:bg-indigo-500 text-white transition flex items-center"
+          title="View bot status and logs">
+          <span class="mr-1">📊</span>
+          <span>Status</span>
+        </button>
+        <span id="connection-status"
+          class="px-2 py-1 text-xs font-medium rounded bg-slate-700 text-slate-400 flex items-center">
+          <span class="inline-block w-2 h-2 bg-slate-400 rounded-full mr-1"></span>Connecting...
+        </span>
+        <button id="btnAnalytics" onclick="openAnalyticsModal()"
+          class="px-2 py-1 text-xs font-medium rounded bg-emerald-600 hover:bg-emerald-500 text-white transition flex items-center"
+          title="View detailed performance analytics">
+          <span class="mr-1">📈</span>
+          <span>Analytics</span>
+        </button>
+        <button onclick="logout()"
+          class="px-2 py-1 text-xs font-medium rounded bg-red-700 hover:bg-red-600 text-white transition flex items-center"
+          title="Logout and clear credentials">
+          <span class="mr-1">🚪</span>
+          <span>Logout</span>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Flash Crash Protection Alert Banner (Smart Feature #12) -->
+  <div id="flash-crash-banner" class="hidden bg-red-900/90 border-b-2 border-red-500 px-4 py-3">
+    <div class="max-w-[1800px] mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="text-2xl animate-pulse">🚨</span>
+        <div>
+          <p class="text-red-100 font-bold text-sm">FLASH CRASH PROTECTION ACTIVE</p>
+          <p id="flash-crash-details" class="text-red-300 text-xs">All bots paused due to extreme market volatility</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <span id="flash-crash-time" class="text-red-400 text-xs"></span>
+        <span class="inline-block w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+      </div>
+    </div>
+  </div>
+
+  <main class="max-w-[1800px] mx-auto px-4 py-6 space-y-6 pt-16">
+    <!-- Closed PnL (Left) + Summary Cards (Right) -->
+    <section class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+      <!-- Left: Closed PnL (1/3 width) -->
+      <div class="xl:col-span-1">
+        <div class="bg-slate-900/80 rounded-xl border border-slate-800 backdrop-blur overflow-hidden h-full">
+          <div class="px-4 py-3 border-b border-slate-800 flex flex-col gap-2">
+            <div class="flex items-center justify-between">
+              <h2 class="text-base font-semibold text-white">Closed PnL</h2>
+              <div class="flex items-center gap-2">
+                <button onclick="openAllPnlModal()"
+                  class="px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-medium rounded transition"
+                  title="View all closed PnL history">
+                  View All
+                </button>
+                <span
+                  class="px-2 py-0.5 bg-blue-500/20 text-blue-400 text-xs font-medium rounded-full flex items-center">
+                  <span class="inline-block w-1.5 h-1.5 bg-blue-400 rounded-full mr-1 live-pulse"></span>
+                  Auto
+                </span>
+              </div>
+            </div>
+            <!-- Today's Stats -->
+            <div class="flex items-center space-x-3 text-xs">
+              <span class="text-slate-400">Today: <span id="pnl-today-net"
+                  class="font-medium value-transition">$0.00</span></span>
+              <span class="text-emerald-400">✓ <span id="pnl-today-wins">0</span></span>
+              <span class="text-red-400">✗ <span id="pnl-today-losses">0</span></span>
+            </div>
+            <!-- All-time Stats -->
+            <div class="flex items-center justify-between text-[10px] pt-1 border-t border-slate-800/50">
+              <div class="flex items-center gap-3">
+                <span class="text-slate-500">All: <span id="closed-pnl-net" class="font-medium">$0.00</span></span>
+                <span class="text-slate-500">WR: <span id="closed-pnl-winrate"
+                    class="text-emerald-400 font-medium">0%</span></span>
+                <span class="text-slate-500">PF: <span id="closed-pnl-pf"
+                    class="text-blue-400 font-medium">0</span></span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-emerald-400">+$<span id="closed-pnl-profit">0</span></span>
+                <span class="text-red-400">-$<span id="closed-pnl-loss">0</span></span>
+              </div>
+            </div>
+          </div>
+          <div class="overflow-x-auto" style="max-height: 380px;">
+            <table class="w-full text-xs">
+              <thead class="bg-slate-800/50 sticky top-0">
+                <tr>
+                  <th class="px-3 py-2 text-left text-[10px] font-medium text-slate-400 uppercase">Time</th>
+                  <th class="px-3 py-2 text-left text-[10px] font-medium text-slate-400 uppercase">Symbol</th>
+                  <th class="px-3 py-2 text-left text-[10px] font-medium text-slate-400 uppercase">Side</th>
+                  <th class="px-3 py-2 text-right text-[10px] font-medium text-slate-400 uppercase">PnL</th>
+                  <th class="px-3 py-2 text-center text-[10px] font-medium text-cyan-400 uppercase"
+                    title="Bot uptime when trade closed">Uptime</th>
+                  <th class="px-3 py-2 text-right text-[10px] font-medium text-slate-400 uppercase">Balance</th>
+                </tr>
+              </thead>
+              <tbody id="pnl-body" class="divide-y divide-slate-800">
+                <tr>
+                  <td colspan="6" class="px-3 py-6 text-center text-slate-500">No trades</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Summary Cards (2/3 width) -->
+      <div class="xl:col-span-2 space-y-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- Total Assets Card -->
+          <div class="bg-slate-900/80 rounded-xl p-5 border border-slate-800 backdrop-blur">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-sm font-medium text-slate-400">Total Assets</h3>
+              <div class="flex items-center gap-2">
+                <button onclick="openTransferModal()"
+                  class="px-2 py-1 text-xs font-bold rounded bg-emerald-600 hover:bg-emerald-500 text-white transition"
+                  title="Transfer from Unified to Funding">
+                  ⇄ Transfer
+                </button>
+                <span class="text-emerald-400">💰</span>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <p class="text-2xl font-bold text-white">$<span id="summary-total-assets"
+                  class="value-transition">0.00</span></p>
+              <p class="text-sm text-slate-500">Available: $<span id="summary-available-balance">0.00</span></p>
+            </div>
+          </div>
+
+          <!-- Transfer Modal -->
+          <!-- Transfer Modal -->
+          <div id="transferModal"
+            class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm hidden"
+            style="display: none;">
+            <div class="bg-slate-800 rounded-xl border border-slate-700 w-full max-w-sm p-6 relative shadow-2xl">
+              <button onclick="closeTransferModal()"
+                class="absolute top-4 right-4 text-slate-400 hover:text-white transition">✕</button>
+              <h3 class="text-lg font-bold text-white mb-4">Transfer Assets</h3>
+
+              <div class="space-y-4">
+                <!-- From Account -->
+                <div class="space-y-1">
+                  <div class="flex justify-between text-xs text-slate-400">
+                    <label>From</label>
+                    <span>Available: <span id="transfer-max-amount"
+                        class="text-emerald-400 font-mono">0.00</span></span>
+                  </div>
+                  <select id="transfer-from"
+                    class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-500">
+                    <option value="UNIFIED">Unified Trading</option>
+                    <option value="FUND">Funding Account</option>
+                  </select>
+                </div>
+
+                <!-- Swap Button -->
+                <div class="flex justify-center -my-2 relative z-10">
+                  <button onclick="swapTransferDirection()"
+                    class="bg-slate-800 border border-slate-700 rounded-full p-1 text-slate-400 hover:text-white hover:border-emerald-500 transition"
+                    title="Swap Direction">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                      <path fill-rule="evenodd"
+                        d="M16.707 10.293a1 1 0 010 1.414l-6 6a1 1 0 01-1.414 0l-6-6a1 1 0 111.414-1.414L9 14.586V3a1 1 0 012 0v11.586l4.293-4.293a1 1 0 011.414 0z"
+                        clip-rule="evenodd" />
+                    </svg>
+                  </button>
+                </div>
+
+                <!-- To Account -->
+                <div class="space-y-1">
+                  <label class="text-xs text-slate-400">To</label>
+                  <select id="transfer-to"
+                    class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-500">
+                    <option value="FUND">Funding Account</option>
+                    <option value="UNIFIED">Unified Trading</option>
+                  </select>
+                </div>
+
+                <!-- Amount & Coin -->
+                <div class="grid grid-cols-3 gap-2">
+                  <div class="col-span-2 space-y-1">
+                    <label class="text-xs text-slate-400">Amount</label>
+                    <div class="relative">
+                      <input type="number" id="transfer-amount" step="0.1" min="0" placeholder="0.00"
+                        class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                      <button onclick="setMaxTransferAmount()"
+                        class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-emerald-400 hover:text-emerald-300 font-bold">MAX</button>
+                    </div>
+                  </div>
+                  <div class="space-y-1">
+                    <label class="text-xs text-slate-400">Coin</label>
+                    <input type="text" id="transfer-coin" value="USDT" readonly
+                      class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-400 text-center cursor-not-allowed" />
+                  </div>
+                </div>
+
+                <!-- Submit Button -->
+                <button onclick="submitTransfer()" id="btn-confirm-transfer"
+                  class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition shadow-lg shadow-emerald-900/20 flex items-center justify-center gap-2">
+                  <svg id="transfer-spinner" class="animate-spin h-5 w-5 text-white hidden"
+                    xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                    </path>
+                  </svg>
+                  <span id="transfer-btn-text">Confirm Transfer</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- PnL Card -->
+          <div class="bg-slate-900/80 rounded-xl p-5 border border-slate-800 backdrop-blur">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-sm font-medium text-slate-400">PnL Overview</h3>
+              <span class="text-blue-400">📊</span>
+            </div>
+            <div class="space-y-2">
+              <div class="flex justify-between">
+                <span class="text-sm text-slate-500">Realized:</span>
+                <span id="summary-realized-pnl" class="text-sm font-medium value-transition">$0.00</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-sm text-slate-500">Unrealized:</span>
+                <span id="summary-unrealized-pnl" class="text-sm font-medium value-transition">$0.00</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Today's PnL Card -->
+          <div class="bg-slate-900/80 rounded-xl p-5 border border-slate-800 backdrop-blur">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-sm font-medium text-slate-400">Today's Performance</h3>
+              <span class="text-purple-400">📈</span>
+            </div>
+            <div class="space-y-2">
+              <p class="text-2xl font-bold"><span id="summary-today-net" class="value-transition">$0.00</span></p>
+              <div class="flex space-x-4 text-sm">
+                <span class="text-emerald-400">✓ <span id="summary-today-wins">0</span></span>
+                <span class="text-red-400">✗ <span id="summary-today-losses">0</span></span>
+              </div>
+            </div>
+            <!-- Running Bots Status -->
+            <div id="running-bots-status" class="mt-4 pt-3 border-t border-slate-700">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-xs text-slate-500">Running Bots:</span>
+                <label class="flex items-center gap-1.5 cursor-pointer">
+                  <input type="checkbox" id="auto-stop-direction"
+                    class="w-3 h-3 rounded border-slate-600 text-red-500 focus:ring-red-500 focus:ring-offset-slate-900">
+                  <span class="text-[9px] text-red-400">Auto-stop on direction change</span>
+                </label>
+              </div>
+              <div id="running-bots-list" class="flex flex-wrap gap-1.5">
+                <span class="text-xs text-slate-600">No bots running</span>
+              </div>
+              <!-- Direction Change Alert -->
+              <div id="direction-change-alert"
+                class="hidden mt-2 p-2 bg-red-900/50 border border-red-500 rounded text-xs text-red-300">
+              </div>
+            </div>
+          </div>
+
+          <!-- Positions Card -->
+          <div class="bg-slate-900/80 rounded-xl p-5 border border-slate-800 backdrop-blur">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-sm font-medium text-slate-400">Positions</h3>
+              <span class="text-orange-400">📍</span>
+            </div>
+            <div class="space-y-2">
+              <p class="text-2xl font-bold text-white"><span id="summary-positions-count">0</span></p>
+              <div class="flex space-x-4 text-sm">
+                <span class="text-emerald-400">Long: <span id="summary-positions-longs">0</span></span>
+                <span class="text-red-400">Short: <span id="summary-positions-shorts">0</span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Profitable Trades Statistics (Bybit-style) -->
+    <section class="bg-slate-900/80 rounded-xl border border-slate-800 backdrop-blur overflow-hidden">
+      <div class="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <h2 class="text-base font-semibold text-white">Profitable Trades</h2>
+          <div class="flex gap-1">
+            <button onclick="loadTradeStats('today')" id="stats-btn-today"
+              class="px-2 py-0.5 text-xs rounded transition stats-period-btn bg-slate-700 text-slate-400 hover:bg-slate-600">Today</button>
+            <button onclick="loadTradeStats('7d')" id="stats-btn-7d"
+              class="px-2 py-0.5 text-xs rounded transition stats-period-btn bg-slate-700 text-slate-400 hover:bg-slate-600">7D</button>
+            <button onclick="loadTradeStats('30d')" id="stats-btn-30d"
+              class="px-2 py-0.5 text-xs rounded transition stats-period-btn bg-slate-700 text-slate-400 hover:bg-slate-600">30D</button>
+            <button onclick="loadTradeStats('all')" id="stats-btn-all"
+              class="px-2 py-0.5 text-xs rounded transition stats-period-btn bg-emerald-600 text-white">All</button>
+          </div>
+        </div>
+        <span class="text-yellow-400">🏆</span>
+      </div>
+      <div class="p-4">
+        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+          <!-- Win Rate -->
+          <div class="text-center">
+            <div class="text-xs text-slate-500 mb-1">Win Rate</div>
+            <div class="text-xl font-bold text-emerald-400" id="stats-win-rate">0%</div>
+            <div class="text-[10px] text-slate-600 mt-1">
+              <span class="text-emerald-400" id="stats-wins">0</span> / <span class="text-red-400"
+                id="stats-losses">0</span>
+            </div>
+          </div>
+          <!-- Total Trades -->
+          <div class="text-center">
+            <div class="text-xs text-slate-500 mb-1">Total Trades</div>
+            <div class="text-xl font-bold text-white" id="stats-total-trades">0</div>
+          </div>
+          <!-- Net PnL -->
+          <div class="text-center">
+            <div class="text-xs text-slate-500 mb-1">Net PnL</div>
+            <div class="text-xl font-bold" id="stats-net-pnl">$0.00</div>
+          </div>
+          <!-- Profit Factor -->
+          <div class="text-center">
+            <div class="text-xs text-slate-500 mb-1">Profit Factor</div>
+            <div class="text-xl font-bold text-blue-400" id="stats-profit-factor">0</div>
+          </div>
+          <!-- Total Profit -->
+          <div class="text-center">
+            <div class="text-xs text-slate-500 mb-1">Total Profit</div>
+            <div class="text-lg font-semibold text-emerald-400" id="stats-total-profit">$0.00</div>
+            <div class="text-[10px] text-slate-600">Avg: <span id="stats-avg-win">$0.00</span></div>
+          </div>
+          <!-- Total Loss -->
+          <div class="text-center">
+            <div class="text-xs text-slate-500 mb-1">Total Loss</div>
+            <div class="text-lg font-semibold text-red-400" id="stats-total-loss">$0.00</div>
+            <div class="text-[10px] text-slate-600">Avg: <span id="stats-avg-loss">$0.00</span></div>
+          </div>
+        </div>
+        <!-- Win/Loss Bar -->
+        <div class="mt-4 pt-3 border-t border-slate-800">
+          <div class="flex items-center gap-2 text-xs text-slate-500 mb-2">
+            <span>Largest Win: <span class="text-emerald-400 font-medium" id="stats-largest-win">$0.00</span></span>
+            <span class="text-slate-700">|</span>
+            <span>Largest Loss: <span class="text-red-400 font-medium" id="stats-largest-loss">$0.00</span></span>
+          </div>
+          <div class="h-2 bg-slate-800 rounded-full overflow-hidden flex">
+            <div id="stats-win-bar" class="bg-emerald-500 transition-all duration-500" style="width: 50%"></div>
+            <div id="stats-loss-bar" class="bg-red-500 transition-all duration-500" style="width: 50%"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Price Predictions Section -->
+    <section class="bg-slate-900/80 rounded-xl border border-slate-800 backdrop-blur overflow-hidden">
+      <div class="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <h2 class="text-base font-semibold text-white">Price Predictions</h2>
+          <span class="text-xs text-slate-500">(Running Bots)</span>
+        </div>
+        <button onclick="refreshPredictions()"
+          class="text-xs text-slate-400 hover:text-white transition flex items-center gap-1">
+          <span id="predictions-loading" class="hidden">⏳</span>
+          <span>↻ Refresh</span>
+        </button>
+      </div>
+      <div id="predictions-container" class="p-4">
+        <div id="predictions-empty" class="text-center text-slate-500 text-sm py-4">
+          No running bots to analyze
+        </div>
+        <div id="predictions-grid" class="hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          <!-- Prediction cards will be inserted here -->
+        </div>
+      </div>
+    </section>
+
+    <!-- Emergency Stop Button (shown only when bots are running) -->
+    <section id="emergency-stop-section" class="flex justify-center" style="display: none;">
+      <button id="btn-emergency-stop" onclick="emergencyStop()"
+        class="px-8 py-4 bg-red-600 hover:bg-red-500 active:bg-red-700 text-white text-xl font-black rounded-xl transition shadow-2xl shadow-red-900/50 border-2 border-red-400 flex items-center gap-3">
+        <span class="text-3xl">🚨</span>
+        <span>EMERGENCY STOP</span>
+        <span class="text-3xl">🚨</span>
+      </button>
+    </section>
+
+    <!-- Open Positions (Compact) -->
+    <section class="bg-slate-900/80 rounded-xl border border-slate-800 backdrop-blur overflow-hidden">
+      <div class="px-4 py-2 border-b border-slate-800">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-4">
+            <h2 class="text-base font-semibold text-white">Open Positions</h2>
+            <!-- Position Stats -->
+            <div class="flex items-center gap-3 text-xs">
+              <span class="text-slate-500">Total: <span id="pos-total-count"
+                  class="text-white font-medium">0</span></span>
+              <span class="text-emerald-400">Long: <span id="pos-long-count">0</span></span>
+              <span class="text-red-400">Short: <span id="pos-short-count">0</span></span>
+            </div>
+          </div>
+          <div class="flex items-center gap-4">
+            <!-- Wallet Balance -->
+            <div class="flex items-center gap-2 px-3 py-1 bg-emerald-500/20 border border-emerald-500/50 rounded-lg">
+              <span class="text-emerald-400 font-bold text-sm">Wallet:</span>
+              <span id="pos-wallet-balance" class="text-white font-bold text-sm">$0.00</span>
+            </div>
+            <!-- Available Balance -->
+            <div class="flex items-center gap-2 px-3 py-1 bg-yellow-500/20 border border-yellow-500/50 rounded-lg">
+              <span class="text-yellow-400 font-bold text-sm">Avail:</span>
+              <span id="pos-available-balance" class="text-white font-bold text-sm">$0.00</span>
+            </div>
+            <!-- End of balance cards -->
+
+            <button onclick="refreshPositions()" class="text-xs text-slate-400 hover:text-white transition">↻
+              Refresh</button>
+          </div>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead class="bg-slate-800/50">
+            <tr>
+              <th class="px-2 py-2 text-left text-[10px] font-medium text-slate-400 uppercase">Symbol</th>
+              <th class="px-2 py-2 text-center text-[10px] font-medium text-purple-400 uppercase">Mode</th>
+              <th class="px-2 py-2 text-center text-[10px] font-medium text-slate-400 uppercase">Range</th>
+              <th class="px-2 py-2 text-right text-[10px] font-medium text-slate-400 uppercase">Size</th>
+              <th class="px-2 py-2 text-right text-[10px] font-medium text-slate-400 uppercase">Value</th>
+              <th class="px-2 py-2 text-right text-[10px] font-medium text-slate-400 uppercase">Entry</th>
+              <th class="px-2 py-2 text-right text-[10px] font-medium text-slate-400 uppercase">Mark</th>
+              <th class="px-2 py-2 text-right text-[10px] font-medium text-slate-400 uppercase"
+                title="Effective leverage">Lev</th>
+              <th class="px-2 py-2 text-right text-[10px] font-medium text-amber-400 uppercase">% to Liq</th>
+              <th class="px-2 py-2 text-right text-[10px] font-medium text-slate-400 uppercase">Unreal PnL</th>
+              <th class="px-2 py-2 text-right text-[10px] font-medium text-cyan-400 uppercase"
+                title="Realized PnL for this position">Real PnL</th>
+              <th class="px-2 py-2 text-center text-[10px] font-medium text-yellow-400 uppercase"
+                title="Balance target - auto-stop when wallet reaches this">Target $</th>
+              <th class="px-2 py-2 text-center text-[10px] font-medium text-red-400 uppercase">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="positions-body" class="divide-y divide-slate-800">
+            <tr>
+              <td colspan="13" class="px-3 py-4 text-center text-slate-500">No open positions</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Active Bots Table -->
+    <section class="bg-slate-900/80 rounded-xl border border-slate-800 backdrop-blur overflow-hidden">
+      <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+          <h2 class="text-lg font-semibold text-white">Active Bots</h2>
+          <span
+            class="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-xs font-medium rounded-full flex items-center">
+            <span class="inline-block w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1 live-pulse"></span>
+            LIVE
+          </span>
+        </div>
+        <div class="flex items-center space-x-3">
+          <button onclick="refreshBots()" class="text-sm text-slate-400 hover:text-white transition">↻ Refresh</button>
+          <button onclick="removeAllBots()" class="text-sm text-red-400 hover:text-red-300 transition">🗑 Remove
+            All</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-800/50">
+            <tr>
+              <th class="px-3 py-3 text-left text-xs font-medium text-slate-400 uppercase w-20">ID</th>
+              <th class="px-3 py-3 text-left text-xs font-medium text-slate-400 uppercase">Symbol</th>
+              <th class="px-3 py-3 text-left text-xs font-medium text-slate-400 uppercase">Mode</th>
+              <th class="px-3 py-3 text-center text-xs font-medium text-slate-400 uppercase">Range</th>
+              <th class="px-3 py-3 text-center text-xs font-medium text-slate-400 uppercase">Profile</th>
+              <th class="px-3 py-3 text-left text-xs font-medium text-slate-400 uppercase">Bounds</th>
+              <th class="px-3 py-3 text-right text-xs font-medium text-slate-400 uppercase">Grids</th>
+              <th class="px-3 py-3 text-right text-xs font-medium text-slate-400 uppercase">Lev</th>
+              <th class="px-3 py-3 text-right text-xs font-medium text-slate-400 uppercase">Invest</th>
+              <th class="px-3 py-3 text-center text-xs font-medium text-slate-400 uppercase">Status</th>
+              <th class="px-3 py-3 text-center text-xs font-medium text-slate-400 uppercase">TP / PnL%</th>
+              <th class="px-3 py-3 text-right text-xs font-medium text-slate-400 uppercase">PnL</th>
+              <th class="px-3 py-3 text-center text-xs font-medium text-slate-400 uppercase"
+                title="Runtime and earnings per hour">Runtime / $/h</th>
+              <th class="px-3 py-3 text-right text-xs font-medium text-slate-400 uppercase"
+                title="Cumulative P&L for this symbol (all time)">Symbol P&L</th>
+              <th class="px-3 py-3 text-center text-xs font-medium text-slate-400 uppercase">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="bots-body" class="divide-y divide-slate-800">
+            <tr>
+              <td colspan="15" class="px-4 py-8 text-center text-slate-500">No bots configured</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Bot Configuration + Neutral Scanner (Side by Side) -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- Bot Configuration Form -->
+      <div class="bg-slate-900/80 rounded-xl border border-slate-800 backdrop-blur p-5">
+        <h2 class="text-lg font-semibold text-white mb-4">Bot Configuration</h2>
+        <form id="bot-form" class="space-y-4">
+          <input type="hidden" id="bot-id" />
+
+          <div>
+            <label class="block text-sm font-medium text-slate-400 mb-1">Symbol</label>
+            <input type="text" id="bot-symbol" placeholder="BTCUSDT"
+              class="select-all-on-click w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-sm font-medium text-slate-400 mb-1">Lower Price</label>
+              <input type="number" id="bot-lower" step="any" placeholder="0.00"
+                class="select-all-on-click w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-400 mb-1">Upper Price</label>
+              <input type="number" id="bot-upper" step="any" placeholder="0.00"
+                class="select-all-on-click w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-sm font-medium text-slate-400 mb-1">Investment (USDT)</label>
+              <input type="number" id="bot-investment" step="any" value="50"
+                class="select-all-on-click w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+              <p id="min-investment-display" class="text-[11px] text-slate-500 mt-1"></p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-400 mb-1">Leverage</label>
+              <input type="number" id="bot-leverage" step="1" value="3" min="1" max="100"
+                class="select-all-on-click w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-sm font-medium text-slate-400 mb-1">Mode</label>
+              <select id="bot-mode"
+                class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                <option value="neutral">Neutral</option>
+                <option value="neutral_classic_bybit">Neutral Classic (Bybit)</option>
+                <option value="long">Long</option>
+                <option value="short">Short</option>
+                <option value="dynamic">🔥 Dynamic (Ultra-Trend)</option>
+                <option value="scalp_pnl">💰 Scalp PnL</option>
+                <option value="scalp_market">⚡ Scalp Market</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-400 mb-1">Profile</label>
+              <select id="bot-profile"
+                class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                <option value="normal">Normal</option>
+                <option value="scalp">Scalp</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Scalp PnL Info Panel (shown when scalp_pnl mode selected) -->
+          <div id="scalp-pnl-info" class="hidden p-3 bg-amber-900/30 border border-amber-700/50 rounded-lg">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-lg">💰</span>
+              <span class="text-sm font-medium text-amber-400">Scalp Unrealized PnL Mode</span>
+            </div>
+            <ul class="text-xs text-slate-300 space-y-1">
+              <li>• Takes quick profit ($0.20-$0.30) in choppy markets</li>
+              <li>• Holds for $0.60+ target in trending markets</li>
+              <li>• Auto-places orders close to price to follow momentum</li>
+              <li>• Adapts dynamically to volatility</li>
+            </ul>
+          </div>
+
+          <!-- Scalp Market Info Panel (shown when scalp_market mode selected) -->
+          <div id="scalp-market-info" class="hidden p-3 bg-cyan-900/30 border border-cyan-700/50 rounded-lg">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-lg">⚡</span>
+              <span class="text-sm font-medium text-cyan-400">Market Order Scalping</span>
+            </div>
+            <ul class="text-xs text-slate-300 space-y-1">
+              <li>• <strong>Instant entry</strong> with market orders (no waiting)</li>
+              <li>• <strong>TP: $0.50</strong> (~0.25%) - profitable after fees</li>
+              <li>• <strong>SL: $0.35</strong> (~0.18%) - tight stop loss</li>
+              <li>• Follows momentum signals (RSI, MACD, EMA)</li>
+              <li>• 30s cooldown between trades</li>
+              <li>• ⚠️ Higher fees (taker ~0.055%)</li>
+            </ul>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-sm font-medium text-slate-400 mb-1">Range Mode</label>
+              <select id="bot-range-mode"
+                class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                <option value="fixed">Fixed</option>
+                <option value="dynamic">Dynamic</option>
+                <option value="trailing">Trailing</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-400 mb-1">Grid Count</label>
+              <input type="number" id="bot-grids" step="1" min="3" max="500" value="10"
+                class="select-all-on-click w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+              <p id="grid-space-display" class="text-[11px] text-slate-500 mt-1"></p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-sm font-medium text-slate-400 mb-1">Auto Stop (USDT)</label>
+              <input type="number" id="bot-auto-stop" step="any" placeholder="Optional"
+                class="select-all-on-click w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+            </div>
+            <div>
+              <label for="bot-tp-pct" class="block text-sm font-medium text-slate-400 mb-1">Global TP %</label>
+              <input type="number" id="bot-tp-pct" step="0.1" min="0" placeholder="e.g. 1.5"
+                class="select-all-on-click w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+              <p class="text-[10px] text-slate-500 mt-1">Auto-close when PnL ≥ TP%</p>
+              <p id="tp-usdt-display" class="text-[11px] text-emerald-400 mt-1 font-medium"></p>
+            </div>
+          </div>
+
+          <div>
+            <label for="bot-balance-target" class="block text-sm font-medium text-slate-400 mb-1">Balance Target
+              (USDT)</label>
+            <input type="number" id="bot-balance-target" step="0.1" min="0" placeholder="e.g. 25.0"
+              class="select-all-on-click w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+            <p class="text-[10px] text-slate-500 mt-1">Stop & close when wallet reaches this $</p>
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <div class="flex items-center space-x-2">
+              <input type="checkbox" id="bot-auto-direction"
+                class="w-4 h-4 bg-slate-800 border-slate-700 rounded text-purple-500 focus:ring-purple-500" />
+              <label for="bot-auto-direction" class="text-sm text-slate-400 cursor-pointer">Auto Direction
+                (RSI+ADX+MACD+EMA+Candles)</label>
+            </div>
+
+            <!-- Auto-Pilot (Feature #20) -->
+            <div class="flex items-center space-x-2">
+              <input type="checkbox" id="bot-auto-pilot" onchange="updateAutoPilotVisibility()"
+                class="w-4 h-4 bg-slate-800 border-slate-700 rounded text-indigo-500 focus:ring-indigo-500" />
+              <label for="bot-auto-pilot"
+                class="text-sm font-bold text-indigo-400 cursor-pointer flex items-center gap-1">
+                <span>🤖 Auto-Pilot Mode</span>
+                <span class="px-1.5 py-0.5 rounded-full bg-indigo-500/20 text-[10px] uppercase">Smart</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Auto-Pilot Info Panel -->
+          <div id="autopilot-info" class="hidden p-3 bg-indigo-900/30 border border-indigo-700/50 rounded-lg">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-lg">🤖</span>
+              <span class="text-sm font-medium text-indigo-400">Auto-Pilot Active</span>
+            </div>
+            <ul class="text-xs text-slate-300 space-y-1">
+              <li>• System automatically selects the best coin</li>
+              <li>• Ranges and modes are managed by AI</li>
+              <li>• Dynamic risk management enabled</li>
+              <li>• 💡 You only need to set Investment and Leverage</li>
+            </ul>
+          </div>
+
+          <!-- Trailing Stop-Loss (Smart Feature #14) -->
+          <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              <input type="checkbox" id="bot-trailing-sl" checked
+                class="w-4 h-4 bg-slate-800 border-slate-700 rounded text-green-500 focus:ring-green-500" />
+              <label for="bot-trailing-sl" class="text-sm text-slate-400 cursor-pointer">Trailing Stop-Loss (lock in
+                profits)</label>
+            </div>
+            <div class="flex items-center space-x-1">
+              <label for="bot-trailing-sl-activation" class="text-[10px] text-slate-500"
+                title="Activation Profit % (empty = default 0.5%)">Act%</label>
+              <input type="number" id="bot-trailing-sl-activation" step="0.01" min="0" placeholder="0.5"
+                class="w-12 px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-white text-[10px] focus:ring-1 focus:ring-green-500" />
+              <label for="bot-trailing-sl-distance" class="text-[10px] text-slate-500"
+                title="Trail Distance % (empty = default 0.3%)">Dist%</label>
+              <input type="number" id="bot-trailing-sl-distance" step="0.01" min="0" placeholder="0.3"
+                class="w-12 px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-white text-[10px] focus:ring-1 focus:ring-green-500" />
+            </div>
+          </div>
+
+          <!-- Volatility Gate -->
+          <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              <input type="checkbox" id="bot-volatility-gate-enabled" checked
+                class="w-4 h-4 bg-slate-800 border-slate-700 rounded text-orange-500 focus:ring-orange-500" />
+              <label for="bot-volatility-gate-enabled" class="text-sm text-slate-400 cursor-pointer">Volatility Gate
+                (ATR Guard)</label>
+            </div>
+            <div class="flex items-center space-x-1">
+              <label for="bot-volatility-gate-threshold" class="text-xs text-slate-500">ATR%</label>
+              <input type="number" id="bot-volatility-gate-threshold" step="0.1" value="5.0"
+                class="w-16 px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-white text-xs focus:ring-1 focus:ring-orange-500" />
+            </div>
+          </div>
+
+          <!-- Smart Bot Recovery (Auto-Healing) -->
+          <div class="flex items-center space-x-2 pt-1">
+            <input type="checkbox" id="bot-recovery-enabled" checked
+              class="w-4 h-4 bg-slate-800 border-slate-700 rounded text-emerald-500 focus:ring-emerald-500" />
+            <label for="bot-recovery-enabled" class="text-sm text-slate-400 cursor-pointer"
+              title="Automatically roll ranges or scale out of bad trades">Smart Recovery</label>
+          </div>
+
+          <!-- Entry Gate (Oversold/Overbought) -->
+          <div class="flex items-center space-x-2 pt-1 border-t border-slate-800 mt-2">
+            <input type="checkbox" id="bot-entry-gate-enabled" checked
+              class="w-4 h-4 bg-slate-800 border-slate-700 rounded text-blue-500 focus:ring-blue-500" />
+            <label for="bot-entry-gate-enabled" class="text-sm text-slate-400 cursor-pointer"
+              title="Block entries if RSI or distance from EMA indicates extreme conditions">Entry Gate (Safety)</label>
+          </div>
+          <p class="text-[10px] text-slate-500 pl-6 leading-tight">
+            Automatically roll ranges or scale out positions if the bot goes out of range.
+            Uses momentum filters (RSI/ADX) to prevent catching falling knives.
+          </p>
+
+          <div id="bot-risk-info" class="text-xs text-slate-500 p-2 bg-slate-800/50 rounded"></div>
+
+          <div class="flex space-x-3">
+            <button type="button" id="btn-save-bot"
+              class="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg transition">
+              Save Bot
+            </button>
+            <button type="button" id="btn-scalp-preset"
+              class="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white font-medium rounded-lg transition">
+              ⚡ Scalp
+            </button>
+            <button type="button" id="btn-backtest-form" onclick="runBacktestFromForm()"
+              class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg transition">
+              Backtest
+            </button>
+            <button type="button" id="btn-ai-range" onclick="autoFillRangeAndGrids()"
+              class="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-medium rounded-lg transition"
+              title="Auto-calculate best range based on market conditions">
+              ✨ AI Range
+            </button>
+            <button type="button" id="btn-reset-bot"
+              class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white font-medium rounded-lg transition">
+              Reset
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Neutral Scanner -->
+      <div class="bg-slate-900/80 rounded-xl border border-slate-800 backdrop-blur overflow-hidden">
+        <div class="px-4 py-3 border-b border-slate-800 flex flex-col gap-2">
+          <div class="flex items-center justify-between">
+            <h2 class="text-base font-semibold text-white">Neutral Scanner</h2>
+          </div>
+          <div class="flex items-center gap-2">
+            <input type="text" id="scanner-symbols" placeholder="BTCUSDT, ETHUSDT, ..."
+              class="select-all-on-click flex-1 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-white text-xs placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+            <button id="btn-scan-neutral"
+              class="px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium rounded transition">
+              🔍 Scan
+            </button>
+          </div>
+          <div class="flex items-center gap-1 flex-wrap">
+            <span class="text-[10px] text-slate-500">Recent:</span>
+            <div id="recent-scans-container" class="flex items-center gap-1 flex-wrap">
+              <span class="text-slate-500 text-[10px]">No recent scans</span>
+            </div>
+            <button onclick="clearRecentScans()" class="text-[10px] text-slate-600 hover:text-slate-400"
+              title="Clear">✕</button>
+          </div>
+
+        </div>
+        <div class="overflow-y-auto overflow-x-hidden" style="max-height: 400px;">
+          <table class="w-full text-xs table-fixed">
+            <thead class="bg-slate-800/50 sticky top-0">
+              <tr>
+                <th class="px-1 py-2 text-left text-[10px] font-medium text-slate-400 uppercase w-16">Symbol</th>
+                <th class="px-1 py-2 text-center text-[10px] font-medium text-slate-400 uppercase w-10"
+                  title="Estimated risk based on volatility">Risk</th>
+                <th class="px-1 py-2 text-right text-[10px] font-medium text-slate-400 uppercase w-10">ADX</th>
+                <th class="px-1 py-2 text-right text-[10px] font-medium text-slate-400 uppercase w-10">ATR%</th>
+                <th class="px-1 py-2 text-right text-[10px] font-medium text-slate-400 uppercase w-10">BBW%</th>
+                <th class="px-1 py-2 text-right text-[10px] font-medium text-slate-400 uppercase w-12">Vol24h</th>
+                <th class="px-1 py-2 text-right text-[10px] font-medium text-slate-400 uppercase w-10">BTC</th>
+                <th class="px-1 py-2 text-center text-[10px] font-medium text-slate-400 uppercase w-14">Regime</th>
+                <th class="px-1 py-2 text-center text-[10px] font-medium text-slate-400 uppercase w-12">Trend</th>
+                <th class="px-1 py-2 text-center text-[10px] font-medium text-slate-400 uppercase w-12">Speed</th>
+                <th class="px-1 py-2 text-center text-[10px] font-medium text-slate-400 uppercase w-12"
+                  title="Price momentum (%/hr)">Vel</th>
+                <th class="px-1 py-2 text-center text-[10px] font-medium text-slate-400 uppercase w-20">Recommended</th>
+                <th class="px-1 py-2 text-left text-[10px] font-medium text-slate-400 uppercase w-24">Range</th>
+                <th class="px-1 py-2 text-center text-[10px] font-medium text-slate-400 uppercase w-12">Action</th>
+              </tr>
+            </thead>
+            <tbody id="scanner-body" class="divide-y divide-slate-800">
+              <tr>
+                <td colspan="14" class="px-3 py-4 text-center text-slate-500">Click "Scan" to find opportunities</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+
+  </main>
+
+  <!-- Bot Status/Log Modal -->
+  <div id="botModal" class="fixed inset-0 z-[100] hidden">
+    <!-- Overlay -->
+    <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="closeBotModal()"></div>
+    <!-- Modal Content -->
+    <div class="relative flex items-center justify-center min-h-screen p-4">
+      <div
+        class="relative bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+        <!-- Modal Header -->
+        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
+          <div class="flex items-center space-x-3">
+            <h3 class="text-lg font-semibold text-white">📊 Bot Status & Logs</h3>
+            <span id="botModalLiveIndicator"
+              class="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-xs font-medium rounded-full flex items-center">
+              <span class="inline-block w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1 live-pulse"></span>
+              Live
+            </span>
+          </div>
+          <button id="botModalClose" onclick="closeBotModal()"
+            class="p-1 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+        <!-- Tab Buttons -->
+        <div class="flex border-b border-slate-700 px-5">
+          <button id="tabBtnStatus" onclick="switchBotModalTab('status')"
+            class="px-4 py-2 text-sm font-medium text-indigo-400 border-b-2 border-indigo-400 -mb-px transition">
+            Status
+          </button>
+          <button id="tabBtnLog" onclick="switchBotModalTab('log')"
+            class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-slate-200 border-b-2 border-transparent -mb-px transition">
+            Runner Log
+          </button>
+        </div>
+        <!-- Modal Body -->
+        <div class="flex-1 overflow-auto p-5">
+          <!-- Status Tab -->
+          <div id="tabContentStatus" class="block">
+            <pre id="botStatusBox"
+              class="bg-slate-800/50 rounded-lg p-4 text-sm text-slate-300 font-mono whitespace-pre-wrap overflow-auto max-h-[50vh]">Loading...</pre>
+          </div>
+          <!-- Log Tab -->
+          <div id="tabContentLog" class="hidden">
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center space-x-3">
+                <label class="text-sm text-slate-400">
+                  Lines:
+                  <select id="logLinesSelect" onchange="loadBotLog()"
+                    class="ml-1 px-2 py-1 bg-slate-800 border border-slate-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                    <option value="50">50</option>
+                    <option value="100" selected>100</option>
+                    <option value="200">200</option>
+                    <option value="500">500</option>
+                  </select>
+                </label>
+                <!-- Runner status indicator -->
+                <span id="runnerStatusBadge"
+                  class="px-2 py-0.5 text-xs font-medium rounded-full bg-slate-700 text-slate-400">
+                  Checking...
+                </span>
+              </div>
+              <div class="flex items-center space-x-2">
+                <button id="btnStartRunner" onclick="startRunner()"
+                  class="px-3 py-1 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded transition flex items-center">
+                  <span class="mr-1">🚀</span> Start
+                </button>
+                <button id="btnStopRunner" onclick="stopRunner()"
+                  class="px-3 py-1 text-xs bg-red-600 hover:bg-red-500 text-white font-medium rounded transition flex items-center">
+                  <span class="mr-1">🛑</span> Stop
+                </button>
+                <button onclick="loadBotLog()"
+                  class="px-3 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition">
+                  ↻ Refresh
+                </button>
+              </div>
+            </div>
+            <pre id="botLogBox"
+              class="bg-slate-950 rounded-lg p-4 text-xs text-green-400 font-mono whitespace-pre-wrap overflow-auto max-h-[50vh] leading-relaxed">Loading...</pre>
+          </div>
+        </div>
+        <!-- Modal Footer -->
+        <div class="flex items-center justify-between px-5 py-3 border-t border-slate-700 text-xs text-slate-500">
+          <span id="botModalLastUpdate">Last updated: -</span>
+          <span>Press <kbd class="px-1 py-0.5 bg-slate-700 rounded text-slate-400">Esc</kbd> to close</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bot Detail Modal -->
+  <div id="botDetailModal" class="fixed inset-0 z-[100] hidden">
+    <!-- Backdrop -->
+    <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="closeBotDetailModal()"></div>
+    <!-- Modal Content -->
+    <div class="relative flex items-center justify-center min-h-screen p-4">
+      <div
+        class="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden">
+        <!-- Modal Header -->
+        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
+          <div class="flex items-center space-x-3">
+            <h3 class="text-lg font-semibold text-white">
+              <span id="botDetailSymbol">BTCUSDT</span> Details
+            </h3>
+            <span id="botDetailStatus"
+              class="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-xs font-medium rounded-full">running</span>
+          </div>
+          <button onclick="closeBotDetailModal()" class="text-slate-400 hover:text-white text-xl">&times;</button>
+        </div>
+        <!-- Modal Body -->
+        <div class="p-5 overflow-y-auto max-h-[calc(90vh-140px)]">
+          <!-- Summary Cards -->
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div class="bg-slate-800/50 rounded-lg p-4">
+              <div class="text-xs text-slate-400 uppercase mb-1">Symbol Net P&L</div>
+              <div id="botDetailNetPnl" class="text-xl font-bold text-emerald-400">$0.00</div>
+              <div id="botDetailWinRate" class="text-xs text-slate-500">0 trades, 0% win</div>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4">
+              <div class="text-xs text-slate-400 uppercase mb-1">Total Profit</div>
+              <div id="botDetailProfit" class="text-xl font-bold text-emerald-400">$0.00</div>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4">
+              <div class="text-xs text-slate-400 uppercase mb-1">Total Loss</div>
+              <div id="botDetailLoss" class="text-xl font-bold text-red-400">$0.00</div>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4">
+              <div class="text-xs text-slate-400 uppercase mb-1">Bot PnL (this config)</div>
+              <div id="botDetailBotPnl" class="text-xl font-bold text-white">$0.00</div>
+            </div>
+          </div>
+
+          <!-- Bot Configuration -->
+          <div class="bg-slate-800/30 rounded-lg p-4 mb-6">
+            <h4 class="text-sm font-medium text-white mb-3">📋 Current Configuration</h4>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <div><span class="text-slate-400">Mode:</span> <span id="botDetailMode" class="text-white">neutral</span>
+              </div>
+              <div><span class="text-slate-400">Profile:</span> <span id="botDetailProfile"
+                  class="text-white">normal</span></div>
+              <div><span class="text-slate-400">Investment:</span> <span id="botDetailInvest"
+                  class="text-white">$0</span></div>
+              <div><span class="text-slate-400">Leverage:</span> <span id="botDetailLeverage"
+                  class="text-white">1x</span></div>
+              <div><span class="text-slate-400">Grids:</span> <span id="botDetailGrids" class="text-white">0</span>
+              </div>
+              <div><span class="text-slate-400">Range:</span> <span id="botDetailRange" class="text-white">-</span>
+              </div>
+              <div><span class="text-slate-400">TP%:</span> <span id="botDetailTp" class="text-white">-</span></div>
+              <div><span class="text-slate-400">Auto-Stop:</span> <span id="botDetailAutoStop"
+                  class="text-white">-</span></div>
+            </div>
+          </div>
+
+          <!-- Smart Features Status -->
+          <div class="bg-slate-800/30 rounded-lg p-4 mb-6">
+            <h4 class="text-sm font-medium text-white mb-3">🧠 Smart Features</h4>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <!-- Funding Rate -->
+              <div class="bg-slate-700/30 rounded-lg p-3">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-xs text-slate-400">Funding Rate Signal</span>
+                  <span id="botDetailFundingSignal"
+                    class="px-2 py-0.5 text-xs rounded-full bg-slate-600 text-slate-300">-</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="text-sm font-mono" id="botDetailFundingRate">-</span>
+                  <span class="text-xs text-slate-500" id="botDetailFundingScore">Score: 0</span>
+                </div>
+              </div>
+              <!-- Partial TP -->
+              <div class="bg-slate-700/30 rounded-lg p-3">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-xs text-slate-400">Partial TP Status</span>
+                  <span id="botDetailPartialTpStatus"
+                    class="px-2 py-0.5 text-xs rounded-full bg-slate-600 text-slate-300">Inactive</span>
+                </div>
+                <div class="flex items-center justify-between mb-1">
+                  <span class="text-sm" id="botDetailPartialTpLevel">Level: 0/3</span>
+                  <span class="text-xs text-slate-500" id="botDetailPartialTpProfit">Closed: 0%</span>
+                </div>
+                <div class="text-xs text-slate-500" id="botDetailPartialTpProgress">
+                  Next: 0.5% profit
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Auto-Direction Signals -->
+          <div id="botDetailSignalsSection" class="bg-slate-800/30 rounded-lg p-4 mb-6 hidden">
+            <div class="flex items-center justify-between mb-3">
+              <h4 class="text-sm font-medium text-white">📊 Auto-Direction Signals</h4>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-slate-400">Total Score:</span>
+                <span id="botDetailDirectionScore"
+                  class="px-2 py-0.5 text-sm font-bold rounded bg-slate-700 text-white">0</span>
+                <span id="botDetailDirectionMode"
+                  class="px-2 py-0.5 text-xs rounded-full bg-slate-600 text-slate-300">NEUTRAL</span>
+              </div>
+            </div>
+            <div id="botDetailSignalsGrid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+              <!-- Signals will be rendered here by JavaScript -->
+            </div>
+            <div id="botDetailSignalsSummary" class="mt-3 text-xs text-slate-500 border-t border-slate-700 pt-2">
+              <!-- Summary text -->
+            </div>
+          </div>
+
+          <!-- Grid Visualization -->
+          <div class="bg-slate-800/30 rounded-lg p-4 mb-6">
+            <div class="flex items-center justify-between mb-3">
+              <h4 class="text-sm font-medium text-white">📊 Grid Visualization</h4>
+              <button onclick="refreshGridVisualization()" class="text-xs text-slate-400 hover:text-white transition">↻
+                Refresh</button>
+            </div>
+            <div id="gridVizContainer" class="relative">
+              <canvas id="gridVizCanvas" height="300"></canvas>
+              <div id="gridVizLoading" class="absolute inset-0 flex items-center justify-center bg-slate-900/80">
+                <span class="text-slate-400">Loading grid data...</span>
+              </div>
+            </div>
+            <div class="mt-2 flex items-center gap-4 text-[10px] text-slate-500">
+              <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> Buy
+                Orders</span>
+              <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500"></span> Sell
+                Orders</span>
+              <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-400"></span> Current
+                Price</span>
+              <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-cyan-400"></span> Entry
+                Price</span>
+            </div>
+          </div>
+
+          <!-- Recent Logs -->
+          <div class="bg-slate-800/30 rounded-lg p-4 mb-6">
+            <div class="flex items-center justify-between mb-3">
+              <h4 class="text-sm font-medium text-white">📜 Recent Logs</h4>
+              <button onclick="refreshBotDetailLogs()" class="text-xs text-slate-400 hover:text-white transition">↻
+                Refresh</button>
+            </div>
+            <pre id="botDetailLogsBox"
+              class="bg-slate-950 rounded p-3 text-xs font-mono text-slate-300 h-48 overflow-auto whitespace-pre-wrap">Loading logs...</pre>
+            <div class="mt-2 text-[10px] text-slate-500 flex items-center justify-between">
+              <span>Showing recent system logs for this bot</span>
+            </div>
+          </div>
+
+          <!-- Trade History -->
+          <div class="bg-slate-800/30 rounded-lg p-4">
+            <h4 class="text-sm font-medium text-white mb-3">📈 Recent Trades (Symbol: <span
+                id="botDetailHistorySymbol">BTCUSDT</span>)</h4>
+            <div class="overflow-x-auto max-h-64 overflow-y-auto">
+              <table class="w-full text-xs">
+                <thead class="bg-slate-700/50 sticky top-0">
+                  <tr>
+                    <th class="px-3 py-2 text-left text-slate-400">Time</th>
+                    <th class="px-3 py-2 text-left text-slate-400">Side</th>
+                    <th class="px-3 py-2 text-right text-slate-400">P&L</th>
+                    <th class="px-3 py-2 text-left text-slate-400">Bot</th>
+                  </tr>
+                </thead>
+                <tbody id="botDetailTradesBody" class="divide-y divide-slate-700">
+                  <tr>
+                    <td colspan="4" class="px-3 py-4 text-center text-slate-500">No trades yet</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <!-- Modal Footer -->
+        <div class="flex items-center justify-between px-5 py-3 border-t border-slate-700 text-xs text-slate-500">
+          <span id="botDetailFirstTrade">First trade: -</span>
+          <span id="botDetailLastTrade">Last trade: -</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- All Closed PnL Modal -->
+  <div id="allPnlModal" class="fixed inset-0 z-[100] hidden">
+    <!-- Backdrop -->
+    <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="closeAllPnlModal()"></div>
+    <!-- Modal Content -->
+    <div class="relative flex items-center justify-center min-h-screen p-4">
+      <div
+        class="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden">
+        <!-- Modal Header -->
+        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
+          <div class="flex items-center space-x-3">
+            <h3 class="text-lg font-semibold text-white">All Closed PnL History</h3>
+            <span id="allPnlRecordCount"
+              class="px-2 py-0.5 bg-blue-500/20 text-blue-400 text-xs font-medium rounded-full">0 records</span>
+          </div>
+          <button onclick="closeAllPnlModal()" class="text-slate-400 hover:text-white text-xl">&times;</button>
+        </div>
+
+        <!-- Summary Stats -->
+        <div class="px-5 py-3 border-b border-slate-700 bg-slate-800/50">
+          <div class="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+            <div>
+              <span class="text-slate-400">Total PnL:</span>
+              <span id="allPnlTotalPnl" class="ml-2 font-bold text-emerald-400">$0.00</span>
+            </div>
+            <div>
+              <span class="text-slate-400">Trades:</span>
+              <span id="allPnlTotalTrades" class="ml-2 font-medium text-white">0</span>
+            </div>
+            <div>
+              <span class="text-slate-400">Wins:</span>
+              <span id="allPnlWins" class="ml-2 font-medium text-emerald-400">0</span>
+            </div>
+            <div>
+              <span class="text-slate-400">Losses:</span>
+              <span id="allPnlLosses" class="ml-2 font-medium text-red-400">0</span>
+            </div>
+            <div>
+              <span class="text-slate-400">Win Rate:</span>
+              <span id="allPnlWinRate" class="ml-2 font-medium text-white">0%</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="px-5 py-3 border-b border-slate-700 bg-slate-800/30">
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-slate-400">From:</label>
+              <input type="date" id="allPnlStartDate"
+                class="px-2 py-1 text-xs bg-slate-700 border border-slate-600 rounded text-white focus:outline-none focus:border-emerald-500">
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-slate-400">To:</label>
+              <input type="date" id="allPnlEndDate"
+                class="px-2 py-1 text-xs bg-slate-700 border border-slate-600 rounded text-white focus:outline-none focus:border-emerald-500">
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-slate-400">Symbol:</label>
+              <input type="text" id="allPnlSymbolFilter" placeholder="e.g., BTCUSDT"
+                class="px-2 py-1 text-xs bg-slate-700 border border-slate-600 rounded text-white w-28 focus:outline-none focus:border-emerald-500">
+            </div>
+            <button onclick="refreshAllPnlModal()"
+              class="px-3 py-1 text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white rounded transition">
+              Apply Filters
+            </button>
+            <button onclick="clearAllPnlFilters()"
+              class="px-3 py-1 text-xs font-medium bg-slate-600 hover:bg-slate-500 text-white rounded transition">
+              Clear
+            </button>
+          </div>
+        </div>
+
+        <!-- Modal Body - Table -->
+        <div class="p-5 overflow-y-auto max-h-[calc(90vh-280px)]">
+          <table class="w-full text-xs">
+            <thead class="bg-slate-700/50 sticky top-0">
+              <tr>
+                <th class="px-3 py-2 text-left text-slate-400">Time</th>
+                <th class="px-3 py-2 text-left text-slate-400">Symbol</th>
+                <th class="px-3 py-2 text-left text-slate-400">Side</th>
+                <th class="px-3 py-2 text-right text-slate-400">PnL</th>
+                <th class="px-3 py-2 text-right text-slate-400">Balance</th>
+                <th class="px-3 py-2 text-right text-slate-400">Investment</th>
+                <th class="px-3 py-2 text-center text-slate-400">Leverage</th>
+                <th class="px-3 py-2 text-center text-slate-400">Mode</th>
+                <th class="px-3 py-2 text-center text-slate-400">Range</th>
+                <th class="px-3 py-2 text-left text-slate-400">Bot ID</th>
+              </tr>
+            </thead>
+            <tbody id="allPnlTableBody" class="divide-y divide-slate-700">
+              <tr>
+                <td colspan="10" class="px-3 py-8 text-center text-slate-500">Loading...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Pagination Footer -->
+        <div class="flex items-center justify-between px-5 py-3 border-t border-slate-700 text-xs">
+          <div class="flex items-center gap-2">
+            <button id="allPnlPrevPage" onclick="allPnlChangePage(-1)"
+              class="px-2 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled>Prev</button>
+            <span id="allPnlPageInfo" class="text-slate-400">Page 1 of 1</span>
+            <button id="allPnlNextPage" onclick="allPnlChangePage(1)"
+              class="px-2 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled>Next</button>
+          </div>
+          <span class="text-slate-500">Press <kbd class="px-1 py-0.5 bg-slate-700 rounded text-slate-400">Esc</kbd> to
+            close</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="max-w-[1800px] mx-auto px-4 py-6 text-center text-slate-600 text-sm">
+    Bybit Futures Control Center • Use at your own risk • <span class="text-emerald-500">Live updates every 3s</span>
+  </footer>
+
+  <!-- Quick Edit Panel -->
+  <div id="quick-edit-panel"
+    class="fixed z-50 hidden bg-slate-800 border border-slate-600 rounded-lg shadow-xl p-4 w-72">
+    <div class="flex items-center justify-between mb-3">
+      <span class="text-sm font-medium text-white">Quick Settings</span>
+      <button onclick="hideQuickEdit()" class="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+    </div>
+    <input type="hidden" id="quick-edit-bot-id" />
+    <div class="space-y-3">
+      <div>
+        <label class="block text-xs text-slate-400 mb-1">Global TP %</label>
+        <div class="flex items-center gap-2">
+          <input type="number" step="0.1" min="0" id="quick-edit-tp" placeholder="e.g. 1.5"
+            class="flex-1 px-2 py-1.5 bg-slate-700 border border-slate-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500" />
+          <span class="text-slate-400 text-sm">%</span>
+        </div>
+        <p class="text-xs text-slate-500 mt-1">Stop when total PnL reaches this %</p>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-400 mb-1">Auto Stop (USDT)</label>
+        <div class="flex items-center gap-2">
+          <input type="number" step="0.1" min="0" id="quick-edit-autostop" placeholder="e.g. 5.0"
+            class="flex-1 px-2 py-1.5 bg-slate-700 border border-slate-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-red-500" />
+          <span class="text-slate-400 text-sm">$</span>
+        </div>
+        <p class="text-xs text-slate-500 mt-1">Stop when unrealized loss reaches this $</p>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-400 mb-1">🎯 Balance Target (USDT)</label>
+        <div class="flex items-center gap-2">
+          <input type="number" step="0.1" min="0" id="quick-edit-balance-target" placeholder="e.g. 25.0"
+            class="flex-1 px-2 py-1.5 bg-slate-700 border border-slate-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500" />
+          <span class="text-slate-400 text-sm">$</span>
+        </div>
+        <p class="text-xs text-slate-500 mt-1">Stop & close when wallet reaches this $</p>
+      </div>
+      <button onclick="saveQuickEdit()"
+        class="w-full px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded transition">
+        Save Changes
+      </button>
+    </div>
+  </div>
+  <!-- Quick Edit Panel Backdrop -->
+  <div id="quick-edit-backdrop" onclick="hideQuickEdit()" class="fixed inset-0 bg-black/50 z-40 hidden"></div>
+
+  <!-- Analytics Modal -->
+  <div id="analyticsModal" class="fixed inset-0 z-[60] hidden overflow-y-auto bg-slate-950/80 backdrop-blur-sm">
+    <div class="flex min-h-full items-center justify-center p-4">
+      <div class="w-full max-w-6xl rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden">
+        <!-- Modal Header -->
+        <div class="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/50">
+          <div class="flex items-center gap-3">
+            <span class="text-2xl">📈</span>
+            <div>
+              <h3 class="text-xl font-bold text-white">Performance Analytics</h3>
+              <p class="text-xs text-slate-400">Deep insights into your trading performance</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-3">
+            <!-- Period Selector -->
+            <div class="flex p-1 bg-slate-800 rounded-lg">
+              <button onclick="loadAnalytics('7d')" id="analytics-7d"
+                class="px-3 py-1 text-xs font-medium rounded-md transition-all text-slate-400 hover:text-slate-200">7D</button>
+              <button onclick="loadAnalytics('30d')" id="analytics-30d"
+                class="px-3 py-1 text-xs font-medium rounded-md transition-all text-slate-400 hover:text-slate-200">30D</button>
+              <button onclick="loadAnalytics('all')" id="analytics-all"
+                class="px-3 py-1 text-xs font-medium rounded-md bg-emerald-600 text-white shadow-lg">ALL</button>
+            </div>
+            <button onclick="closeAnalyticsModal()"
+              class="p-2 hover:bg-slate-800 rounded-full transition text-slate-400 hover:text-white">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Modal Content -->
+        <div class="p-6 space-y-6 max-h-[85vh] overflow-y-auto">
+          <!-- Analytics Stats Grid -->
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50">
+              <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">Net PnL</p>
+              <p id="ana-net-pnl" class="text-2xl font-bold">$0.00</p>
+            </div>
+            <div class="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50">
+              <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">Win Rate</p>
+              <p id="ana-win-rate" class="text-2xl font-bold">0.0%</p>
+            </div>
+            <div class="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50">
+              <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">Profit Factor</p>
+              <p id="ana-profit-factor" class="text-2xl font-bold text-blue-400">0.00</p>
+            </div>
+            <div class="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50">
+              <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">Max Drawdown</p>
+              <p id="ana-mdd" class="text-2xl font-bold text-red-400">$0.00</p>
+            </div>
+          </div>
+
+          <!-- Charts Section -->
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Equity Curve -->
+            <div class="bg-slate-800/40 p-5 rounded-xl border border-slate-700/50 space-y-4">
+              <div class="flex items-center justify-between">
+                <h4 class="text-sm font-semibold text-slate-300">Equity Curve & Drawdown</h4>
+              </div>
+              <div class="h-[300px] w-full">
+                <canvas id="equityChart"></canvas>
+              </div>
+            </div>
+
+            <!-- Daily PnL -->
+            <div class="bg-slate-800/40 p-5 rounded-xl border border-slate-700/50 space-y-4">
+              <div class="flex items-center justify-between">
+                <h4 class="text-sm font-semibold text-slate-300">Daily PnL Breakdown</h4>
+              </div>
+              <div class="h-[300px] w-full">
+                <canvas id="dailyPnlChart"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}?v=20260111"></script>
+  <script src="{{ url_for('static', filename='js/app_lf.js') }}?v=20260111"></script>
+</body>
+
+</html>

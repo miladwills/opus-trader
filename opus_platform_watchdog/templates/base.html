@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Watchdog{% endblock %} - Opus Platform</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/watchdog.css">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slate: {
+                            950: '#0b0f19',
+                            900: '#0f172a',
+                            850: '#141c2e',
+                            800: '#1e293b',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-slate-950 text-gray-200 min-h-screen">
+    <nav class="bg-slate-900 border-b border-slate-800 px-4 py-3">
+        <div class="max-w-7xl mx-auto flex items-center justify-between">
+            <div class="flex items-center gap-6">
+                <a href="/" class="text-emerald-400 font-bold text-lg tracking-tight">Watchdog</a>
+                <div class="hidden sm:flex items-center gap-4 text-sm">
+                    <a href="/" class="hover:text-emerald-400 {% if request.url.path == '/' %}text-emerald-400{% else %}text-gray-400{% endif %}">Dashboard</a>
+                    <a href="/incidents" class="hover:text-emerald-400 {% if request.url.path == '/incidents' %}text-emerald-400{% else %}text-gray-400{% endif %}">Incidents</a>
+                    <a href="/probes" class="hover:text-emerald-400 {% if request.url.path == '/probes' %}text-emerald-400{% else %}text-gray-400{% endif %}">Probes</a>
+                    <a href="/bridge" class="hover:text-emerald-400 {% if request.url.path == '/bridge' %}text-emerald-400{% else %}text-gray-400{% endif %}">Bridge</a>
+                    <a href="/system" class="hover:text-emerald-400 {% if request.url.path == '/system' %}text-emerald-400{% else %}text-gray-400{% endif %}">System</a>
+                    <a href="/debug" class="hover:text-emerald-400 {% if request.url.path == '/debug' %}text-emerald-400{% else %}text-gray-400{% endif %}">Debug</a>
+                </div>
+            </div>
+            <div id="auto-refresh-badge" class="text-xs text-gray-500">auto-refresh: 10s</div>
+        </div>
+    </nav>
+    <main class="max-w-7xl mx-auto px-4 py-6">
+        {% block content %}{% endblock %}
+    </main>
+    <script src="/static/watchdog.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

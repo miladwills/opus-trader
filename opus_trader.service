@@ -1,0 +1,15 @@
+[Unit]
+Description=Opus Trader Flask App
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/var/www/opus_trader
+Environment="APP_HOST=0.0.0.0"
+Environment="APP_PORT=8000"
+ExecStartPre=/bin/sh -c '/usr/bin/fuser -k 8000/tcp || true'
+ExecStart=/var/www/opus_trader/venv/bin/python app.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

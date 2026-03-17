@@ -1,0 +1,54 @@
+{
+  "name": "Volatile - Avoid",
+  "sortLevels": [
+    {
+      "col": "state",
+      "dir": "asc"
+    },
+    {
+      "col": "speed_pct",
+      "dir": "desc"
+    },
+    {
+      "col": "atrPct15",
+      "dir": "desc"
+    },
+    {
+      "col": "bbw15",
+      "dir": "desc"
+    },
+    {
+      "col": "vol24h",
+      "dir": "desc"
+    }
+  ],
+  "filterRules": [
+    {
+      "col": "state",
+      "op": "=",
+      "val": "VOLATILE",
+      "val2": ""
+    },
+    {
+      "col": "speed_pct",
+      "op": ">=",
+      "val": "60",
+      "val2": ""
+    },
+    {
+      "col": "atrPct15",
+      "op": ">=",
+      "val": "1.5",
+      "val2": ""
+    },
+    {
+      "col": "bbw15",
+      "op": ">=",
+      "val": "20",
+      "val2": ""
+    }
+  ],
+  "combineMode": "OR",
+  "createdAt": "2026-01-09T00:00:00Z",
+  "updatedAt": "2026-01-09T00:00:00Z"
+}

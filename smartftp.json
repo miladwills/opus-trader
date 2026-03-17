@@ -1,0 +1,26 @@
+{
+  "name": "Opus VPS (SFTP)",
+  "host": "82.197.68.169",
+  "protocol": "sftp",
+  "port": 22,
+  "username": "root",
+  "password": "aA0109587045",
+  "remotePath": "/var/www",
+  "uploadOnSave": true,
+  "useTempFile": false,
+  "openSsh": false,
+  "watcher": {
+    "files": "**/*",
+    "autoUpload": true,
+    "autoDelete": false,
+    "ignoreCreate": false,
+    "ignoreUpdate": false,
+    "ignoreDelete": true
+  },
+  "ignore": [
+    "venv",
+    "node_modules",
+    ".git",
+    ".vscode"
+  ]
+}
