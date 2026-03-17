@@ -142,18 +142,21 @@ def test_api_summary_fresh_request_prefers_runner_bridge_payload(
     assert payload["fresh_request_reason"] == "summary_runner_bridge_preferred"
 
 
-def test_api_bots_runtime_returns_empty_degraded_fallback_when_snapshot_times_out(
+def test_api_bots_runtime_returns_empty_degraded_fallback_when_bridge_stale(
     monkeypatch,
     tmp_path,
 ):
     app_module = _load_app_module(monkeypatch, tmp_path)
 
-    def slow_runtime_bots():
-        time.sleep(0.05)
-        return [{"id": "live-bot"}]
-
-    app_module.bot_status_service = SimpleNamespace(get_runtime_bots=slow_runtime_bots)
-    # bot_storage.list_bots() must NOT be called — fallback returns empty degraded state
+    # Bridge returns nothing usable — stale path must NOT trigger heavy builder
+    app_module.runtime_snapshot_bridge = SimpleNamespace(
+        read_section=lambda section_name, max_age_sec=None: None,
+    )
+    # Heavy builder must NOT be called — stale bridge goes to degraded fallback
+    app_module._build_runtime_bots_payload = lambda: (_ for _ in ()).throw(
+        AssertionError("must not call _build_runtime_bots_payload when bridge stale")
+    )
+    # bot_storage.list_bots() must NOT be called
     app_module.bot_storage = SimpleNamespace(
         list_bots=lambda: (_ for _ in ()).throw(
             AssertionError("must not call bot_storage.list_bots() on critical path")
@@ -169,7 +172,7 @@ def test_api_bots_runtime_returns_empty_degraded_fallback_when_snapshot_times_ou
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["stale_data"] is True
-    assert payload["error"] == "bots_runtime_timeout"
+    assert "bridge" in payload.get("error", "")
     assert payload["bots"] == []
     assert payload["runtime_state_source"] == "critical_path_empty_fallback"
 
@@ -450,12 +453,12 @@ def test_prefer_runtime_snapshot_bridge_requires_fresh_bots_runtime(
     assert app_module._prefer_runtime_snapshot_bridge() is False
 
 
-def test_get_runtime_bots_snapshot_recovers_when_bridge_stale(
+def test_get_runtime_bots_snapshot_returns_degraded_when_bridge_stale(
     monkeypatch,
     tmp_path,
 ):
-    """When bridge is stale (alive but hard-stale), recovery runs and fresh
-    data from the app-side rebuild is preferred over stale bridge data."""
+    """When bridge is stale, the heavy builder is NOT called. Degraded
+    fallback is returned instead — no bot_storage.list_bots() contention."""
     app_module = _load_app_module(monkeypatch, tmp_path)
     app_module.runtime_snapshot_bridge = SimpleNamespace(
         read_section=lambda section_name, max_age_sec=None: (
@@ -471,8 +474,9 @@ def test_get_runtime_bots_snapshot_recovers_when_bridge_stale(
         )
     )
     app_module._is_bridge_producer_alive = lambda: True
-    app_module.bot_status_service = SimpleNamespace(
-        get_runtime_bots=lambda: [{"id": "fresh-bot", "setup_ready_status": "ready"}]
+    # Heavy builder must NOT be called when bridge is stale
+    app_module._build_runtime_bots_payload = lambda: (_ for _ in ()).throw(
+        AssertionError("must not call _build_runtime_bots_payload when bridge stale")
     )
     with app_module.DASHBOARD_SNAPSHOT_LOCK:
         app_module.DASHBOARD_SNAPSHOT_CACHE.clear()
@@ -480,17 +484,17 @@ def test_get_runtime_bots_snapshot_recovers_when_bridge_stale(
 
     payload = app_module._get_runtime_bots_snapshot()
 
-    # Recovery produces fresh data, watchdog prefers it over stale bridge
-    assert payload["bots"][0]["id"] == "fresh-bot"
-    assert payload["stale_data"] is False
+    # Stale bridge data is returned (watchdog resolves bridge vs degraded fallback)
+    assert payload["stale_data"] is True
+    assert isinstance(payload["bots"], list)
 
 
-def test_build_dashboard_stream_payload_recovers_stale_bots_for_snapshot_poll(
+def test_build_dashboard_stream_payload_uses_degraded_when_bridge_stale(
     monkeypatch,
     tmp_path,
 ):
-    """When bots_runtime bridge is stale, recovery runs and fresh rebuilt
-    data is used in the stream payload."""
+    """When bots_runtime bridge is stale, degraded fallback is used instead
+    of triggering the heavy builder that hits bot_storage."""
     app_module = _load_app_module(monkeypatch, tmp_path)
     app_module.runtime_snapshot_bridge = SimpleNamespace(
         read_dashboard_payload=lambda reason: {
@@ -514,8 +518,9 @@ def test_build_dashboard_stream_payload_recovers_stale_bots_for_snapshot_poll(
         read_market_snapshot=lambda: {"snapshot_owner": "runner", "snapshot_fresh": True, "stale_data": False},
     )
     app_module._is_bridge_producer_alive = lambda: True
-    app_module.bot_status_service = SimpleNamespace(
-        get_runtime_bots=lambda: [{"id": "fresh-bot", "setup_ready_status": "ready"}]
+    # Heavy builder must NOT be called when bridge is stale
+    app_module._build_runtime_bots_payload = lambda: (_ for _ in ()).throw(
+        AssertionError("must not call _build_runtime_bots_payload when bridge stale")
     )
     app_module._get_summary_snapshot = lambda: {
         "account": {"equity": 10.0},
@@ -533,9 +538,9 @@ def test_build_dashboard_stream_payload_recovers_stale_bots_for_snapshot_poll(
 
     payload = app_module._build_dashboard_stream_payload("snapshot_poll")
 
-    # Fresh rebuilt data preferred over stale bridge
-    assert payload["bots"][0]["id"] == "fresh-bot"
-    assert payload["bots_meta"]["stale_data"] is False
+    # Stale bridge data used — heavy builder not invoked
+    assert isinstance(payload["bots"], list)
+    assert payload["bots_meta"]["stale_data"] is True
 
 
 def test_build_dashboard_stream_payload_does_not_use_raw_dashboard_bridge_bundle(

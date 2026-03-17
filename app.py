@@ -591,24 +591,17 @@ def _get_runtime_bots_snapshot() -> Dict[str, Any]:
     # If alive-but-stale or dead/missing, fall through to direct recovery.
     bridge_usable = _bridge_section_usable(bridged)
     need_probe = (not bridge_usable) and integrity_watchdog.should_probe_direct_runtime(bridged)
-    if bot_status_service is not None and need_probe:
-        rebuilt = _dashboard_snapshot(
-            "bots_runtime",
-            _build_runtime_bots_payload,
-            _build_runtime_bots_fallback,
-            wait_timeout=min(float(DASHBOARD_SNAPSHOT_WAIT_SEC), 2.0),
-            refresh_ttl=max(min(float(DASHBOARD_SNAPSHOT_REFRESH_TTL_SEC), 3.0), 1.0),
-        )
+    if need_probe:
+        # Bridge stale + watchdog says probe — return degraded fallback instead
+        # of submitting heavy _build_runtime_bots_payload to executor (which
+        # would call bot_status_service.get_runtime_bots() -> bot_storage.list_bots()
+        # and contend on cache_lock + file_lock).
+        rebuilt = _build_runtime_bots_fallback("bots_runtime_bridge_stale")
     elif not bridge_usable and bot_status_service is None:
         rebuilt = _build_runtime_bots_fallback("bots_runtime_bridge_unavailable")
-    elif force_rebuild and not bridge_usable and bot_status_service is not None:
-        rebuilt = _dashboard_snapshot(
-            "bots_runtime",
-            _build_runtime_bots_payload,
-            _build_runtime_bots_fallback,
-            wait_timeout=1.0,
-            refresh_ttl=0.5,
-        )
+    elif force_rebuild and not bridge_usable:
+        # Forced rebuild with stale bridge — use degraded fallback, not heavy builder.
+        rebuilt = _build_runtime_bots_fallback("bots_runtime_force_rebuild_stale")
     return _get_runtime_state_integrity_watchdog_service().resolve_runtime_bots(
         bridge_payload=bridged,
         app_payload=rebuilt,
@@ -1666,25 +1659,39 @@ def _build_app_runtime(runtime_cfg: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# Bounded last-known-good hold for stream symbol collection.
+# Prevents subscription churn when bridge is briefly empty/stale.
+_last_known_stream_symbols: List[str] = []
+_last_known_stream_symbols_ts: float = 0.0
+_STREAM_SYMBOLS_HOLD_SEC: float = 60.0
+
+
 def _collect_stream_symbols() -> List[str]:
+    global _last_known_stream_symbols, _last_known_stream_symbols_ts
     symbols = set()
-    try:
-        for bot in bot_storage.list_bots():
-            if bot.get("status") != "running":
-                continue
-            symbol = str(bot.get("symbol") or "").strip().upper()
-            if not symbol or symbol == "AUTO-PILOT":
-                continue
-            symbols.add(symbol)
-    except Exception as exc:
-        logging.debug("Failed to collect bot symbols for stream sync: %s", exc)
-
-    if not symbols:
-        # No running bots — return empty. Position-based symbol discovery
-        # is the runner's responsibility, not the web request path.
-        pass
-
-    return sorted(symbols)
+    # Use bridge data instead of bot_storage to avoid cache_lock contention.
+    # Prefer lightweight section first, fall back to full runtime section.
+    bridged = runtime_snapshot_bridge.read_section("bots_runtime_light")
+    bots = (bridged or {}).get("bots") or []
+    if not bots:
+        bridged = runtime_snapshot_bridge.read_section("bots_runtime")
+        bots = (bridged or {}).get("bots") or []
+    for bot in bots:
+        if bot.get("status") != "running":
+            continue
+        symbol = str(bot.get("symbol") or "").strip().upper()
+        if not symbol or symbol == "AUTO-PILOT":
+            continue
+        symbols.add(symbol)
+    result = sorted(symbols)
+    if result:
+        _last_known_stream_symbols = result
+        _last_known_stream_symbols_ts = time.time()
+        return result
+    # Bridge returned empty — use last-known-good if within hold window.
+    if _last_known_stream_symbols and (time.time() - _last_known_stream_symbols_ts) < _STREAM_SYMBOLS_HOLD_SEC:
+        return _last_known_stream_symbols
+    return []
 
 
 def _sync_stream_subscriptions_once() -> None:
