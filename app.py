@@ -3169,7 +3169,17 @@ def api_bridge_diagnostics():
                 counts["bots"] = len(payload.get("bots") or [])
                 counts["bots_scope"] = payload.get("bots_scope")
             elif name == "open_orders":
-                counts["orders"] = len(payload.get("orders") or [])
+                symbols_payload = payload.get("symbols") or {}
+                if isinstance(symbols_payload, dict):
+                    counts["symbols"] = len(symbols_payload)
+                    counts["orders"] = sum(
+                        int((entry or {}).get("open_order_count") or 0)
+                        for entry in symbols_payload.values()
+                        if isinstance(entry, dict)
+                    )
+                else:
+                    counts["symbols"] = 0
+                    counts["orders"] = 0
             section_diag = {
                 "present": bool(section),
                 "published_at": published_at or None,

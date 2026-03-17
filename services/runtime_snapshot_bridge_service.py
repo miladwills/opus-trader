@@ -788,17 +788,30 @@ class RuntimeSnapshotBridgeService:
         self._maybe_log_publish_diagnostics(publish_diag)
 
     def _write_snapshot(self, payload: Dict[str, Any]) -> None:
+        serialization_started = time.monotonic()
         serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        serialization_ms = round(
+            max(time.monotonic() - serialization_started, 0.0) * 1000.0,
+            3,
+        )
+        serialized_bytes = serialized.encode("utf-8")
+        total_bytes = len(serialized_bytes)
         tmp_path = None
+        write_file_ms = 0.0
         try:
             fd, tmp_path = tempfile.mkstemp(
                 dir=str(self.file_path.parent),
                 prefix=f"{self.file_path.name}.",
                 suffix=".tmp",
             )
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                handle.write(serialized)
+            write_started = time.monotonic()
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(serialized_bytes)
             os.replace(tmp_path, self.file_path)
+            write_file_ms = round(
+                max(time.monotonic() - write_started, 0.0) * 1000.0,
+                3,
+            )
             try:
                 os.chmod(self.file_path, 0o644)
             except OSError:
@@ -819,6 +832,11 @@ class RuntimeSnapshotBridgeService:
                     os.unlink(tmp_path)
                 except OSError:
                     pass
+        return {
+            "serialization_ms": serialization_ms,
+            "write_file_ms": write_file_ms,
+            "total_bytes": total_bytes,
+        }
 
     def _build_meta(self, now_ts: float) -> Dict[str, Any]:
         stream_health = self._build_market_health(now_ts)
@@ -1014,21 +1032,113 @@ class RuntimeSnapshotBridgeService:
         publish_diag.setdefault("write_events", []).append(write_event)
         if stage == "final":
             publish_diag["final_write_requested_at"] = requested_at
-        snapshot.setdefault("meta", {})["publish_pass"] = self._copy(publish_diag)
+        if stage != "final":
+            snapshot.setdefault("meta", {})["publish_pass"] = self._copy(publish_diag)
+            with self._state_lock:
+                snapshot["meta"]["snapshot_epoch"] = self._next_writer_seq
+                self._next_writer_seq += 1
+                self._write_snapshot(snapshot)
+                self._last_snapshot = self._copy(snapshot)
+            completed_at = time.time()
+            write_event["completed_at"] = completed_at
+            publish_diag["pass_elapsed_ms"] = round(
+                max(completed_at - float(publish_diag.get("pass_started_at") or completed_at), 0.0)
+                * 1000.0,
+                2,
+            )
+            return
+
+        with self._state_lock:
+            snapshot_epoch = self._next_writer_seq
+        snapshot_meta = snapshot.setdefault("meta", {})
+        snapshot_meta.pop("publish_pass", None)
+        snapshot_meta["snapshot_epoch"] = snapshot_epoch
+        write_stats = self._write_snapshot(snapshot)
+        completed_at = time.time()
+        write_event["completed_at"] = completed_at
+        self._finalize_publish_diagnostics(
+            publish_diag,
+            snapshot=snapshot,
+            completed_at=completed_at,
+            write_stats=write_stats,
+        )
+        snapshot["meta"]["publish_pass"] = self._copy(publish_diag)
         with self._state_lock:
             snapshot["meta"]["snapshot_epoch"] = self._next_writer_seq
             self._next_writer_seq += 1
             self._write_snapshot(snapshot)
             self._last_snapshot = self._copy(snapshot)
-        completed_at = time.time()
-        write_event["completed_at"] = completed_at
+
+    def _finalize_publish_diagnostics(
+        self,
+        publish_diag: Dict[str, Any],
+        *,
+        snapshot: Dict[str, Any],
+        completed_at: float,
+        write_stats: Optional[Dict[str, Any]],
+    ) -> None:
+        normalized_write_stats = write_stats if isinstance(write_stats, dict) else {}
+        publish_diag["final_write_completed_at"] = completed_at
         publish_diag["pass_elapsed_ms"] = round(
             max(completed_at - float(publish_diag.get("pass_started_at") or completed_at), 0.0)
             * 1000.0,
             2,
         )
-        if stage == "final":
-            publish_diag["final_write_completed_at"] = completed_at
+        publish_diag["serialization_ms"] = round(
+            self._safe_float(normalized_write_stats.get("serialization_ms"), 0.0),
+            3,
+        )
+        publish_diag["write_file_ms"] = round(
+            self._safe_float(normalized_write_stats.get("write_file_ms"), 0.0),
+            3,
+        )
+        publish_diag["total_bytes"] = max(
+            int(normalized_write_stats.get("total_bytes") or 0),
+            0,
+        )
+
+        sections = publish_diag.get("sections") or {}
+        long_pole_name = None
+        long_pole_elapsed_ms = -0.01
+        for name in (
+            "market",
+            "open_orders",
+            "positions",
+            "summary",
+            "bots_runtime_light",
+            "bots_runtime",
+        ):
+            elapsed_ms = self._safe_float((sections.get(name) or {}).get("elapsed_ms"), 0.0)
+            if elapsed_ms > long_pole_elapsed_ms:
+                long_pole_name = name
+                long_pole_elapsed_ms = elapsed_ms
+        publish_diag["long_pole_section"] = long_pole_name
+
+        section_ages_at_final_ms: Dict[str, Optional[float]] = {}
+        max_section_age_at_final_ms = None
+        snapshot_sections = snapshot.get("sections") or {}
+        for name in (
+            "market",
+            "open_orders",
+            "positions",
+            "summary",
+            "bots_runtime_light",
+            "bots_runtime",
+        ):
+            section = snapshot_sections.get(name) or {}
+            published_at = self._safe_float(section.get("published_at"), 0.0)
+            age_ms = (
+                round(max(completed_at - published_at, 0.0) * 1000.0, 2)
+                if published_at > 0
+                else None
+            )
+            section_ages_at_final_ms[name] = age_ms
+            if age_ms is None:
+                continue
+            if max_section_age_at_final_ms is None or age_ms > max_section_age_at_final_ms:
+                max_section_age_at_final_ms = age_ms
+        publish_diag["section_ages_at_final_ms"] = section_ages_at_final_ms
+        publish_diag["max_section_age_at_final_ms"] = max_section_age_at_final_ms
 
     def _maybe_log_publish_diagnostics(self, publish_diag: Dict[str, Any]) -> None:
         total_ms = self._safe_float(publish_diag.get("pass_elapsed_ms"), 0.0)

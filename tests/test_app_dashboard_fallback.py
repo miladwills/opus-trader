@@ -262,6 +262,104 @@ def test_api_bot_config_returns_404_for_missing_bot(monkeypatch, tmp_path):
     assert response.get_json()["error"] == "bot not found"
 
 
+def test_api_bridge_diagnostics_counts_open_orders_from_symbols_payload(
+    monkeypatch,
+    tmp_path,
+):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+    now = time.time()
+    snapshot = {
+        "meta": {
+            "producer_pid": 1234,
+            "produced_at": now,
+            "snapshot_epoch": 9,
+        },
+        "sections": {
+            "open_orders": {
+                "published_at": now,
+                "source": "runner_runtime_snapshot",
+                "reason": "timer",
+                "payload": {
+                    "symbols": {
+                        "BTCUSDT": {
+                            "open_order_count": 2,
+                            "reduce_only_count": 1,
+                            "entry_order_count": 1,
+                        },
+                        "ETHUSDT": {
+                            "open_order_count": 1,
+                            "reduce_only_count": 0,
+                            "entry_order_count": 1,
+                        },
+                    },
+                    "stale_data": False,
+                    "error": None,
+                },
+            },
+            "market": {
+                "published_at": now,
+                "source": "runner_stream_snapshot",
+                "reason": "timer",
+                "payload": {"health": {}, "prices": {}, "symbols": [], "stale_data": False},
+            },
+            "positions": {
+                "published_at": now,
+                "source": "runner_runtime_snapshot",
+                "reason": "timer",
+                "payload": {"positions": [], "stale_data": False, "error": None},
+            },
+            "summary": {
+                "published_at": now,
+                "source": "runner_runtime_snapshot",
+                "reason": "timer",
+                "payload": {"account": {}, "positions_summary": {}, "stale_data": False},
+            },
+            "bots_runtime": {
+                "published_at": now,
+                "source": "runner_runtime_snapshot",
+                "reason": "timer",
+                "payload": {"bots": [], "stale_data": False, "bots_scope": "full"},
+            },
+            "bots_runtime_light": {
+                "published_at": now,
+                "source": "runner_runtime_snapshot_light",
+                "reason": "timer",
+                "payload": {
+                    "bots": [],
+                    "stale_data": False,
+                    "bots_scope": "light",
+                    "light_runtime_diagnostics": {},
+                },
+            },
+        },
+    }
+    app_module.runtime_snapshot_bridge = SimpleNamespace(
+        READ_STALE_AGE_SEC=app_module.runtime_snapshot_bridge.READ_STALE_AGE_SEC,
+        _payload_shape_valid=lambda section_name, payload: True,
+        read_snapshot=lambda copy_payload=False: snapshot,
+        extract_section_from_snapshot=lambda snapshot_payload, section_name, max_age_sec=None: (
+            ((snapshot_payload or {}).get("sections") or {}).get(section_name, {}).get("payload")
+        ),
+        get_enrichment_diagnostics=lambda: {},
+    )
+    app_module._pid_is_alive = lambda pid, expected_substring=None: True
+
+    flask_app = app_module.app
+    flask_app.config["TESTING"] = True
+
+    with flask_app.test_client() as client:
+        response = client.get(
+            "/api/bridge/diagnostics",
+            headers=_basic_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    open_orders_diag = payload["sections"]["open_orders"]
+    assert open_orders_diag["payload_counts"]["symbols"] == 2
+    assert open_orders_diag["payload_counts"]["orders"] == 3
+
+
 def test_api_stream_events_falls_back_to_snapshot_poll_when_stream_service_disabled(
     monkeypatch,
     tmp_path,
