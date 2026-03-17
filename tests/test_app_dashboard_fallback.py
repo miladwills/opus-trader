@@ -636,17 +636,49 @@ def test_recover_bootstrap_uses_local_only_fallbacks_and_completes_fast(
     )
 
     started_at = time.monotonic()
-    results = app_module._recover_bootstrap_dashboard_sections(timeout_sec=3.0)
+    results, section_elapsed_ms = app_module._recover_bootstrap_dashboard_sections(
+        timeout_sec=3.0
+    )
     elapsed = time.monotonic() - started_at
 
     # Local-only fallbacks complete near-instantly
     assert elapsed < 0.5
+    assert section_elapsed_ms["summary"] < 100.0
+    assert section_elapsed_ms["positions"] < 100.0
+    assert section_elapsed_ms["bots"] < 100.0
     assert results["summary"]["error"] == "bootstrap_recovery"
     assert results["positions"]["error"] == "bootstrap_recovery"
     assert results["bots"]["error"] == "bootstrap_recovery"
     assert results["summary"]["stale_data"] is True
     assert results["positions"]["stale_data"] is True
     assert results["bots"]["stale_data"] is True
+
+
+def test_recover_bootstrap_bypasses_shared_snapshot_executor(
+    monkeypatch,
+    tmp_path,
+):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+
+    class ExplodingExecutor:
+        def submit(self, *args, **kwargs):
+            raise AssertionError("bootstrap recovery must not use shared executor")
+
+    monkeypatch.setattr(
+        app_module,
+        "DASHBOARD_SNAPSHOT_EXECUTOR",
+        ExplodingExecutor(),
+        raising=False,
+    )
+
+    results, section_elapsed_ms = app_module._recover_bootstrap_dashboard_sections(
+        timeout_sec=3.0
+    )
+
+    assert results["summary"]["error"] == "bootstrap_recovery"
+    assert results["positions"]["error"] == "bootstrap_recovery"
+    assert results["bots"]["error"] == "bootstrap_recovery"
+    assert section_elapsed_ms["summary"] >= 0.0
 
 
 def test_bootstrap_recovery_returns_degraded_when_bridge_stale_and_cache_empty(

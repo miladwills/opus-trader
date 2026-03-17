@@ -622,11 +622,14 @@ class TestDashboardFallback:
                     "_build_positions_fallback_payload",
                     return_value={"stale_data": True, "error": "bootstrap_recovery"},
                 ) as mock_positions_fallback:
-                    result = app_module._recover_bootstrap_dashboard_sections(timeout_sec=5.0)
+                    result, section_elapsed_ms = app_module._recover_bootstrap_dashboard_sections(
+                        timeout_sec=5.0
+                    )
         mock_light_fallback.assert_called_once_with("bootstrap_recovery")
         mock_summary_fallback.assert_called_once_with("bootstrap_recovery")
         mock_positions_fallback.assert_called_once_with("bootstrap_recovery")
         assert result["bots"]["bots_scope"] == "light"
+        assert section_elapsed_ms["bots"] >= 0.0
 
     def test_bootstrap_recovery_never_calls_full_get_runtime_bots(self):
         """Bootstrap recovery must never trigger heavy get_runtime_bots()."""

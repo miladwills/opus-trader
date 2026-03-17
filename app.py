@@ -222,6 +222,8 @@ DASHBOARD_SNAPSHOT_WAIT_SEC = 1.5
 DASHBOARD_SNAPSHOT_REFRESH_TTL_SEC = 1.0
 DASHBOARD_BOTS_SNAPSHOT_REFRESH_TTL_SEC = 1.0
 DASHBOARD_STREAM_FALLBACK_INTERVAL_SEC = 2.0
+BOOTSTRAP_RECOVERY_LOG_LOCK = threading.Lock()
+BOOTSTRAP_RECOVERY_LOG_STATE: Dict[str, float] = {"last_logged_at": 0.0}
 RUNTIME_SNAPSHOT_BRIDGE_FILE = os.environ.get(
     "RUNTIME_SNAPSHOT_BRIDGE_FILE",
     os.path.join("storage", "runtime_snapshot_bridge.json"),
@@ -2740,10 +2742,35 @@ def _build_dashboard_stream_payload(reason: str, *, fast: bool = False) -> Dict[
     )
 
 
+def _log_bootstrap_recovery_timing(
+    *,
+    timeout_sec: float,
+    section_elapsed_ms: Dict[str, float],
+    all_fresh: bool,
+) -> None:
+    now = time.monotonic()
+    with BOOTSTRAP_RECOVERY_LOG_LOCK:
+        last_logged_at = float(BOOTSTRAP_RECOVERY_LOG_STATE.get("last_logged_at", 0.0))
+        if (now - last_logged_at) < 60.0:
+            return
+        BOOTSTRAP_RECOVERY_LOG_STATE["last_logged_at"] = now
+
+    logging.warning(
+        "Dashboard bootstrap degraded recovery path=inline_local all_fresh=%s "
+        "timeout_budget_sec=%.1f total_ms=%.1f summary_ms=%.1f positions_ms=%.1f bots_ms=%.1f",
+        all_fresh,
+        float(timeout_sec or 0.0),
+        round(sum(section_elapsed_ms.values()), 1),
+        float(section_elapsed_ms.get("summary", 0.0)),
+        float(section_elapsed_ms.get("positions", 0.0)),
+        float(section_elapsed_ms.get("bots", 0.0)),
+    )
+
+
 def _recover_bootstrap_dashboard_sections(
     *,
     timeout_sec: float = 3.0,
-) -> Dict[str, Dict[str, Any]]:
+) -> tuple[Dict[str, Dict[str, Any]], Dict[str, float]]:
     section_specs = {
         "summary": {
             "cache_key": "summary",
@@ -2761,26 +2788,13 @@ def _recover_bootstrap_dashboard_sections(
             "fallback": _build_runtime_bots_light_fallback,
         },
     }
-    futures = {
-        section_name: DASHBOARD_SNAPSHOT_EXECUTOR.submit(spec["builder"])
-        for section_name, spec in section_specs.items()
-    }
-    deadline = time.monotonic() + max(float(timeout_sec or 0.0), 0.0)
     results: Dict[str, Dict[str, Any]] = {}
-    for section_name, future in futures.items():
+    section_elapsed_ms: Dict[str, float] = {}
+    for section_name, spec in section_specs.items():
         spec = section_specs[section_name]
+        section_started = time.monotonic()
         try:
-            remaining_sec = max(deadline - time.monotonic(), 0.0)
-            if not future.done() and remaining_sec <= 0.0:
-                raise FuturesTimeoutError()
-            payload = future.result(timeout=remaining_sec)
-        except FuturesTimeoutError:
-            logging.warning(
-                "Dashboard bootstrap %s recovery timed out within %.1fs budget",
-                section_name,
-                timeout_sec,
-            )
-            payload = spec["fallback"]("bootstrap_timeout")
+            payload = spec["builder"]()
         except Exception as exc:
             logging.warning(
                 "Dashboard bootstrap %s recovery failed: %s",
@@ -2788,11 +2802,15 @@ def _recover_bootstrap_dashboard_sections(
                 exc,
             )
             payload = spec["fallback"]("bootstrap_error")
-        else:
-            if isinstance(payload, dict) and not payload.get("stale_data"):
-                _store_dashboard_snapshot_entry(spec["cache_key"], payload)
+        finally:
+            section_elapsed_ms[section_name] = round(
+                (time.monotonic() - section_started) * 1000.0,
+                1,
+            )
+        if isinstance(payload, dict) and not payload.get("stale_data"):
+            _store_dashboard_snapshot_entry(spec["cache_key"], payload)
         results[section_name] = payload
-    return results
+    return results, section_elapsed_ms
 
 
 def _dashboard_emit_interval_for_event(event_type: str) -> float | None:
@@ -2829,7 +2847,12 @@ def api_dashboard_bootstrap():
     else:
         # Any section dead/missing/stale — recover with direct builders so the
         # bootstrap path is not capped by the generic 1.5s snapshot timeout.
-        results = _recover_bootstrap_dashboard_sections(timeout_sec=3.0)
+        results, section_elapsed_ms = _recover_bootstrap_dashboard_sections(timeout_sec=3.0)
+        _log_bootstrap_recovery_timing(
+            timeout_sec=3.0,
+            section_elapsed_ms=section_elapsed_ms,
+            all_fresh=all_fresh,
+        )
         bots_snapshot = results["bots"]
         payload = _build_dashboard_payload_from_snapshots(
             "bootstrap",
