@@ -28,6 +28,8 @@ class _BotStorage:
     def __init__(self, bots):
         self._bots = [dict(bot) for bot in list(bots or [])]
         self.saved = []
+        self.runtime_saved = []
+        self.cache_only = []
 
     def list_bots(self):
         return [dict(bot) for bot in self._bots]
@@ -40,6 +42,24 @@ class _BotStorage:
             for item in self._bots
         ]
         self.saved.append(snapshot)
+        return snapshot
+
+    def save_runtime_bot(self, bot, persist=True, **kwargs):
+        snapshot = dict(bot)
+        bot_id = str(bot.get("id") or "").strip()
+        self._bots = [
+            snapshot if str(item.get("id") or "").strip() == bot_id else dict(item)
+            for item in self._bots
+        ]
+        record = {
+            "bot": snapshot,
+            "persist": bool(persist),
+            "kwargs": dict(kwargs),
+        }
+        if persist:
+            self.runtime_saved.append(record)
+        else:
+            self.cache_only.append(record)
         return snapshot
 
 
@@ -233,6 +253,48 @@ def test_error_state_reconciliation_classifies_exchange_exposure(
     service.client.create_order.assert_not_called()
     service.client.cancel_all_orders.assert_not_called()
     service.client.close_position.assert_not_called()
+
+
+def test_error_state_reconciliation_skips_duplicate_persist_when_only_timestamps_change():
+    service = _make_service(
+        bots=[
+            {
+                "id": "bot-1",
+                "symbol": "BTCUSDT",
+                "status": "error",
+                "position_size": 0.0,
+                "open_order_count": 0,
+            }
+        ],
+        positions=[],
+        orders_by_symbol={},
+    )
+
+    baseline = service.reconcile_bots_exchange_truth(
+        service.bot_storage.list_bots(),
+        reason="error_maintenance",
+        force=True,
+    )[0]
+    assert len(service.bot_storage.runtime_saved) == 1
+
+    service.bot_storage._bots = [dict(baseline)]
+    service.bot_storage.runtime_saved.clear()
+    service.bot_storage.cache_only.clear()
+
+    updated = service.reconcile_bots_exchange_truth(
+        service.bot_storage.list_bots(),
+        reason="error_maintenance",
+        force=True,
+    )
+
+    assert len(updated) == 1
+    assert service.bot_storage.runtime_saved == []
+    assert len(service.bot_storage.cache_only) == 1
+    cache_only_save = service.bot_storage.cache_only[0]
+    assert cache_only_save["persist"] is False
+    assert cache_only_save["kwargs"]["path"] == "exchange_reconciliation"
+    assert cache_only_save["kwargs"]["reason"] == "error_maintenance"
+    assert cache_only_save["kwargs"]["persistence_class"] == "error_path"
 
 
 def test_ambiguous_execution_follow_up_is_revisited_and_resolved_from_exchange_truth():

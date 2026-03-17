@@ -3,6 +3,7 @@
 Update this file for meaningful patches. Keep entries short.
 
 ## 2026-03-17
+- Storage contention follow-up: repeated `error_maintenance` / `ambiguous_follow_up` exchange reconciliation passes now keep timestamp-only refreshes cache-only instead of re-writing `bots.json`, and bot storage emits throttled `BOT_RUNTIME_PERSIST` diagnostics for that path so duplicate runtime persistence can be measured without flooding logs
 - Dashboard bridge freshness fix: SSE/dashboard stream payload assembly no longer trusts the raw `read_dashboard_payload()` bundle, so stale-but-complete `summary` / `positions` / `bots_runtime` bridge sections now fall back through the existing freshness-aware section recovery path instead of being streamed as live truth
 - Dashboard bootstrap recovery fix: `/api/dashboard/bootstrap` now runs direct bounded `summary` / `positions` / `bots_runtime` rebuilds instead of the generic 1.5s snapshot wrappers, and fresh recovered sections are cached so the next stream tick serves stale-real data rather than repainting zero fallbacks during bridge recovery
 

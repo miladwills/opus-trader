@@ -133,6 +133,7 @@ DEFAULT_INTERNAL_LOCK_TIMEOUT_SEC = max(
     float(os.environ.get("BOT_STORAGE_INTERNAL_LOCK_TIMEOUT_SEC", "0.25") or 0.25),
     0.01,
 )
+RUNTIME_PERSIST_OBSERVATION_LOG_INTERVAL_SEC = 60.0
 
 
 class BotStorageService:
@@ -156,6 +157,8 @@ class BotStorageService:
         self._runtime_lock = threading.RLock()
         self._pending_runtime_updates: Dict[str, Dict[str, Any]] = {}
         self._runtime_flush_timer: Optional[threading.Timer] = None
+        self._runtime_persist_observation_lock = threading.RLock()
+        self._runtime_persist_observations: Dict[str, Dict[str, Any]] = {}
         self.runtime_flush_delay_sec = max(
             float(os.environ.get("BOT_RUNTIME_FLUSH_DELAY_SEC", "0.5") or 0.5),
             0.1,
@@ -298,6 +301,107 @@ class BotStorageService:
         if timer:
             timer.cancel()
         return pending
+
+    def _observe_runtime_persistence(
+        self,
+        *,
+        path: Optional[str],
+        bot_id: str,
+        symbol: Optional[str],
+        reason: Optional[str],
+        persistence_class: Optional[str],
+        outcome: str,
+        changed_fields_count: int,
+        elapsed_ms: float,
+        lock_timeout: bool = False,
+    ) -> None:
+        if not path or not bot_id:
+            return
+        now = time.monotonic()
+        normalized_reason = str(reason or "").strip().lower()
+        normalized_class = str(persistence_class or "").strip().lower()
+        observation_key = "|".join(
+            (
+                str(path),
+                str(bot_id),
+                normalized_reason,
+                normalized_class,
+            )
+        )
+        should_log = False
+        snapshot: Optional[Dict[str, Any]] = None
+        with self._runtime_persist_observation_lock:
+            stats = self._runtime_persist_observations.get(observation_key)
+            if stats is None:
+                stats = {
+                    "path": str(path),
+                    "bot_id": str(bot_id),
+                    "symbol": str(symbol or ""),
+                    "reason": normalized_reason,
+                    "persistence_class": normalized_class,
+                    "first_seen_at": now,
+                    "last_logged_at": 0.0,
+                    "count": 0,
+                    "queued_flush": 0,
+                    "cache_only": 0,
+                    "skipped_unchanged": 0,
+                    "runtime_lock_timeout": 0,
+                    "save_bot_fallback": 0,
+                    "max_elapsed_ms": 0.0,
+                    "last_changed_fields_count": 0,
+                }
+                self._runtime_persist_observations[observation_key] = stats
+            if symbol:
+                stats["symbol"] = str(symbol)
+            stats["count"] += 1
+            if outcome == "queued_flush":
+                stats["queued_flush"] += 1
+            elif outcome == "cache_only":
+                stats["cache_only"] += 1
+            elif outcome == "skipped_unchanged":
+                stats["skipped_unchanged"] += 1
+            elif outcome == "runtime_lock_timeout_cache_only":
+                stats["runtime_lock_timeout"] += 1
+                stats["cache_only"] += 1
+            elif outcome == "save_bot_fallback":
+                stats["save_bot_fallback"] += 1
+            if lock_timeout and outcome != "runtime_lock_timeout_cache_only":
+                stats["runtime_lock_timeout"] += 1
+            stats["max_elapsed_ms"] = max(
+                float(stats.get("max_elapsed_ms") or 0.0),
+                float(elapsed_ms or 0.0),
+            )
+            stats["last_changed_fields_count"] = int(changed_fields_count or 0)
+            should_log = (
+                int(stats.get("count") or 0) == 1
+                or (now - float(stats.get("last_logged_at") or 0.0))
+                >= RUNTIME_PERSIST_OBSERVATION_LOG_INTERVAL_SEC
+            )
+            if should_log:
+                stats["last_logged_at"] = now
+                snapshot = dict(stats)
+        if not should_log or snapshot is None:
+            return
+        window_sec = max(now - float(snapshot.get("first_seen_at") or now), 0.001)
+        logger.info(
+            "BOT_RUNTIME_PERSIST path=%s bot_id=%s symbol=%s reason=%s class=%s count=%d rate_per_min=%.2f "
+            "queued_flush=%d cache_only=%d skipped_unchanged=%d runtime_lock_timeout=%d save_bot_fallback=%d "
+            "last_changed_fields=%d max_elapsed_ms=%.2f",
+            snapshot.get("path"),
+            snapshot.get("bot_id"),
+            snapshot.get("symbol") or "?",
+            snapshot.get("reason") or "-",
+            snapshot.get("persistence_class") or "runtime_path",
+            int(snapshot.get("count") or 0),
+            float(snapshot.get("count") or 0) * 60.0 / window_sec,
+            int(snapshot.get("queued_flush") or 0),
+            int(snapshot.get("cache_only") or 0),
+            int(snapshot.get("skipped_unchanged") or 0),
+            int(snapshot.get("runtime_lock_timeout") or 0),
+            int(snapshot.get("save_bot_fallback") or 0),
+            int(snapshot.get("last_changed_fields_count") or 0),
+            float(snapshot.get("max_elapsed_ms") or 0.0),
+        )
 
     def _schedule_runtime_flush_locked(self, delay_sec: float) -> None:
         if self._runtime_flush_timer:
@@ -710,6 +814,11 @@ class BotStorageService:
         bot: Dict[str, Any],
         flush_delay_sec: Optional[float] = None,
         allow_pnl_override: bool = False,
+        *,
+        persist: bool = True,
+        path: Optional[str] = None,
+        reason: Optional[str] = None,
+        persistence_class: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Save runtime-only bot fields with a short debounce.
@@ -717,13 +826,33 @@ class BotStorageService:
         This updates the in-memory cache immediately and batches the disk write.
         Any control/settings/config field falls back to save_bot() immediately.
         """
+        started_at = time.monotonic()
         bot_id = str(bot.get("id") or "").strip()
+        symbol = str(bot.get("symbol") or "").strip().upper()
+
+        def observe(outcome: str, *, changed_fields_count: int, lock_timeout: bool = False) -> None:
+            self._observe_runtime_persistence(
+                path=path,
+                bot_id=bot_id,
+                symbol=symbol,
+                reason=reason,
+                persistence_class=persistence_class,
+                outcome=outcome,
+                changed_fields_count=changed_fields_count,
+                elapsed_ms=(time.monotonic() - started_at) * 1000.0,
+                lock_timeout=lock_timeout,
+            )
+
         if not bot_id:
-            return self.save_bot(bot)
+            saved = self.save_bot(bot)
+            observe("save_bot_fallback", changed_fields_count=len(list(bot or {})))
+            return saved
 
         existing_bot = self.get_bot(bot_id)
         if not existing_bot:
-            return self.save_bot(bot, allow_pnl_override=allow_pnl_override)
+            saved = self.save_bot(bot, allow_pnl_override=allow_pnl_override)
+            observe("save_bot_fallback", changed_fields_count=len(list(bot or {})))
+            return saved
 
         changed_fields: Dict[str, Any] = {}
         for field, value in bot.items():
@@ -737,11 +866,14 @@ class BotStorageService:
                 changed_fields.pop(field, None)
 
         if not changed_fields:
+            observe("skipped_unchanged", changed_fields_count=0)
             return existing_bot
 
         protected_fields = set(SETTINGS_PROTECTED_FIELDS) | set(CONTROL_PROTECTED_FIELDS)
         if any(field in protected_fields for field in changed_fields):
-            return self.save_bot(bot, allow_pnl_override=allow_pnl_override)
+            saved = self.save_bot(bot, allow_pnl_override=allow_pnl_override)
+            observe("save_bot_fallback", changed_fields_count=len(changed_fields))
+            return saved
 
         now_iso = datetime.now(timezone.utc).isoformat()
         updated_bot = self._clone_bots([existing_bot])[0]
@@ -766,8 +898,14 @@ class BotStorageService:
                 found = True
                 break
         if not found:
-            return self.save_bot(bot, allow_pnl_override=allow_pnl_override)
+            saved = self.save_bot(bot, allow_pnl_override=allow_pnl_override)
+            observe("save_bot_fallback", changed_fields_count=len(changed_fields))
+            return saved
         self._update_cache(cached_bots, mtime_ns=pre_read_mtime)
+
+        if not persist:
+            observe("cache_only", changed_fields_count=len(changed_fields))
+            return updated_bot
 
         with self._timed_internal_lock(
             self._runtime_lock,
@@ -779,6 +917,11 @@ class BotStorageService:
                 # disk — avoids amplifying contention by falling back to the
                 # heavier save_bot() path.  Next cycle recomputes runtime
                 # fields and will succeed under normal lock conditions.
+                observe(
+                    "runtime_lock_timeout_cache_only",
+                    changed_fields_count=len(changed_fields),
+                    lock_timeout=True,
+                )
                 return updated_bot
             pending = self._pending_runtime_updates.setdefault(bot_id, {})
             pending.update(copy.deepcopy(changed_fields))
@@ -789,6 +932,7 @@ class BotStorageService:
             )
             self._schedule_runtime_flush_locked(delay)
 
+        observe("queued_flush", changed_fields_count=len(changed_fields))
         return updated_bot
 
     def flush_runtime_updates(self) -> int:

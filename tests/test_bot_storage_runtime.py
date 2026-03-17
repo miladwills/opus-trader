@@ -472,3 +472,45 @@ def test_save_runtime_bot_skips_disk_when_runtime_lock_is_unavailable(tmp_path):
     # Disk does NOT have the update (no fallback to save_bot)
     on_disk = json.loads(storage_path.read_text(encoding="utf-8"))
     assert on_disk[0].get("current_price") is None
+
+
+def test_save_runtime_bot_can_update_cache_without_queuing_disk_flush(tmp_path):
+    storage_path = tmp_path / "bots.json"
+    storage = BotStorageService(str(storage_path))
+    bot = storage.save_bot(
+        {
+            "id": "bot-1",
+            "symbol": "BTCUSDT",
+            "mode": "neutral",
+            "status": "error",
+        }
+    )
+
+    updated = dict(bot)
+    updated["exchange_reconciliation"] = {
+        "status": "error_no_exchange_exposure",
+        "reason": "error_no_exchange_exposure",
+        "source": "error_maintenance",
+        "updated_at": "2026-03-17T17:00:00+00:00",
+    }
+    updated["exchange_exposure_detected"] = False
+    updated["exchange_position_detected"] = False
+    updated["exchange_open_orders_detected"] = False
+    updated["position_assumption_stale"] = False
+    updated["order_assumption_stale"] = False
+
+    result = storage.save_runtime_bot(
+        updated,
+        persist=False,
+        path="exchange_reconciliation",
+        reason="error_maintenance",
+        persistence_class="error_path",
+    )
+
+    cached = storage.get_bot("bot-1")
+    on_disk = json.loads(storage_path.read_text(encoding="utf-8"))
+
+    assert result["exchange_reconciliation"]["status"] == "error_no_exchange_exposure"
+    assert cached["exchange_reconciliation"]["status"] == "error_no_exchange_exposure"
+    assert on_disk[0].get("exchange_reconciliation") is None
+    assert storage.flush_runtime_updates() == 0

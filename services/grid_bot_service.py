@@ -1387,10 +1387,52 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
                 target_bot[key] = incoming_bot.get(key)
         return target_bot
 
-    def _save_runtime_bot(self, bot: Dict[str, Any]) -> Dict[str, Any]:
+    def _save_runtime_bot(self, bot: Dict[str, Any], **kwargs: Any) -> Dict[str, Any]:
         if hasattr(self.bot_storage, "save_runtime_bot"):
-            return self.bot_storage.save_runtime_bot(bot)
+            return self.bot_storage.save_runtime_bot(bot, **kwargs)
         return self.bot_storage.save_bot(bot)
+
+    def _save_runtime_bot_cache_only(
+        self,
+        bot: Dict[str, Any],
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        if hasattr(self.bot_storage, "save_runtime_bot"):
+            return self.bot_storage.save_runtime_bot(bot, persist=False, **kwargs)
+        return dict(bot)
+
+    @staticmethod
+    def _classify_reconciliation_persistence_class(reason: str) -> str:
+        normalized_reason = str(reason or "").strip().lower()
+        if normalized_reason in {"cycle_exception", "error_maintenance"}:
+            return "error_path"
+        if normalized_reason == "ambiguous_follow_up":
+            return "recovery_path"
+        if normalized_reason == "startup":
+            return "maintenance_path"
+        return "runtime_path"
+
+    @staticmethod
+    def _normalized_exchange_reconciliation_state(
+        payload: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        normalized = dict(payload or {})
+        normalized.pop("updated_at", None)
+        return normalized
+
+    @staticmethod
+    def _normalized_ambiguous_follow_up_state(
+        marker: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        normalized = dict(marker or {})
+        for field in (
+            "updated_at",
+            "last_checked_at",
+            "resolved_at",
+            "last_escalated_at",
+        ):
+            normalized.pop(field, None)
+        return normalized
 
     @staticmethod
     def _mark_control_state_change(bot: Dict[str, Any]) -> None:
@@ -6850,6 +6892,19 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
         updated_bots: List[Dict[str, Any]] = []
         for bot in target_bots:
             symbol = self._normalized_bot_symbol(bot)
+            previous_reconcile_state = self._normalized_exchange_reconciliation_state(
+                bot.get("exchange_reconciliation")
+            )
+            previous_marker_state = self._normalized_ambiguous_follow_up_state(
+                bot.get("ambiguous_execution_follow_up")
+            )
+            previous_runtime_flags = {
+                "exchange_exposure_detected": bot.get("exchange_exposure_detected"),
+                "exchange_position_detected": bot.get("exchange_position_detected"),
+                "exchange_open_orders_detected": bot.get("exchange_open_orders_detected"),
+                "position_assumption_stale": bot.get("position_assumption_stale"),
+                "order_assumption_stale": bot.get("order_assumption_stale"),
+            }
             same_symbol_bots = self._same_symbol_bots_for_reconcile(
                 symbol,
                 bots=all_bots or candidates,
@@ -7052,7 +7107,34 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
                     symbol_owner_ambiguous=bool(snapshot.get("symbol_owner_ambiguous")),
                 )
 
-            updated_bots.append(self._save_runtime_bot(bot))
+            material_reconcile_changed = (
+                previous_reconcile_state
+                != self._normalized_exchange_reconciliation_state(
+                    bot.get("exchange_reconciliation")
+                )
+            )
+            material_marker_changed = (
+                previous_marker_state
+                != self._normalized_ambiguous_follow_up_state(
+                    bot.get("ambiguous_execution_follow_up")
+                )
+            )
+            runtime_flags_changed = any(
+                previous_runtime_flags.get(field) != bot.get(field)
+                for field in previous_runtime_flags
+            )
+            persistence_class = self._classify_reconciliation_persistence_class(reason)
+            save_kwargs = {
+                "path": "exchange_reconciliation",
+                "reason": reason,
+                "persistence_class": persistence_class,
+            }
+            if material_reconcile_changed or material_marker_changed or runtime_flags_changed:
+                updated_bots.append(self._save_runtime_bot(bot, **save_kwargs))
+            else:
+                updated_bots.append(
+                    self._save_runtime_bot_cache_only(bot, **save_kwargs)
+                )
         return updated_bots
 
     @staticmethod
