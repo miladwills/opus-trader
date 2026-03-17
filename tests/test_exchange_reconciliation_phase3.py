@@ -30,8 +30,10 @@ class _BotStorage:
         self.saved = []
         self.runtime_saved = []
         self.cache_only = []
+        self.list_bots_calls = []
 
-    def list_bots(self):
+    def list_bots(self, *, source=None):
+        self.list_bots_calls.append(source)
         return [dict(bot) for bot in self._bots]
 
     def save_bot(self, bot):
@@ -180,6 +182,42 @@ def test_startup_reconciliation_detects_exchange_persist_mismatch_without_tradin
     service.client.cancel_all_orders.assert_not_called()
     service.client.cancel_order.assert_not_called()
     service.client.close_position.assert_not_called()
+    assert service.bot_storage.list_bots_calls == [None, "exchange_reconciliation:startup"]
+
+
+def test_reconciliation_reuses_passed_full_snapshot_without_relisting_storage():
+    bots = [
+        {
+            "id": "bot-1",
+            "symbol": "BTCUSDT",
+            "status": "running",
+            "position_size": 0.0,
+            "open_order_count": 0,
+        },
+        {
+            "id": "bot-2",
+            "symbol": "BTCUSDT",
+            "status": "paused",
+            "position_size": 0.0,
+            "open_order_count": 0,
+        },
+    ]
+    service = _make_service(
+        bots=bots,
+        positions=[],
+        orders_by_symbol={},
+    )
+
+    updated = service.reconcile_bots_exchange_truth(
+        [bots[0]],
+        reason="startup",
+        force=True,
+        all_bots_snapshot=bots,
+    )
+
+    assert len(updated) == 1
+    assert updated[0]["exchange_reconciliation"]["same_symbol_bot_count"] == 2
+    assert service.bot_storage.list_bots_calls == []
 
 
 @pytest.mark.parametrize(

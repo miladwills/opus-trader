@@ -261,6 +261,7 @@ EXCHANGE_RECONCILE_AMBIGUOUS_INTERVAL_SEC = 10.0
 EXCHANGE_RECONCILE_STARTUP_INTERVAL_SEC = 300.0
 EXCHANGE_RECONCILE_EVENT_THROTTLE_SEC = 120.0
 AMBIGUOUS_EXECUTION_FOLLOW_UP_TTL_SEC = 900.0
+STORAGE_READ_REUSE_OBSERVATION_LOG_INTERVAL_SEC = 60.0
 
 from services.bybit_client import BybitClient
 from services.bot_storage_service import BotStorageService
@@ -481,6 +482,8 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
         self._last_price_metadata_by_symbol: Dict[str, Dict[str, Any]] = {}
         self._close_attempt_fences: Dict[str, Dict[str, Any]] = {}
         self._last_close_position_result: Optional[Dict[str, Any]] = None
+        self._storage_read_reuse_observation_lock = threading.RLock()
+        self._storage_read_reuse_observations: Dict[str, Dict[str, Any]] = {}
         if hasattr(self.client, "set_trade_forensics_service"):
             self.client.set_trade_forensics_service(self.trade_forensics_service)
         self._position_mode_cache = {}
@@ -1395,6 +1398,78 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
             if key in incoming_bot:
                 target_bot[key] = incoming_bot.get(key)
         return target_bot
+
+    def _observe_storage_read_reuse(
+        self,
+        *,
+        path: str,
+        source: Optional[str],
+        reused_snapshot: bool,
+        skipped_list_bots: bool,
+        candidate_count: int,
+        all_bots_count: int,
+    ) -> None:
+        normalized_source = str(source or "").strip().lower() or "-"
+        lock = getattr(self, "_storage_read_reuse_observation_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._storage_read_reuse_observation_lock = lock
+        observations = getattr(self, "_storage_read_reuse_observations", None)
+        if observations is None:
+            observations = {}
+            self._storage_read_reuse_observations = observations
+        now = time.monotonic()
+        snapshot = None
+        key = "|".join(
+            (
+                str(path or "").strip() or "-",
+                normalized_source,
+                "1" if reused_snapshot else "0",
+            )
+        )
+        with lock:
+            stats = observations.setdefault(
+                key,
+                {
+                    "path": str(path or "").strip() or "-",
+                    "source": normalized_source,
+                    "reused_snapshot": bool(reused_snapshot),
+                    "count": 0,
+                    "skipped_list_bots": 0,
+                    "candidate_count": 0,
+                    "all_bots_count": 0,
+                    "first_seen_at": now,
+                    "last_logged_at": 0.0,
+                },
+            )
+            stats["count"] += 1
+            if skipped_list_bots:
+                stats["skipped_list_bots"] += 1
+            stats["candidate_count"] = int(candidate_count or 0)
+            stats["all_bots_count"] = int(all_bots_count or 0)
+            should_log = (
+                int(stats.get("count") or 0) == 1
+                or (now - float(stats.get("last_logged_at") or 0.0))
+                >= STORAGE_READ_REUSE_OBSERVATION_LOG_INTERVAL_SEC
+            )
+            if should_log:
+                stats["last_logged_at"] = now
+                snapshot = dict(stats)
+        if not snapshot:
+            return
+        window_sec = max(now - float(snapshot.get("first_seen_at") or now), 0.001)
+        logger.info(
+            "BOT_STORAGE_REUSE path=%s source=%s reused_snapshot=%s count=%d rate_per_min=%.2f "
+            "skipped_list_bots=%d candidate_count=%d all_bots_count=%d",
+            snapshot.get("path"),
+            snapshot.get("source"),
+            "true" if snapshot.get("reused_snapshot") else "false",
+            int(snapshot.get("count") or 0),
+            float(snapshot.get("count") or 0) * 60.0 / window_sec,
+            int(snapshot.get("skipped_list_bots") or 0),
+            int(snapshot.get("candidate_count") or 0),
+            int(snapshot.get("all_bots_count") or 0),
+        )
 
     def _save_runtime_bot(self, bot: Dict[str, Any], **kwargs: Any) -> Dict[str, Any]:
         if hasattr(self.bot_storage, "save_runtime_bot"):
@@ -6829,6 +6904,7 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
         *,
         reason: str,
         force: bool = False,
+        all_bots_snapshot: Optional[List[Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
         candidates = [dict(bot) for bot in list(bots or []) if isinstance(bot, dict)]
         if not candidates:
@@ -6862,16 +6938,19 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
                 if symbol_key:
                     positions_by_symbol.setdefault(symbol_key, []).append(dict(position))
 
-        all_bots = []
-        if hasattr(self.bot_storage, "list_bots"):
+        reconciliation_source = str(reason or "").strip().lower() or "reconcile"
+        all_bots = [
+            dict(bot)
+            for bot in list(all_bots_snapshot or [])
+            if isinstance(bot, dict)
+        ] if all_bots_snapshot is not None else []
+        reused_all_bots_snapshot = all_bots_snapshot is not None
+        if not reused_all_bots_snapshot and hasattr(self.bot_storage, "list_bots"):
             try:
                 try:
                     all_bots = list(
                         self.bot_storage.list_bots(
-                            source=(
-                                f"exchange_reconciliation:"
-                                f"{str(reason or '').strip().lower() or 'reconcile'}"
-                            )
+                            source=f"exchange_reconciliation:{reconciliation_source}"
                         )
                         or []
                     )
@@ -6879,6 +6958,14 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
                     all_bots = list(self.bot_storage.list_bots() or [])
             except Exception:
                 all_bots = []
+        self._observe_storage_read_reuse(
+            path="exchange_reconciliation",
+            source=reconciliation_source,
+            reused_snapshot=reused_all_bots_snapshot,
+            skipped_list_bots=reused_all_bots_snapshot,
+            candidate_count=len(candidates),
+            all_bots_count=len(all_bots),
+        )
         symbols = sorted({self._normalized_bot_symbol(bot) for bot in target_bots if self._normalized_bot_symbol(bot)})
         orders_by_symbol: Dict[str, List[Dict[str, Any]]] = {}
         orders_lookup_error_by_symbol: Dict[str, Optional[str]] = {}

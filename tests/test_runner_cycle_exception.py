@@ -27,7 +27,14 @@ class _FakeGridBotService:
         self.calls = []
         self.reconcile_status = reconcile_status
 
-    def reconcile_bots_exchange_truth(self, bots, *, reason, force=False):
+    def reconcile_bots_exchange_truth(
+        self,
+        bots,
+        *,
+        reason,
+        force=False,
+        all_bots_snapshot=None,
+    ):
         snapshots = []
         for bot in list(bots or []):
             updated = dict(bot)
@@ -42,6 +49,9 @@ class _FakeGridBotService:
                 "reason": reason,
                 "force": force,
                 "bot_ids": [bot.get("id") for bot in list(bots or [])],
+                "all_bot_ids": [
+                    bot.get("id") for bot in list(all_bots_snapshot or [])
+                ],
             }
         )
         return snapshots
@@ -72,7 +82,12 @@ def test_persist_bot_cycle_exception_marks_active_bot_error():
     assert datetime.fromisoformat(saved["last_run_at"]).tzinfo == timezone.utc
     assert reconciled["exchange_reconciliation"]["status"] == "error_no_exchange_exposure"
     assert grid_service.calls == [
-        {"reason": "cycle_exception", "force": True, "bot_ids": ["bot-1"]}
+        {
+            "reason": "cycle_exception",
+            "force": True,
+            "bot_ids": ["bot-1"],
+            "all_bot_ids": [],
+        }
     ]
 
 
@@ -114,3 +129,27 @@ def test_startup_reconciliation_targets_include_error_cleanup_and_pending_follow
     )
 
     assert [bot["id"] for bot in targets] == ["bot-1", "bot-2", "bot-3", "bot-4"]
+
+
+def test_run_exchange_truth_reconciliation_forwards_all_bots_snapshot_when_provided():
+    grid_service = _FakeGridBotService()
+    bots = [
+        {"id": "bot-1", "symbol": "BTCUSDT", "status": "running"},
+        {"id": "bot-2", "symbol": "ETHUSDT", "status": "paused"},
+    ]
+
+    reconciled = runner._run_exchange_truth_reconciliation(
+        grid_service,
+        [bots[0]],
+        reason="startup",
+        force=True,
+        all_bots_snapshot=bots,
+    )
+
+    assert len(reconciled) == 1
+    assert grid_service.calls[-1] == {
+        "reason": "startup",
+        "force": True,
+        "bot_ids": ["bot-1"],
+        "all_bot_ids": ["bot-1", "bot-2"],
+    }

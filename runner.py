@@ -306,15 +306,33 @@ def _run_exchange_truth_reconciliation(
     *,
     reason: str,
     force: bool = False,
+    all_bots_snapshot: Optional[list[dict]] = None,
 ) -> list[dict]:
     if grid_bot_service is None or not hasattr(grid_bot_service, "reconcile_bots_exchange_truth"):
         return list(bots or [])
+    snapshot_arg = None
+    if all_bots_snapshot is not None:
+        snapshot_arg = [
+            dict(bot)
+            for bot in list(all_bots_snapshot or [])
+            if isinstance(bot, dict)
+        ]
     try:
-        reconciled = grid_bot_service.reconcile_bots_exchange_truth(
-            list(bots or []),
-            reason=reason,
-            force=force,
-        )
+        try:
+            reconciled = grid_bot_service.reconcile_bots_exchange_truth(
+                list(bots or []),
+                reason=reason,
+                force=force,
+                all_bots_snapshot=snapshot_arg,
+            )
+        except TypeError as exc:
+            if snapshot_arg is None or "all_bots_snapshot" not in str(exc):
+                raise
+            reconciled = grid_bot_service.reconcile_bots_exchange_truth(
+                list(bots or []),
+                reason=reason,
+                force=force,
+            )
     except Exception as exc:
         logging.error("Exchange reconciliation failed during %s: %s", reason, exc)
         logging.debug("Traceback:\n%s", traceback.format_exc())
@@ -840,17 +858,17 @@ def main():
 
     try:
         try:
-            startup_bots = _startup_reconciliation_targets(
-                bot_storage.list_bots(source="runner_startup")
-            )
+            startup_all_bots = bot_storage.list_bots(source="runner_startup")
         except TypeError:
-            startup_bots = _startup_reconciliation_targets(bot_storage.list_bots())
+            startup_all_bots = bot_storage.list_bots()
+        startup_bots = _startup_reconciliation_targets(startup_all_bots)
         if startup_bots:
             reconciled_startup_bots = _run_exchange_truth_reconciliation(
                 grid_bot_service,
                 startup_bots,
                 reason="startup",
                 force=True,
+                all_bots_snapshot=startup_all_bots,
             )
             if reconciled_startup_bots:
                 logging.info(
@@ -1031,6 +1049,7 @@ def main():
                         grid_bot_service,
                         bots,
                         reason="ambiguous_follow_up",
+                        all_bots_snapshot=bots,
                     )
                     error_targets = [
                         dict(bot)
@@ -1042,6 +1061,7 @@ def main():
                             grid_bot_service,
                             bots,
                             reason="error_maintenance",
+                            all_bots_snapshot=bots,
                         )
                 running_count = 0
 
