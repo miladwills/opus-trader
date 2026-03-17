@@ -436,3 +436,39 @@ def test_save_bot_writes_disk_when_cache_lock_is_unavailable(tmp_path):
     assert elapsed < 0.25
     assert updated["status"] == "paused"
     assert on_disk[0]["status"] == "paused"
+
+
+def test_save_runtime_bot_skips_disk_when_runtime_lock_is_unavailable(tmp_path):
+    """When runtime_lock times out, save_runtime_bot should return the
+    cache-updated bot without falling back to the heavier save_bot() path.
+    The data is in the memory cache and will be flushed or recomputed next cycle."""
+    storage_path = tmp_path / "bots.json"
+    storage = BotStorageService(str(storage_path))
+    storage.internal_lock_timeout_sec = 0.01
+    bot = storage.save_bot(
+        {
+            "id": "bot-1",
+            "symbol": "BTCUSDT",
+            "mode": "neutral",
+            "status": "running",
+        }
+    )
+
+    updated = dict(bot)
+    updated["current_price"] = 99999.0
+
+    started_at = time.perf_counter()
+    with _HeldLock(storage._runtime_lock):
+        result = storage.save_runtime_bot(updated, flush_delay_sec=60.0)
+    elapsed = time.perf_counter() - started_at
+
+    # Should complete quickly (no save_bot fallback)
+    assert elapsed < 0.25
+    # Returned bot reflects the update
+    assert result["current_price"] == 99999.0
+    # Cache reflects the update
+    cached = storage.get_bot("bot-1")
+    assert cached["current_price"] == 99999.0
+    # Disk does NOT have the update (no fallback to save_bot)
+    on_disk = json.loads(storage_path.read_text(encoding="utf-8"))
+    assert on_disk[0].get("current_price") is None

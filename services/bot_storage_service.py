@@ -10,6 +10,7 @@ import json
 import uuid
 import os
 import tempfile
+import time
 import logging
 import copy
 import threading
@@ -188,6 +189,15 @@ class BotStorageService:
         *,
         mtime_ns: Optional[int] = None,
     ) -> None:
+        # Perform expensive deepcopy OUTSIDE the lock so that _cache_lock
+        # only protects an O(1) pointer swap instead of blocking other
+        # threads for the full copy duration.
+        cloned = self._clone_bots(bots)
+        resolved_mtime = (
+            mtime_ns if mtime_ns is not None
+            else self._get_file_mtime_ns()
+        )
+        t0 = time.monotonic()
         with self._timed_internal_lock(
             self._cache_lock,
             "cache_lock",
@@ -195,10 +205,14 @@ class BotStorageService:
         ) as acquired:
             if not acquired:
                 return
-            self._cached_bots = self._clone_bots(bots)
-            self._cached_mtime_ns = (
-                mtime_ns if mtime_ns is not None
-                else self._get_file_mtime_ns()
+            self._cached_bots = cloned
+            self._cached_mtime_ns = resolved_mtime
+        clone_ms = (time.monotonic() - t0) * 1000
+        if clone_ms > 50.0:
+            logger.debug(
+                "_update_cache: lock held %.1fms (%d bots)",
+                clone_ms,
+                len(bots),
             )
 
     @contextmanager
@@ -305,14 +319,7 @@ class BotStorageService:
                 return self._clone_bots(self._cached_bots)
         bots = self._read_all_locked()
         self._apply_runtime_updates_to_bots(bots, pending_updates)
-        with self._timed_internal_lock(
-            self._cache_lock,
-            "cache_lock",
-            fail_open=True,
-        ) as acquired:
-            if acquired:
-                self._cached_bots = self._clone_bots(bots)
-                self._cached_mtime_ns = mtime_ns
+        self._update_cache(bots, mtime_ns=mtime_ns)
         return self._clone_bots(bots)
 
     @contextmanager
@@ -768,7 +775,11 @@ class BotStorageService:
             fail_open=True,
         ) as acquired:
             if not acquired:
-                return self.save_bot(updated_bot, allow_pnl_override=allow_pnl_override)
+                # Cache already updated above. Return without queuing to
+                # disk — avoids amplifying contention by falling back to the
+                # heavier save_bot() path.  Next cycle recomputes runtime
+                # fields and will succeed under normal lock conditions.
+                return updated_bot
             pending = self._pending_runtime_updates.setdefault(bot_id, {})
             pending.update(copy.deepcopy(changed_fields))
             delay = (
