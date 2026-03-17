@@ -1088,11 +1088,20 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
             return False
         try:
             try:
-                fresh = self.bot_storage.get_bot_fresh(bot_id)
+                fresh = self.bot_storage.get_bot_fresh(
+                    bot_id,
+                    source="control_version_stale_check",
+                )
             except (AttributeError, TypeError):
                 fresh = self.bot_storage.get_bot(bot_id)
             if not isinstance(fresh, (dict, type(None))):
-                fresh = self.bot_storage.get_bot(bot_id)
+                try:
+                    fresh = self.bot_storage.get_bot(
+                        bot_id,
+                        source="control_version_stale_check_fallback",
+                    )
+                except TypeError:
+                    fresh = self.bot_storage.get_bot(bot_id)
             if not fresh:
                 return True  # bot deleted — abort
             persisted_cv = int(fresh.get("control_version") or 0)
@@ -6856,7 +6865,18 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
         all_bots = []
         if hasattr(self.bot_storage, "list_bots"):
             try:
-                all_bots = list(self.bot_storage.list_bots() or [])
+                try:
+                    all_bots = list(
+                        self.bot_storage.list_bots(
+                            source=(
+                                f"exchange_reconciliation:"
+                                f"{str(reason or '').strip().lower() or 'reconcile'}"
+                            )
+                        )
+                        or []
+                    )
+                except TypeError:
+                    all_bots = list(self.bot_storage.list_bots() or [])
             except Exception:
                 all_bots = []
         symbols = sorted({self._normalized_bot_symbol(bot) for bot in target_bots if self._normalized_bot_symbol(bot)})
@@ -11198,7 +11218,13 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
                 return bot
 
             if bot_id:
-                fresh_bot = self.bot_storage.get_bot(bot_id)
+                try:
+                    fresh_bot = self.bot_storage.get_bot(
+                        bot_id,
+                        source="neutral_classic_fast_refill",
+                    )
+                except TypeError:
+                    fresh_bot = self.bot_storage.get_bot(bot_id)
                 if fresh_bot:
                     bot = fresh_bot
             if bot.get("status") != "running":
@@ -12280,11 +12306,20 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
                 # Always read from disk to avoid stale-cache races with app.py.
                 fresh_bot = None
                 try:
-                    fresh_bot = self.bot_storage.get_bot_fresh(bot_id)
+                    fresh_bot = self.bot_storage.get_bot_fresh(
+                        bot_id,
+                        source="run_bot_cycle",
+                    )
                 except (AttributeError, TypeError):
                     fresh_bot = self.bot_storage.get_bot(bot_id)
                 if not isinstance(fresh_bot, dict):
-                    fresh_bot = self.bot_storage.get_bot(bot_id)
+                    try:
+                        fresh_bot = self.bot_storage.get_bot(
+                            bot_id,
+                            source="run_bot_cycle_fallback",
+                        )
+                    except TypeError:
+                        fresh_bot = self.bot_storage.get_bot(bot_id)
                 if fresh_bot:
                     bot = self._merge_cycle_runtime_context(
                         fresh_bot,
@@ -18085,7 +18120,15 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
 
         bot["last_error"] = None
         bot["last_run_at"] = datetime.now(timezone.utc).isoformat()
-        return self._save_runtime_bot(bot)
+        try:
+            return self._save_runtime_bot(
+                bot,
+                path="neutral_classic_cycle_tail",
+                reason="cycle_tail",
+                persistence_class="runtime_path",
+            )
+        except TypeError:
+            return self._save_runtime_bot(bot)
 
     # =========================================================================
     # EXTRACTED HELPERS — mode-specific logic from _run_bot_cycle_impl
@@ -26635,7 +26678,15 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
         bot["price_metadata_write_path"] = str(write_path or "active_cycle")
         bot["current_price_persist_delta_ms"] = delta_ms
         bot["current_price_persisted_before_guard"] = bool(persisted_before_guard)
-        self._save_runtime_bot(bot)
+        try:
+            self._save_runtime_bot(
+                bot,
+                path="early_price_runtime",
+                reason=write_path,
+                persistence_class="runtime_path",
+            )
+        except TypeError:
+            self._save_runtime_bot(bot)
         return True
 
     def _apply_reevaluation_runtime_context(

@@ -401,7 +401,13 @@ def _persist_bot_cycle_exception(bot_storage, grid_bot_service, bot: dict, exc: 
     try:
         persisted_bot = None
         if bot_id and hasattr(bot_storage, "get_bot"):
-            persisted_bot = bot_storage.get_bot(bot_id)
+            try:
+                persisted_bot = bot_storage.get_bot(
+                    bot_id,
+                    source="runner_cycle_exception",
+                )
+            except TypeError:
+                persisted_bot = bot_storage.get_bot(bot_id)
         target_bot = dict(persisted_bot or bot)
         current_status = str(target_bot.get("status") or "").strip().lower()
         if current_status not in FULL_CYCLE_ELIGIBLE_STATUSES:
@@ -446,7 +452,10 @@ def risk_check_all_bots(bot_storage, grid_bot_service):
         grid_bot_service: GridBotService with check_upnl_stoploss_fast method
     """
     try:
-        bots = bot_storage.list_bots()
+        try:
+            bots = bot_storage.list_bots(source="runner_risk_tick")
+        except TypeError:
+            bots = bot_storage.list_bots()
         stream_service = getattr(grid_bot_service, "stream_service", None)
         if stream_service:
             # Include symbols from bots that may hold exchange positions,
@@ -830,7 +839,12 @@ def main():
     clear_stop_flag()
 
     try:
-        startup_bots = _startup_reconciliation_targets(bot_storage.list_bots())
+        try:
+            startup_bots = _startup_reconciliation_targets(
+                bot_storage.list_bots(source="runner_startup")
+            )
+        except TypeError:
+            startup_bots = _startup_reconciliation_targets(bot_storage.list_bots())
         if startup_bots:
             reconciled_startup_bots = _run_exchange_truth_reconciliation(
                 grid_bot_service,
@@ -1000,7 +1014,10 @@ def main():
                         # Continue with bot processing even if margin monitor fails
 
                 # 5) Load bots and run cycles for running bots
-                bots = bot_storage.list_bots()
+                try:
+                    bots = bot_storage.list_bots(source="runner_grid_tick")
+                except TypeError:
+                    bots = bot_storage.list_bots()
                 maintenance_targets = [
                     dict(bot)
                     for bot in bots
@@ -1159,7 +1176,12 @@ def main():
                 # =================================================================
                 try:
                     # Re-list bots in case they changed
-                    bots_for_rot = bot_storage.list_bots()
+                    try:
+                        bots_for_rot = bot_storage.list_bots(
+                            source="runner_legacy_rotation"
+                        )
+                    except TypeError:
+                        bots_for_rot = bot_storage.list_bots()
                     running_bots_rot = [
                         b for b in bots_for_rot if b.get("status") == "running"
                     ]

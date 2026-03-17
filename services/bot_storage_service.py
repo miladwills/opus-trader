@@ -134,6 +134,7 @@ DEFAULT_INTERNAL_LOCK_TIMEOUT_SEC = max(
     0.01,
 )
 RUNTIME_PERSIST_OBSERVATION_LOG_INTERVAL_SEC = 60.0
+READ_OBSERVATION_LOG_INTERVAL_SEC = 60.0
 
 
 class BotStorageService:
@@ -159,6 +160,8 @@ class BotStorageService:
         self._runtime_flush_timer: Optional[threading.Timer] = None
         self._runtime_persist_observation_lock = threading.RLock()
         self._runtime_persist_observations: Dict[str, Dict[str, Any]] = {}
+        self._read_observation_lock = threading.RLock()
+        self._read_observations: Dict[str, Dict[str, Any]] = {}
         self.runtime_flush_delay_sec = max(
             float(os.environ.get("BOT_RUNTIME_FLUSH_DELAY_SEC", "0.5") or 0.5),
             0.1,
@@ -411,7 +414,92 @@ class BotStorageService:
         self._runtime_flush_timer = timer
         timer.start()
 
-    def _read_all_cached(self) -> List[Dict[str, Any]]:
+    def _observe_read_access(
+        self,
+        *,
+        path: str,
+        source: Optional[str],
+        bot_id: Optional[str] = None,
+        cache_result: Optional[str] = None,
+        full_list_read: bool = False,
+        elapsed_ms: float,
+    ) -> None:
+        if not source:
+            return
+        now = time.monotonic()
+        snapshot = None
+        key = "|".join(
+            (
+                str(path or "").strip() or "-",
+                str(source or "").strip() or "-",
+                str(cache_result or "").strip() or "-",
+            )
+        )
+        with self._read_observation_lock:
+            stats = self._read_observations.setdefault(
+                key,
+                {
+                    "path": str(path or "").strip() or "-",
+                    "source": str(source or "").strip() or "-",
+                    "cache_result": str(cache_result or "").strip() or "-",
+                    "bot_id": str(bot_id or "").strip() or None,
+                    "count": 0,
+                    "cache_hit": 0,
+                    "cache_refill": 0,
+                    "direct_read": 0,
+                    "full_list_read": 0,
+                    "max_elapsed_ms": 0.0,
+                    "first_seen_at": now,
+                    "last_logged_at": 0.0,
+                },
+            )
+            stats["count"] += 1
+            if bot_id:
+                stats["bot_id"] = str(bot_id or "").strip() or None
+            if cache_result == "hit":
+                stats["cache_hit"] += 1
+            elif cache_result == "refill":
+                stats["cache_refill"] += 1
+            else:
+                stats["direct_read"] += 1
+            if full_list_read:
+                stats["full_list_read"] += 1
+            stats["max_elapsed_ms"] = max(
+                float(stats.get("max_elapsed_ms") or 0.0),
+                float(elapsed_ms or 0.0),
+            )
+            should_log = (
+                (now - float(stats.get("last_logged_at") or 0.0))
+                >= READ_OBSERVATION_LOG_INTERVAL_SEC
+            )
+            if should_log:
+                stats["last_logged_at"] = now
+                snapshot = dict(stats)
+        if not snapshot:
+            return
+        window_sec = max(now - float(snapshot.get("first_seen_at") or now), 0.001)
+        logger.info(
+            "BOT_STORAGE_READ path=%s source=%s bot_id=%s count=%d rate_per_min=%.2f "
+            "cache_hit=%d cache_refill=%d direct_read=%d full_list_read=%d max_elapsed_ms=%.2f",
+            snapshot.get("path"),
+            snapshot.get("source"),
+            snapshot.get("bot_id") or "-",
+            int(snapshot.get("count") or 0),
+            float(snapshot.get("count") or 0) * 60.0 / window_sec,
+            int(snapshot.get("cache_hit") or 0),
+            int(snapshot.get("cache_refill") or 0),
+            int(snapshot.get("direct_read") or 0),
+            int(snapshot.get("full_list_read") or 0),
+            float(snapshot.get("max_elapsed_ms") or 0.0),
+        )
+
+    def _read_all_cached(
+        self,
+        *,
+        source: Optional[str] = None,
+        bot_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        started_at = time.monotonic()
         mtime_ns = self._get_file_mtime_ns()
         pending_updates = self._get_pending_runtime_updates_snapshot(fail_open=True)
         with self._timed_internal_lock(
@@ -420,11 +508,29 @@ class BotStorageService:
             fail_open=True,
         ) as acquired:
             if acquired and self._cached_bots is not None and self._cached_mtime_ns == mtime_ns:
-                return self._clone_bots(self._cached_bots)
+                bots = self._clone_bots(self._cached_bots)
+                self._observe_read_access(
+                    path="_read_all_cached",
+                    source=source,
+                    bot_id=bot_id,
+                    cache_result="hit",
+                    full_list_read=False,
+                    elapsed_ms=(time.monotonic() - started_at) * 1000.0,
+                )
+                return bots
         bots = self._read_all_locked()
         self._apply_runtime_updates_to_bots(bots, pending_updates)
         self._update_cache(bots, mtime_ns=mtime_ns)
-        return self._clone_bots(bots)
+        cloned = self._clone_bots(bots)
+        self._observe_read_access(
+            path="_read_all_cached",
+            source=source,
+            bot_id=bot_id,
+            cache_result="refill",
+            full_list_read=True,
+            elapsed_ms=(time.monotonic() - started_at) * 1000.0,
+        )
+        return cloned
 
     @contextmanager
     def _file_lock(self, exclusive: bool = False):
@@ -601,16 +707,16 @@ class BotStorageService:
         """
         self._write_all_locked(bots)
 
-    def list_bots(self) -> List[Dict[str, Any]]:
+    def list_bots(self, *, source: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Get all bots.
 
         Returns:
             List of all bot dictionaries
         """
-        return self._read_all_cached()
+        return self._read_all_cached(source=source)
 
-    def get_bot(self, bot_id: str) -> Optional[Dict[str, Any]]:
+    def get_bot(self, bot_id: str, *, source: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Get a specific bot by ID.
 
@@ -620,13 +726,13 @@ class BotStorageService:
         Returns:
             Bot dictionary if found, None otherwise
         """
-        bots = self._read_all_cached()
+        bots = self._read_all_cached(source=source, bot_id=bot_id)
         for bot in bots:
             if bot.get("id") == bot_id:
                 return bot
         return None
 
-    def get_bot_fresh(self, bot_id: str) -> Optional[Dict[str, Any]]:
+    def get_bot_fresh(self, bot_id: str, *, source: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Get a specific bot by ID, always reading from disk.
 
@@ -639,12 +745,21 @@ class BotStorageService:
         Returns:
             Bot dictionary if found, None otherwise
         """
+        started_at = time.monotonic()
         pending_updates = self._get_pending_runtime_updates_snapshot(fail_open=True)
         bots = self._read_all_locked()
         self._apply_runtime_updates_to_bots(bots, pending_updates)
         # Update the cache so subsequent get_bot() calls benefit
         mtime_ns = self._get_file_mtime_ns()
         self._update_cache(bots, mtime_ns=mtime_ns)
+        self._observe_read_access(
+            path="get_bot_fresh",
+            source=source,
+            bot_id=bot_id,
+            cache_result="fresh",
+            full_list_read=True,
+            elapsed_ms=(time.monotonic() - started_at) * 1000.0,
+        )
         for bot in bots:
             if bot.get("id") == bot_id:
                 return copy.deepcopy(bot)
@@ -848,7 +963,20 @@ class BotStorageService:
             observe("save_bot_fallback", changed_fields_count=len(list(bot or {})))
             return saved
 
-        existing_bot = self.get_bot(bot_id)
+        pre_read_mtime = self._get_file_mtime_ns()
+        cached_bots = self._read_all_cached(
+            source=(
+                f"save_runtime_bot:{str(path or '').strip() or 'generic'}"
+            ),
+            bot_id=bot_id,
+        )
+        existing_index = None
+        existing_bot = None
+        for index, cached_bot in enumerate(cached_bots):
+            if str(cached_bot.get("id") or "").strip() == bot_id:
+                existing_index = index
+                existing_bot = cached_bot
+                break
         if not existing_bot:
             saved = self.save_bot(bot, allow_pnl_override=allow_pnl_override)
             observe("save_bot_fallback", changed_fields_count=len(list(bot or {})))
@@ -884,23 +1012,7 @@ class BotStorageService:
         updated_bot["updated_at"] = now_iso
         changed_fields["updated_at"] = now_iso
 
-        # Capture disk mtime BEFORE reading so the cache mtime reflects the
-        # data version we actually read.  If another process (app.py) writes
-        # between our read and cache update, the mtime on disk will be newer
-        # than pre_read_mtime, causing the next _read_all_cached() to detect
-        # the mismatch and re-read from disk instead of returning stale data.
-        pre_read_mtime = self._get_file_mtime_ns()
-        cached_bots = self._read_all_cached()
-        found = False
-        for index, cached_bot in enumerate(cached_bots):
-            if str(cached_bot.get("id") or "").strip() == bot_id:
-                cached_bots[index] = copy.deepcopy(updated_bot)
-                found = True
-                break
-        if not found:
-            saved = self.save_bot(bot, allow_pnl_override=allow_pnl_override)
-            observe("save_bot_fallback", changed_fields_count=len(changed_fields))
-            return saved
+        cached_bots[existing_index] = copy.deepcopy(updated_bot)
         self._update_cache(cached_bots, mtime_ns=pre_read_mtime)
 
         if not persist:

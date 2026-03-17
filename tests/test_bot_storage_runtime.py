@@ -514,3 +514,66 @@ def test_save_runtime_bot_can_update_cache_without_queuing_disk_flush(tmp_path):
     assert cached["exchange_reconciliation"]["status"] == "error_no_exchange_exposure"
     assert on_disk[0].get("exchange_reconciliation") is None
     assert storage.flush_runtime_updates() == 0
+
+
+def test_storage_read_helpers_accept_source_labels_without_behavior_change(tmp_path):
+    storage_path = tmp_path / "bots.json"
+    storage = BotStorageService(str(storage_path))
+    storage.save_bot(
+        {
+            "id": "bot-1",
+            "symbol": "SOLUSDT",
+            "mode": "long",
+            "status": "running",
+        }
+    )
+
+    bots = storage.list_bots(source="runner_grid_tick")
+    cached = storage.get_bot("bot-1", source="run_bot_cycle_fallback")
+    fresh = storage.get_bot_fresh("bot-1", source="run_bot_cycle")
+
+    assert bots[0]["id"] == "bot-1"
+    assert cached["symbol"] == "SOLUSDT"
+    assert fresh["status"] == "running"
+
+
+def test_save_runtime_bot_reads_cached_snapshot_once_per_update(tmp_path):
+    storage_path = tmp_path / "bots.json"
+    storage = BotStorageService(str(storage_path))
+    bot = storage.save_bot(
+        {
+            "id": "bot-1",
+            "symbol": "SOLUSDT",
+            "mode": "long",
+            "status": "running",
+        }
+    )
+
+    original_read_all_cached = storage._read_all_cached
+    read_calls = []
+
+    def counting_read_all_cached(*args, **kwargs):
+        read_calls.append(
+            {
+                "args": args,
+                "kwargs": dict(kwargs),
+            }
+        )
+        return original_read_all_cached(*args, **kwargs)
+
+    storage._read_all_cached = counting_read_all_cached
+
+    updated = dict(bot)
+    updated["current_price"] = 94.48
+    updated["last_run_at"] = "2026-03-17T18:45:43+00:00"
+    result = storage.save_runtime_bot(
+        updated,
+        flush_delay_sec=60.0,
+        path="early_price_runtime",
+        reason="directional_pre_gate",
+        persistence_class="runtime_path",
+    )
+
+    assert result["current_price"] == 94.48
+    assert len(read_calls) == 1
+    assert read_calls[0]["kwargs"]["source"] == "save_runtime_bot:early_price_runtime"
