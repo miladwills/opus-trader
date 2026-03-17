@@ -142,7 +142,7 @@ def test_api_summary_fresh_request_prefers_runner_bridge_payload(
     assert payload["fresh_request_reason"] == "summary_runner_bridge_preferred"
 
 
-def test_api_bots_runtime_returns_raw_bot_fallback_when_snapshot_times_out(
+def test_api_bots_runtime_returns_empty_degraded_fallback_when_snapshot_times_out(
     monkeypatch,
     tmp_path,
 ):
@@ -153,15 +153,11 @@ def test_api_bots_runtime_returns_raw_bot_fallback_when_snapshot_times_out(
         return [{"id": "live-bot"}]
 
     app_module.bot_status_service = SimpleNamespace(get_runtime_bots=slow_runtime_bots)
+    # bot_storage.list_bots() must NOT be called — fallback returns empty degraded state
     app_module.bot_storage = SimpleNamespace(
-        list_bots=lambda: [
-            {
-                "id": "raw-bot",
-                "symbol": "BTCUSDT",
-                "mode": "long",
-                "status": "running",
-            }
-        ]
+        list_bots=lambda: (_ for _ in ()).throw(
+            AssertionError("must not call bot_storage.list_bots() on critical path")
+        )
     )
 
     flask_app = app_module.app
@@ -174,7 +170,8 @@ def test_api_bots_runtime_returns_raw_bot_fallback_when_snapshot_times_out(
     payload = response.get_json()
     assert payload["stale_data"] is True
     assert payload["error"] == "bots_runtime_timeout"
-    assert payload["bots"][0]["id"] == "raw-bot"
+    assert payload["bots"] == []
+    assert payload["runtime_state_source"] == "critical_path_empty_fallback"
 
 
 def test_runtime_bots_fallback_preserves_cached_payload_shape(monkeypatch, tmp_path):

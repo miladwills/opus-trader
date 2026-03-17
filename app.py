@@ -419,23 +419,19 @@ def _build_runtime_bots_fallback(error: str) -> Dict[str, Any]:
             payload.setdefault("snapshot_source", "dashboard_cache_fallback")
         return payload
 
-    fallback_bots = []
-    try:
-        fallback_bots = bot_storage.list_bots() if "bot_storage" in globals() else []
-    except Exception:
-        fallback_bots = []
-
+    # No bot_storage.list_bots() — avoid cache_lock + file_lock contention
+    # on dashboard-critical path. Empty degraded state; bots arrive via bridge/SSE.
     return {
-        "bots": fallback_bots,
+        "bots": [],
         "error": error,
         "stale_data": True,
-        "runtime_state_source": "storage_fallback",
-        "snapshot_source": "app_runtime_storage_fallback",
+        "runtime_state_source": "critical_path_empty_fallback",
+        "snapshot_source": "critical_path_empty_fallback",
     }
 
 
 def _build_runtime_bots_light_fallback(error: str) -> Dict[str, Any]:
-    """Light-oriented fallback: light cache -> full cache -> raw storage."""
+    """Light-oriented fallback: light cache -> full cache -> empty degraded."""
     cache_entry = _get_dashboard_snapshot_entry("bots_runtime_light")
     if cache_entry:
         payload = _mark_snapshot_stale(cache_entry.get("value"), error)
@@ -450,16 +446,13 @@ def _build_runtime_bots_light_fallback(error: str) -> Dict[str, Any]:
             payload.setdefault("runtime_state_source", "dashboard_cache_fallback")
             payload.setdefault("bots_scope", "full_fallback")
         return payload
-    fallback_bots = []
-    try:
-        fallback_bots = bot_storage.list_bots() if "bot_storage" in globals() else []
-    except Exception:
-        fallback_bots = []
+    # No bot_storage.list_bots() — avoid cache_lock + file_lock contention
+    # on dashboard-critical path. Empty degraded state; bots arrive via bridge/SSE.
     return {
-        "bots": fallback_bots,
+        "bots": [],
         "error": error,
         "stale_data": True,
-        "runtime_state_source": "storage_fallback",
+        "runtime_state_source": "critical_path_empty_fallback",
         "bots_scope": "light",
     }
 

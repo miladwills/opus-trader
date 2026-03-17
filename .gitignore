@@ -39,4 +39,8 @@ storage/*.lock
 neutralscanner/cache/
 storage/bots.json
 storage/*.json
+storage/*.jsonl
 logs/
+*.db
+*.db-shm
+*.db-wal
