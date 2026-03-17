@@ -7709,7 +7709,7 @@
     "funding_protection_active": false,
     "target_grid_count": 10,
     "created_at": "2026-03-14T01:34:20.575710+00:00",
-    "updated_at": "2026-03-17T15:12:04.541728+00:00",
+    "updated_at": "2026-03-17T15:12:44.328539+00:00",
     "watchdog_bottleneck_summary": {
       "capital_compression_snapshot_count": 17,
       "capital_compression_active": true,
@@ -7718,7 +7718,7 @@
       "last_runtime_grid_count_cap": 10,
       "last_runtime_open_order_cap_total": 6,
       "capital_starved_by_effective_capital": true,
-      "updated_at": "2026-03-17T15:06:52.681898+00:00",
+      "updated_at": "2026-03-17T15:12:27.152940+00:00",
       "capital_starved_active": false,
       "recenter_happened_count": 7,
       "last_recenter_state": "recenter_happened",
@@ -7869,8 +7869,8 @@
     "_position_mode": "hedge",
     "_position_mode_ts": 1773760008.603997,
     "auto_margin_remaining_cap": 49.1286,
-    "atr_5m_pct": 0.0038862875642310312,
-    "atr_15m_pct": 0.005712936661909912,
+    "atr_5m_pct": 0.00418566120341135,
+    "atr_15m_pct": 0.006054154528409499,
     "volatility_derisk_tier": "normal",
     "volatility_derisk_step_mult": 1.0,
     "volatility_derisk_size_mult": 1.0,
@@ -7881,9 +7881,9 @@
     "regime_secondary": "SIDEWAYS",
     "regime_effective": "SIDEWAYS",
     "regime_confidence": "low",
-    "_regime_last_eval_ts": 1773760012.6815846,
-    "current_price": 94.68,
-    "current_price_updated_at": "2026-03-17T15:06:53.579438+00:00",
+    "_regime_last_eval_ts": 1773760345.5126276,
+    "current_price": 94.13,
+    "current_price_updated_at": "2026-03-17T15:12:29.524231+00:00",
     "current_price_source": "rest_ticker",
     "current_price_transport": "rest_ticker",
     "current_price_exchange_ts": null,
@@ -7892,7 +7892,7 @@
     "price_metadata_write_reason": "trusted_price_ready",
     "price_metadata_write_path": "directional_pre_gate",
     "current_price_persisted_before_guard": true,
-    "current_price_persist_delta_ms": 120997.15,
+    "current_price_persist_delta_ms": 335944.79,
     "runtime_experiment_tags": [],
     "runtime_experiment_count": 0,
     "entry_signal_code": null,
@@ -8100,7 +8100,7 @@
       "status": "diverged",
       "reason": "orphaned_position",
       "source": "ambiguous_follow_up",
-      "updated_at": "2026-03-17T15:07:59.200132+00:00",
+      "updated_at": "2026-03-17T15:12:29.227509+00:00",
       "exchange_position_detected": true,
       "exchange_open_orders_detected": true,
       "has_exchange_exposure": true,
@@ -13160,7 +13160,7 @@
     "funding_protection_active": false,
     "target_grid_count": 10,
     "created_at": "2026-03-14T19:31:49.212326+00:00",
-    "updated_at": "2026-03-17T15:04:55.846905+00:00",
+    "updated_at": "2026-03-17T15:12:40.277350+00:00",
     "watchdog_bottleneck_summary": {
       "capital_compression_snapshot_count": 4,
       "capital_compression_active": true,
@@ -13742,7 +13742,7 @@
     "tp_pct": null,
     "id": "eb63cde0-7ade-4d16-8243-356b3630b85f",
     "created_at": "2026-03-14T23:59:10.079569+00:00",
-    "updated_at": "2026-03-17T15:05:03.233217+00:00",
+    "updated_at": "2026-03-17T15:12:47.994989+00:00",
     "watchdog_bottleneck_summary": {
       "capital_compression_snapshot_count": 10,
       "capital_compression_active": true,
@@ -14473,7 +14473,7 @@
     "funding_protection_active": false,
     "target_grid_count": 9,
     "created_at": "2026-03-15T06:00:40.053374+00:00",
-    "updated_at": "2026-03-17T15:05:13.932941+00:00",
+    "updated_at": "2026-03-17T15:12:53.917122+00:00",
     "watchdog_bottleneck_summary": {
       "capital_compression_snapshot_count": 12,
       "capital_compression_active": true,
@@ -15269,7 +15269,7 @@
     "funding_protection_active": false,
     "target_grid_count": 18,
     "created_at": "2026-03-16T03:20:45.500109+00:00",
-    "updated_at": "2026-03-17T15:05:23.377491+00:00",
+    "updated_at": "2026-03-17T15:13:08.796370+00:00",
     "watchdog_bottleneck_summary": {
       "capital_compression_snapshot_count": 1,
       "capital_compression_active": true,
@@ -15699,7 +15699,7 @@
     "funding_protection_active": false,
     "target_grid_count": 7,
     "created_at": "2026-03-16T14:16:27.318243+00:00",
-    "updated_at": "2026-03-17T15:05:29.512639+00:00",
+    "updated_at": "2026-03-17T15:13:14.878832+00:00",
     "watchdog_bottleneck_summary": {
       "capital_compression_snapshot_count": 3,
       "capital_compression_active": false,
@@ -16354,7 +16354,7 @@
     "funding_protection_active": false,
     "target_grid_count": 18,
     "created_at": "2026-03-16T14:17:14.419128+00:00",
-    "updated_at": "2026-03-17T15:05:36.959152+00:00"
+    "updated_at": "2026-03-17T15:13:25.922076+00:00"
   },
   {
     "id": "3fe45fe0-45c3-4377-85ad-55945d2033e8",
@@ -16496,7 +16496,7 @@
     "funding_protection_active": false,
     "target_grid_count": 18,
     "created_at": "2026-03-16T14:18:39.264411+00:00",
-    "updated_at": "2026-03-17T15:05:44.714125+00:00"
+    "updated_at": "2026-03-17T15:13:32.353412+00:00"
   },
   {
     "id": "574547f6-2547-4305-845e-66a4cfd7b071",
