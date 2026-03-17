@@ -394,6 +394,18 @@ class TestLightPathIsolation:
             for call in mock_scanner.call_args_list:
                 assert call.kwargs.get("cache_only") is True or (len(call.args) > 1 and call.args[1] is True)
 
+    def test_light_path_requests_projected_storage_snapshot(self):
+        svc = self._make_service()
+        with patch.object(svc, "_get_scanner_recommendation_lookup", return_value={}):
+            with patch.object(svc, "_build_stopped_preview_lookup", return_value={}):
+                with patch.object(svc, "_get_runtime_positions_payload", return_value={"positions": []}):
+                    with patch.object(svc, "_build_live_open_orders_by_symbol", return_value={}):
+                        svc.get_runtime_bots_light()
+
+        svc.bot_storage.list_bots.assert_called_once()
+        assert svc.bot_storage.list_bots.call_args.kwargs["source"] == "bot_status_runtime_light"
+        assert svc.bot_storage.list_bots.call_args.kwargs["projector"] is extract_light_bot
+
     def test_light_path_never_calls_scanner_scan(self):
         """The scanner's scan() method must never be invoked from light path."""
         svc = self._make_service()

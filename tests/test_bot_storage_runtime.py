@@ -2,6 +2,7 @@ import json
 import threading
 import time
 
+from services.bot_runtime_contracts import extract_light_bot
 from services.bot_storage_service import BotStorageService
 
 
@@ -565,6 +566,42 @@ def test_capture_read_diagnostics_records_cache_paths(tmp_path):
     assert first_diag["phase_ms"]["json_parse_ms"] >= 0.0
     assert second_diag["storage_read_call_count"] == 1
     assert second_diag["cache_result_counts"]["hit"] == 1
+
+
+def test_list_bots_projector_returns_light_shape_without_mutating_cache(tmp_path):
+    storage_path = tmp_path / "bots.json"
+    storage = BotStorageService(str(storage_path))
+    storage.save_bot(
+        {
+            "id": "bot-1",
+            "symbol": "SOLUSDT",
+            "mode": "long",
+            "status": "running",
+            "direction_signals": {"rsi": "long"},
+            "mode_readiness_matrix": [{"mode": "long", "status": "armed"}],
+        }
+    )
+    storage._cached_bots = None
+    storage._cached_mtime_ns = None
+
+    with storage.capture_read_diagnostics("projected_read") as diag:
+        projected = storage.list_bots(
+            source="runtime_bots_light",
+            projector=extract_light_bot,
+        )
+
+    assert projected[0]["symbol"] == "SOLUSDT"
+    assert "mode_readiness_matrix" not in projected[0]
+    assert diag["cache_result_counts"]["refill"] == 1
+    assert diag["phase_ms"]["projection_ms"] >= 0.0
+
+    projected[0]["direction_signals"]["rsi"] = "short"
+
+    cached_again = storage.list_bots(
+        source="runtime_bots_light",
+        projector=extract_light_bot,
+    )
+    assert cached_again[0]["direction_signals"]["rsi"] == "long"
 
 
 def test_save_runtime_bot_reads_cached_snapshot_once_per_update(tmp_path):

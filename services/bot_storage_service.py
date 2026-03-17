@@ -15,7 +15,7 @@ import logging
 import copy
 import threading
 from datetime import datetime, timezone
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any, Tuple, Callable
 from contextlib import contextmanager
 
 from services.lock_service import file_lock
@@ -26,6 +26,8 @@ from services.mode_semantics import (
 )
 
 logger = logging.getLogger(__name__)
+
+BotProjector = Callable[[Dict[str, Any]], Dict[str, Any]]
 
 
 SETTINGS_PROTECTED_FIELDS = (
@@ -184,6 +186,20 @@ class BotStorageService:
     def _clone_bots(bots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         return copy.deepcopy(bots)
 
+    @staticmethod
+    def _materialize_bots(
+        bots: List[Dict[str, Any]],
+        *,
+        projector: Optional[BotProjector] = None,
+    ) -> List[Dict[str, Any]]:
+        if projector is None:
+            return copy.deepcopy(bots)
+        materialized: List[Dict[str, Any]] = []
+        for bot in bots:
+            projected = projector(bot)
+            materialized.append(copy.deepcopy(projected if isinstance(projected, dict) else {}))
+        return materialized
+
     def _get_read_diagnostics_stack(self) -> List[Dict[str, Any]]:
         stack = getattr(self._read_diagnostics_local, "stack", None)
         if stack is None:
@@ -331,13 +347,18 @@ class BotStorageService:
         bots: List[Dict[str, Any]],
         *,
         mtime_ns: Optional[int] = None,
+        assume_owned: bool = False,
     ) -> None:
         started_at = time.monotonic()
         # Perform expensive deepcopy OUTSIDE the lock so that _cache_lock
         # only protects an O(1) pointer swap instead of blocking other
         # threads for the full copy duration.
-        cloned = self._clone_bots(bots)
-        clone_ms = (time.monotonic() - started_at) * 1000.0
+        if assume_owned:
+            cloned = bots
+            clone_ms = 0.0
+        else:
+            cloned = self._clone_bots(bots)
+            clone_ms = (time.monotonic() - started_at) * 1000.0
         self._record_read_diagnostic(
             metric_name="cache_update_clone_ms",
             metric_ms=clone_ms,
@@ -657,45 +678,48 @@ class BotStorageService:
         *,
         source: Optional[str] = None,
         bot_id: Optional[str] = None,
+        projector: Optional[BotProjector] = None,
     ) -> List[Dict[str, Any]]:
         started_at = time.monotonic()
         mtime_ns = self._get_file_mtime_ns()
         pending_updates = self._get_pending_runtime_updates_snapshot(fail_open=True)
         cache_check_started = time.monotonic()
+        cached_bots: Optional[List[Dict[str, Any]]] = None
         with self._timed_internal_lock(
             self._cache_lock,
             "cache_lock",
             fail_open=True,
         ) as acquired:
             if acquired and self._cached_bots is not None and self._cached_mtime_ns == mtime_ns:
-                bots = self._clone_bots(self._cached_bots)
-                cache_lookup_ms = (time.monotonic() - cache_check_started) * 1000.0
-                self._record_read_diagnostic(
-                    operation="_read_all_cached:hit",
-                    source=source,
-                    cache_result="hit",
-                    full_list_read=False,
-                    elapsed_ms=(time.monotonic() - started_at) * 1000.0,
-                    metric_name="cache_lookup_ms",
-                    metric_ms=cache_lookup_ms,
-                    bot_count=len(bots),
-                )
-                self._record_read_diagnostic(
-                    metric_name="clone_ms",
-                    metric_ms=max(
-                        ((time.monotonic() - started_at) * 1000.0) - cache_lookup_ms,
-                        0.0,
-                    ),
-                )
-                self._observe_read_access(
-                    path="_read_all_cached",
-                    source=source,
-                    bot_id=bot_id,
-                    cache_result="hit",
-                    full_list_read=False,
-                    elapsed_ms=(time.monotonic() - started_at) * 1000.0,
-                )
-                return bots
+                cached_bots = self._cached_bots
+        if cached_bots is not None:
+            cache_lookup_ms = (time.monotonic() - cache_check_started) * 1000.0
+            materialize_started = time.monotonic()
+            bots = self._materialize_bots(cached_bots, projector=projector)
+            materialize_ms = (time.monotonic() - materialize_started) * 1000.0
+            self._record_read_diagnostic(
+                operation="_read_all_cached:hit",
+                source=source,
+                cache_result="hit",
+                full_list_read=False,
+                elapsed_ms=(time.monotonic() - started_at) * 1000.0,
+                metric_name="cache_lookup_ms",
+                metric_ms=cache_lookup_ms,
+                bot_count=len(bots),
+            )
+            self._record_read_diagnostic(
+                metric_name="projection_ms" if projector is not None else "clone_ms",
+                metric_ms=materialize_ms,
+            )
+            self._observe_read_access(
+                path="_read_all_cached",
+                source=source,
+                bot_id=bot_id,
+                cache_result="hit",
+                full_list_read=False,
+                elapsed_ms=(time.monotonic() - started_at) * 1000.0,
+            )
+            return bots
         self._record_read_diagnostic(
             metric_name="cache_lookup_ms",
             metric_ms=(time.monotonic() - cache_check_started) * 1000.0,
@@ -715,22 +739,22 @@ class BotStorageService:
             metric_ms=runtime_merge_ms,
         )
         cache_update_started = time.monotonic()
-        self._update_cache(bots, mtime_ns=mtime_ns)
+        self._update_cache(bots, mtime_ns=mtime_ns, assume_owned=True)
         self._record_read_diagnostic(
             metric_name="cache_update_call_ms",
             metric_ms=(time.monotonic() - cache_update_started) * 1000.0,
         )
-        clone_started = time.monotonic()
-        cloned = self._clone_bots(bots)
-        clone_ms = (time.monotonic() - clone_started) * 1000.0
+        materialize_started = time.monotonic()
+        cloned = self._materialize_bots(bots, projector=projector)
+        materialize_ms = (time.monotonic() - materialize_started) * 1000.0
         self._record_read_diagnostic(
             operation="_read_all_cached:refill",
             source=source,
             cache_result="refill",
             full_list_read=True,
             elapsed_ms=(time.monotonic() - started_at) * 1000.0,
-            metric_name="clone_ms",
-            metric_ms=clone_ms,
+            metric_name="projection_ms" if projector is not None else "clone_ms",
+            metric_ms=materialize_ms,
             bot_count=len(cloned),
         )
         self._observe_read_access(
@@ -942,14 +966,19 @@ class BotStorageService:
         """
         self._write_all_locked(bots)
 
-    def list_bots(self, *, source: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_bots(
+        self,
+        *,
+        source: Optional[str] = None,
+        projector: Optional[BotProjector] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Get all bots.
 
         Returns:
             List of all bot dictionaries
         """
-        return self._read_all_cached(source=source)
+        return self._read_all_cached(source=source, projector=projector)
 
     def get_bot(self, bot_id: str, *, source: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """

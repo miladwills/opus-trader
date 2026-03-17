@@ -1352,7 +1352,10 @@ class BotStatusService:
         ) as storage_diag:
             phase_started = time.monotonic()
             count_operation("bot_storage.list_bots")
-            bots = self.bot_storage.list_bots(source="bot_status_runtime_light")
+            bots = self.bot_storage.list_bots(
+                source="bot_status_runtime_light",
+                projector=extract_light_bot,
+            )
             record_phase("source_bot_load_ms", phase_started)
 
             phase_started = time.monotonic()
