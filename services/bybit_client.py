@@ -431,19 +431,31 @@ class BybitClient:
         try:
             # Use server time endpoint - lightweight, no auth required
             response = self.session.get(f"{self.base_url}/v5/market/time", timeout=5)
-            latency_ms = (time.time() - start_time) * 1000
+            end_time = time.time()
+            latency_ms = (end_time - start_time) * 1000
 
             if response.status_code == 200:
                 data = response.json()
                 if data.get("retCode") == 0:
-                    sync_ts = time.time()
+                    sync_ts = end_time
                     server_time_ms = self._extract_server_time_ms(data)
                     if server_time_ms:
-                        # Calculate offset: server_time - (local_time + latency/2)
-                        # We assume symmetric latency
-                        local_now_ms = int((start_time + (latency_ms / 2000)) * 1000)
-                        self._time_offset_ms = server_time_ms - local_now_ms
-                        logger.info(f"Bybit time synchronized. Offset: {self._time_offset_ms}ms")
+                        # Use the receive edge as the applied offset so transport
+                        # asymmetry or local pre-send delay cannot push signed
+                        # timestamps into the future. Midpoint remains diagnostic.
+                        midpoint_local_ms = int((start_time + (latency_ms / 2000)) * 1000)
+                        receive_local_ms = int(end_time * 1000)
+                        midpoint_offset_ms = server_time_ms - midpoint_local_ms
+                        receive_edge_offset_ms = server_time_ms - receive_local_ms
+                        self._time_offset_ms = receive_edge_offset_ms
+                        logger.info(
+                            "Bybit time synchronized. Offset: %sms "
+                            "midpoint_offset_ms=%s receive_edge_offset_ms=%s latency_ms=%.1f",
+                            self._time_offset_ms,
+                            midpoint_offset_ms,
+                            receive_edge_offset_ms,
+                            latency_ms,
+                        )
 
                     self._last_time_sync = sync_ts
                     self._is_healthy = True
@@ -846,6 +858,11 @@ class BybitClient:
 
     @staticmethod
     def _extract_recv_window_skew_ms(error_msg: Any) -> Optional[int]:
+        details = BybitClient._extract_recv_window_error_details(error_msg)
+        return details.get("skew_ms")
+
+    @staticmethod
+    def _extract_recv_window_error_details(error_msg: Any) -> Dict[str, Optional[int]]:
         text = str(error_msg or "")
 
         def _extract_value(field: str) -> Optional[int]:
@@ -864,9 +881,16 @@ class BybitClient:
 
         req_ts = _extract_value("req_timestamp")
         server_ts = _extract_value("server_timestamp")
-        if req_ts is None or server_ts is None:
-            return None
-        return req_ts - server_ts
+        recv_window_ms = _extract_value("recv_window")
+        skew_ms = None
+        if req_ts is not None and server_ts is not None:
+            skew_ms = req_ts - server_ts
+        return {
+            "request_timestamp_ms": req_ts,
+            "server_timestamp_ms": server_ts,
+            "recv_window_ms": recv_window_ms,
+            "skew_ms": skew_ms,
+        }
 
     def _retry_after_recv_window_error(
         self,
@@ -875,21 +899,32 @@ class BybitClient:
         path: str,
         error_msg: Any,
         attempt: int,
+        request_timestamp_ms: Optional[int] = None,
+        request_round_trip_ms: Optional[float] = None,
+        pre_send_delay_ms: Optional[int] = None,
     ) -> bool:
         if attempt >= self.MAX_RETRIES - 1:
             return False
+        details = self._extract_recv_window_error_details(error_msg)
         previous_offset_ms = int(self._time_offset_ms or 0)
         sync = self.health_check()
         if not sync.get("healthy"):
             if self._should_log_error(10002):
                 logger.warning(
                     "BYBIT_TIME_RESYNC reason=recv_window method=%s path=%s result=sync_failed "
-                    "attempt=%d/%d skew_ms=%s old_offset_ms=%s error=%s",
+                    "attempt=%d/%d req_timestamp_ms=%s server_timestamp_ms=%s recv_window_ms=%s "
+                    "skew_ms=%s request_round_trip_ms=%s pre_send_delay_ms=%s "
+                    "old_offset_ms=%s error=%s",
                     method,
                     path,
                     attempt + 1,
                     self.MAX_RETRIES,
-                    self._extract_recv_window_skew_ms(error_msg),
+                    details.get("request_timestamp_ms") or request_timestamp_ms,
+                    details.get("server_timestamp_ms"),
+                    details.get("recv_window_ms"),
+                    details.get("skew_ms"),
+                    request_round_trip_ms,
+                    pre_send_delay_ms,
                     previous_offset_ms,
                     sync.get("error"),
                 )
@@ -897,14 +932,22 @@ class BybitClient:
         if self._should_log_error(10002):
             logger.info(
                 "BYBIT_TIME_RESYNC reason=recv_window method=%s path=%s result=retrying "
-                "attempt=%d/%d skew_ms=%s old_offset_ms=%s new_offset_ms=%s",
+                "attempt=%d/%d req_timestamp_ms=%s server_timestamp_ms=%s recv_window_ms=%s "
+                "skew_ms=%s request_round_trip_ms=%s pre_send_delay_ms=%s "
+                "old_offset_ms=%s new_offset_ms=%s sync_latency_ms=%s",
                 method,
                 path,
                 attempt + 1,
                 self.MAX_RETRIES,
-                self._extract_recv_window_skew_ms(error_msg),
+                details.get("request_timestamp_ms") or request_timestamp_ms,
+                details.get("server_timestamp_ms"),
+                details.get("recv_window_ms"),
+                details.get("skew_ms"),
+                request_round_trip_ms,
+                pre_send_delay_ms,
                 previous_offset_ms,
                 int(self._time_offset_ms or 0),
+                sync.get("latency_ms"),
             )
         return True
 
@@ -1079,6 +1122,7 @@ class BybitClient:
 
             # Fresh timestamp for each attempt
             timestamp = str(self._timestamp_ms())
+            request_timestamp_ms = int(timestamp)
 
             headers = {
                 "X-BAPI-API-KEY": self.api_key,
@@ -1088,6 +1132,7 @@ class BybitClient:
             }
 
             _req_t0 = time.monotonic()
+            pre_send_delay_ms: Optional[int] = None
             try:
                 if method.upper() == "GET":
                     # Build query string for signing
@@ -1099,6 +1144,7 @@ class BybitClient:
 
                     signature = self._sign(timestamp, query_string)
                     headers["X-BAPI-SIGN"] = signature
+                    pre_send_delay_ms = max(int(time.time() * 1000) - request_timestamp_ms, 0)
                     response = self.session.get(
                         url, params=params, headers=headers, timeout=20
                     )
@@ -1111,6 +1157,7 @@ class BybitClient:
 
                     signature = self._sign(timestamp, body_str)
                     headers["X-BAPI-SIGN"] = signature
+                    pre_send_delay_ms = max(int(time.time() * 1000) - request_timestamp_ms, 0)
                     response = self.session.post(
                         url, data=body_str, headers=headers, timeout=20
                     )
@@ -1226,6 +1273,11 @@ class BybitClient:
                         path=path,
                         error_msg=error_msg,
                         attempt=attempt,
+                        request_timestamp_ms=request_timestamp_ms,
+                        request_round_trip_ms=round(
+                            (time.monotonic() - _req_t0) * 1000, 1
+                        ),
+                        pre_send_delay_ms=pre_send_delay_ms,
                     ):
                         continue
 

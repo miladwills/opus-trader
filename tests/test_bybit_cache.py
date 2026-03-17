@@ -269,7 +269,38 @@ class TestBybitClientCache:
         )
         assert "ORDER_STATE_INVALIDATED symbol=BTCUSDT action=create_order" in caplog.text
 
-    def test_request_resyncs_and_retries_recv_window_error(self, client, mock_session):
+    def test_health_check_uses_receive_edge_offset_to_avoid_future_skew(self, client, mock_session):
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {
+            "retCode": 0,
+            "result": {"timeNano": "103500000000"},
+        }
+        mock_session.get.return_value = response
+
+        with patch("services.bybit_client.logger.info"), patch(
+            "services.bybit_client.time.time", side_effect=[100.0, 104.0]
+        ):
+            result = client.health_check()
+
+        assert result["healthy"] is True
+        assert result["offset_ms"] == -500
+        assert client._time_offset_ms == -500
+
+    def test_extract_recv_window_error_details(self):
+        details = BybitClient._extract_recv_window_error_details(
+            "invalid request, please check your server timestamp or recv_window param: "
+            "req_timestamp[1773773230612],server_timestamp[1773773229002],recv_window[5000]"
+        )
+
+        assert details == {
+            "request_timestamp_ms": 1773773230612,
+            "server_timestamp_ms": 1773773229002,
+            "recv_window_ms": 5000,
+            "skew_ms": 1610,
+        }
+
+    def test_request_resyncs_and_retries_recv_window_error(self, client, mock_session, caplog):
         error_response = Mock()
         error_response.status_code = 200
         error_response.text = (
@@ -292,20 +323,26 @@ class TestBybitClientCache:
 
         def _health_check():
             client._time_offset_ms = -1700
-            return {"healthy": True, "offset_ms": -1700}
+            return {"healthy": True, "offset_ms": -1700, "latency_ms": 210.5}
 
         client.health_check = Mock(side_effect=_health_check)
 
-        result = client._request(
-            "GET",
-            "/v5/position/list",
-            params={"category": "linear", "settleCoin": "USDT"},
-            skip_cache=True,
-        )
+        with caplog.at_level("INFO"):
+            result = client._request(
+                "GET",
+                "/v5/position/list",
+                params={"category": "linear", "settleCoin": "USDT"},
+                skip_cache=True,
+            )
 
         assert result["success"] is True
         client.health_check.assert_called_once()
         assert mock_session.get.call_count == 2
+        assert "BYBIT_TIME_RESYNC reason=recv_window" in caplog.text
+        assert "req_timestamp_ms=1773773230612" in caplog.text
+        assert "server_timestamp_ms=1773773229002" in caplog.text
+        assert "skew_ms=1610" in caplog.text
+        assert "sync_latency_ms=210.5" in caplog.text
 
     def test_request_does_not_retry_recv_window_error_when_resync_fails(self, client, mock_session):
         error_response = Mock()

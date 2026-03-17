@@ -3,6 +3,7 @@
 Update this file for meaningful patches. Keep entries short.
 
 ## 2026-03-17
+- Bybit time-sync hardening: `health_check()` now applies a conservative receive-edge server offset instead of the midpoint estimate that could be poisoned by asymmetric delay or local send stalls, and `retCode=10002` retries now emit throttled request/server/skew/RTT diagnostics so future-timestamp failures can be distinguished from true recv_window lag without changing trading semantics
 - Bybit recv_window recovery fix: REST requests that hit `retCode=10002` now perform an immediate time resync and retry once with throttled `BYBIT_TIME_RESYNC` diagnostics, reducing repeated clock-skew/recv_window failure bursts without changing order-truth handling or websocket ambiguity semantics
 - Storage contention control-truth follow-up: `run_bot_cycle()` now records the exact `bots.json` mtime from its mandatory fresh bot read and the immediate `control_version_stale_check` skips its second full fresh read when that file is unchanged, preserving stale-control safety while emitting throttled `BOT_STORAGE_REUSE` proof for same-cycle control-read reuse
 - Storage contention reuse follow-up: runner startup and maintenance reconciliation now forward the already-materialized full bot snapshot into `reconcile_bots_exchange_truth()`, eliminating the redundant same-tick `list_bots()` re-read for those paths and emitting throttled `BOT_STORAGE_REUSE` diagnostics so skipped reconciliation re-lists can be proven in live runner logs
