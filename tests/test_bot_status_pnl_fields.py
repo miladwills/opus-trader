@@ -741,6 +741,120 @@ def test_build_stopped_preview_lookup_returns_bounded_preview_when_enabled():
     assert lookup["bot-stop-1"]["readiness_preview_age_sec"] == 0.0
 
 
+def test_build_stopped_preview_lookup_refreshes_all_stopped_bots_when_nothing_is_live():
+    class FakeEntryReadinessService:
+        def __init__(self):
+            self.calls = []
+
+        def evaluate_bot(self, bot, allow_stopped_analysis_preview=None):
+            bot_id = str(bot.get("id") or "")
+            self.calls.append((bot_id, bool(allow_stopped_analysis_preview)))
+            score = 81.0 if bot_id == "bot-stop-1" else 67.0
+            return {
+                "entry_ready_status": "watch",
+                "entry_ready_reason": "preview_disabled",
+                "analysis_ready_status": "ready",
+                "analysis_ready_reason": "ready",
+                "analysis_ready_reason_text": "Enter now",
+                "analysis_ready_score": score,
+                "setup_ready": True,
+                "setup_ready_status": "ready",
+                "setup_ready_reason": "early_entry",
+                "setup_ready_reason_text": "Early entry window",
+                "setup_ready_score": score,
+            }
+
+    service = make_service()
+    service.entry_readiness_service = FakeEntryReadinessService()
+    service.stopped_preview_enabled = True
+    service.stopped_preview_max_bots = 1
+
+    lookup = service._build_stopped_preview_lookup(
+        [
+            {
+                "id": "bot-stop-1",
+                "symbol": "BTCUSDT",
+                "mode": "long",
+                "status": "stopped",
+            },
+            {
+                "id": "bot-stop-2",
+                "symbol": "ETHUSDT",
+                "mode": "short",
+                "status": "stopped",
+            },
+        ]
+    )
+
+    assert service.entry_readiness_service.calls == [
+        ("bot-stop-1", True),
+        ("bot-stop-2", True),
+    ]
+    assert lookup["bot-stop-1"]["readiness_source_kind"] == "stopped_preview"
+    assert lookup["bot-stop-1"]["setup_ready_score"] == 81.0
+    assert lookup["bot-stop-2"]["readiness_source_kind"] == "stopped_preview"
+    assert lookup["bot-stop-2"]["setup_ready_score"] == 67.0
+
+
+def test_build_stopped_preview_lookup_keeps_bounded_budget_when_live_bot_exists():
+    class FakeEntryReadinessService:
+        def __init__(self):
+            self.calls = []
+
+        def evaluate_bot(self, bot, allow_stopped_analysis_preview=None):
+            bot_id = str(bot.get("id") or "")
+            self.calls.append((bot_id, bool(allow_stopped_analysis_preview)))
+            return {
+                "entry_ready_status": "watch",
+                "entry_ready_reason": "preview_disabled",
+                "analysis_ready_status": "ready",
+                "analysis_ready_reason": "ready",
+                "analysis_ready_reason_text": "Enter now",
+                "analysis_ready_score": 74.0,
+                "setup_ready": True,
+                "setup_ready_status": "ready",
+                "setup_ready_reason": "early_entry",
+                "setup_ready_reason_text": "Early entry window",
+                "setup_ready_score": 74.0,
+            }
+
+    service = make_service()
+    service.entry_readiness_service = FakeEntryReadinessService()
+    service.stopped_preview_enabled = True
+    service.stopped_preview_max_bots = 1
+
+    lookup = service._build_stopped_preview_lookup(
+        [
+            {
+                "id": "bot-live-1",
+                "symbol": "SOLUSDT",
+                "mode": "long",
+                "status": "running",
+            },
+            {
+                "id": "bot-stop-1",
+                "symbol": "BTCUSDT",
+                "mode": "long",
+                "status": "stopped",
+            },
+            {
+                "id": "bot-stop-2",
+                "symbol": "ETHUSDT",
+                "mode": "short",
+                "status": "stopped",
+            },
+        ]
+    )
+
+    assert service.entry_readiness_service.calls == [
+        ("bot-stop-1", True),
+        ("bot-stop-2", False),
+    ]
+    assert lookup["bot-stop-1"]["readiness_source_kind"] == "stopped_preview"
+    assert lookup["bot-stop-2"]["readiness_source_kind"] == "stopped_preview_unavailable"
+    assert lookup["bot-stop-2"]["setup_ready_reason"] == "preview_disabled"
+
+
 def test_stopped_preview_ready_setup_uses_tighter_fresh_window_and_ages_out_earlier():
     service = make_service()
     service.entry_readiness_service = object()

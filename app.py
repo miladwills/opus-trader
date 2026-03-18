@@ -534,6 +534,21 @@ def _build_summary_fallback_payload(error: str) -> Dict[str, Any]:
     }
 
 
+def _build_neutral_scan_fallback_payload(error: str) -> Dict[str, Any]:
+    cache_entry = _get_dashboard_snapshot_entry("neutral_scan")
+    if cache_entry:
+        payload = _mark_snapshot_stale(cache_entry.get("value"), error)
+        if isinstance(payload, dict):
+            payload.setdefault("snapshot_source", "neutral_scan_cache_fallback")
+        return payload
+    return {
+        "results": [],
+        "error": error,
+        "stale_data": True,
+        "snapshot_source": "neutral_scan_fallback",
+    }
+
+
 def _build_runtime_bots_fallback(error: str) -> Dict[str, Any]:
     cache_entry = _get_dashboard_snapshot_entry("bots_runtime")
     if cache_entry:
@@ -6439,12 +6454,18 @@ def api_neutral_scan():
     if symbols_param:
         # Custom symbol set — always compute fresh
         results = neutral_scanner.scan(symbols)
-    else:
-        # Default universe — cache for 30s (scans 34 symbols, 2-5s cold)
-        results = _get_cached_or_compute(
-            "neutral_scan", 30.0, lambda: neutral_scanner.scan(symbols)
-        )
-    return jsonify({"results": results})
+        return jsonify({"results": results})
+
+    # Default universe — serve cached/stale payload quickly and refresh in the
+    # background instead of letting the dashboard request hang on a cold scan.
+    payload = _dashboard_snapshot(
+        "neutral_scan",
+        lambda: {"results": neutral_scanner.scan(symbols)},
+        _build_neutral_scan_fallback_payload,
+        wait_timeout=2.5,
+        refresh_ttl=30.0,
+    )
+    return jsonify(payload)
 
 
 # ============================================================

@@ -7,37 +7,154 @@ from .base import BaseProbe
 from ..models import ProbeResult
 
 
-class SystemdProbe(BaseProbe):
+class DirectRuntimeProbe(BaseProbe):
     timeout_sec = 3.0
     cadence_sec = 30.0
 
-    def __init__(self, unit_name: str, probe_name: str):
-        self.unit_name = unit_name
+    def __init__(
+        self,
+        *,
+        probe_name: str,
+        script_path: str,
+        label: str,
+        match_terms: list[str] | None = None,
+        port: int | None = None,
+        systemd_unit: str | None = None,
+    ):
         self.name = probe_name
+        self.script_path = script_path
+        self.label = label
+        terms = [script_path]
+        for term in match_terms or []:
+            if term and term not in terms:
+                terms.append(term)
+        self.match_terms = terms
+        self.port = int(port) if port is not None else None
+        self.systemd_unit = systemd_unit
+
+    async def _exec(self, *args: str) -> tuple[int, str, str]:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        return (
+            int(proc.returncode or 0),
+            stdout.decode(errors="replace"),
+            stderr.decode(errors="replace"),
+        )
+
+    async def _find_matching_processes(self) -> list[dict[str, object]]:
+        rc, stdout, _ = await self._exec("ps", "-eo", "pid=,args=")
+        if rc != 0:
+            return []
+        matches: list[dict[str, object]] = []
+        for raw_line in stdout.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            parts = line.split(None, 1)
+            if len(parts) != 2:
+                continue
+            pid_text, args = parts
+            if not any(term in args for term in self.match_terms):
+                continue
+            try:
+                pid = int(pid_text)
+            except (TypeError, ValueError):
+                continue
+            matches.append({"pid": pid, "cmdline": args})
+        return matches
+
+    async def _find_listening_pids(self) -> list[int]:
+        if self.port is None:
+            return []
+        rc, stdout, _ = await self._exec(
+            "lsof",
+            "-nP",
+            f"-iTCP:{self.port}",
+            "-sTCP:LISTEN",
+        )
+        if rc != 0 and not stdout.strip():
+            return []
+        pids: list[int] = []
+        for line in stdout.splitlines()[1:]:
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            try:
+                pids.append(int(parts[1]))
+            except (TypeError, ValueError):
+                continue
+        return sorted(set(pids))
+
+    async def _get_systemd_state(self) -> str | None:
+        if not self.systemd_unit:
+            return None
+        rc, stdout, stderr = await self._exec(
+            "systemctl",
+            "is-active",
+            self.systemd_unit,
+        )
+        state = stdout.strip() or stderr.strip()
+        if state:
+            return state
+        if rc != 0:
+            return "unknown"
+        return None
 
     async def execute(self) -> ProbeResult:
         t0 = time.monotonic()
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "systemctl", "is-active", self.unit_name,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await proc.communicate()
+            processes = await self._find_matching_processes()
+            pids = [int(item["pid"]) for item in processes]
+            listening_pids = await self._find_listening_pids()
+            systemd_state = await self._get_systemd_state()
             latency = (time.monotonic() - t0) * 1000
-            state = stdout.decode().strip()
-            is_active = state == "active"
+            pid = pids[0] if pids else None
+            detail = {
+                "label": self.label,
+                "probe_mode": "runtime_process",
+                "script_path": self.script_path,
+                "match_terms": list(self.match_terms),
+                "pid": pid,
+                "pids": pids,
+                "pid_count": len(pids),
+                "cmdline": str(processes[0]["cmdline"]) if processes else None,
+                "state": "missing",
+            }
+            if self.port is not None:
+                detail["port"] = self.port
+                detail["listening_pids"] = listening_pids
+                detail["port_listening"] = bool(set(pids) & set(listening_pids))
+            if systemd_state is not None:
+                detail["systemd_unit"] = self.systemd_unit
+                detail["systemd_state"] = systemd_state
+
+            is_active = bool(pids)
+            status = "ok"
+            if not is_active:
+                status = "down"
+                detail["state"] = "missing"
+            elif self.port is not None and not bool(set(pids) & set(listening_pids)):
+                status = "down"
+                detail["state"] = "port_not_listening"
+            elif self.port is not None:
+                detail["state"] = "listening"
+            else:
+                detail["state"] = "running"
             return ProbeResult(
                 probe_name=self.name, timestamp=time.time(),
                 success=is_active, latency_ms=latency,
-                status="ok" if is_active else "down",
-                detail={"unit": self.unit_name, "state": state},
+                status=status,
+                detail=detail,
             )
         except Exception as e:
             return ProbeResult(
                 probe_name=self.name, timestamp=time.time(),
                 success=False, latency_ms=(time.monotonic() - t0) * 1000,
-                status="error", detail={"unit": self.unit_name},
+                status="error", detail={"label": self.label, "script_path": self.script_path},
                 error=str(e)[:200],
             )
 

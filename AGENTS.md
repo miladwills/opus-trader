@@ -3,7 +3,7 @@
 ## Current Repo Reality
 - The live Opus Trader checkout on this host is `/var/www`, not `/var/www/opus_trader`.
 - `/var/www/opus_trader` does not currently exist. Some old helper files and unit files still reference it. Treat those paths as stale until they are fixed.
-- This workspace is not currently a git checkout. Do not rely on `git status`, history, or branches being available.
+- Verify git checkout and GitHub remote state before relying on branch workflow assumptions. When git and the GitHub remote are available, branch-based GitHub delivery is the default workflow.
 - Trading is effectively mainnet-only in the current runtime. Do not carry forward old testnet assumptions.
 - Runtime data under `storage/` is live operational state. Read it carefully; do not hand-edit it unless the task is explicitly a state repair.
 
@@ -27,8 +27,10 @@
 2. Make the smallest safe patch.
 3. Add or update focused tests for changed behavior.
 4. Restart both `app.py` and `runner.py`, then verify final PIDs.
-5. Create the required project zip in `/var/www/`.
-6. Update only the relevant docs.
+5. After each completed code change, create a new git branch, commit the changes, and push that branch to GitHub.
+6. Do not push directly to `main`, `master`, or production branches unless the user explicitly asks.
+7. Report the branch name, latest commit hash, GitHub branch URL, and compare URL against the base branch.
+8. Update only the relevant docs.
 
 ## Review Workflow
 - After each meaningful implementation:
@@ -43,6 +45,11 @@
 - Why each change was needed
 - Tests added/updated
 - Test results
+- Git delivery details:
+  - branch name
+  - latest commit hash
+  - GitHub branch URL
+  - compare URL against the base branch
 - Any intentionally unchanged behavior
 - Remaining risks or follow-up items
 - Explicit UI location note, or `No visible UI change in this patch.`
@@ -243,31 +250,29 @@
 - Current live process style on this host is direct Python execution from `/var/www/venv/bin/python`, not reliable systemd service management.
 - Because `app.py` runs a runner watchdog, restarting the app can also affect runner lifecycle. Always re-check both PIDs after restart.
 
-## Permanent Release / Handoff ZIP Rule
-- After every completed implementation, bugfix, refactor, or finished modification batch, always create a fresh full-project ZIP archive automatically.
+## Permanent GitHub Branch Delivery Rule
+- After every completed implementation, bugfix, refactor, or finished modification batch, use GitHub branch delivery by default.
 - This rule is always active by default.
 - It applies every time changes are completed, even multiple times within the same chat/session.
 
-### ZIP Policy
-- Archive the full project.
-- Canonical target path is `/var/www/opus_trader`.
-- On this host, that path is currently missing and the live project root is `/var/www`; until `/var/www/opus_trader` exists again, archive `/var/www`.
-- Save the archive in `/var/www/`.
-- Include important source code, configs, docs, templates, assets, tests, and required scripts.
-- Exclude:
-  - `venv/`
-  - `.venv/`
-  - `env/`
-  - all existing `.zip` files
-  - `__pycache__/`
-  - `.pytest_cache/`
-  - `.mypy_cache/`
-  - `.cache/`
-  - temp files
-  - logs
-  - other bulky non-runtime artifacts not needed for execution, review, or handoff
-- Use this naming format:
-  - `opus_trader - [latest remarkable changes] - [YYYY-MM-DD] [HH-MM AM/PM].zip`
+### GitHub Branch Policy
+- Create a new branch for each completed change batch.
+- Use one of these branch prefixes:
+  - `fix/<short-slug>`
+  - `feat/<short-slug>`
+  - `chore/<short-slug>`
+- Commit the completed changes on that branch.
+- Push the branch to the configured GitHub remote.
+- Never push directly to `main`, `master`, or any production branch unless the user explicitly asks.
+- Report back with:
+  - branch name
+  - latest commit hash
+  - GitHub branch URL
+  - compare URL against the base branch
+
+### ZIP Fallback Policy
+- Do not create a ZIP by default.
+- Only create a ZIP if the user explicitly asks for a ZIP deliverable.
 
 ## Commands
 - `python3 -m venv venv && source venv/bin/activate`

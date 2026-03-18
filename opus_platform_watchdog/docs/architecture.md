@@ -6,7 +6,7 @@ The watchdog runs as a standalone FastAPI service, completely isolated from Opus
 
 1. **HTTP probes** - calls safe read-only API endpoints
 2. **File probes** - reads bridge JSON, runner lock, log file metadata
-3. **Process probes** - checks systemd unit states
+3. **Process probes** - checks direct `app.py` / `runner.py` PID truth and the dashboard listen port, with systemd retained only as auxiliary metadata
 4. **Log probes** - tails log files and matches known error patterns
 
 ## Components
@@ -60,5 +60,5 @@ SQLite with WAL mode for concurrent reads. Retention purge runs hourly.
 - No Python imports from `/var/www/` (Opus Trader)
 - HTTP probes use httpx with configurable auth
 - File probes use read-only access
-- Process probes use `systemctl is-active` (no control)
+- Process probes use read-only PID and socket inspection plus optional `systemctl is-active` metadata (no control)
 - No shared mutable state with trading runtime

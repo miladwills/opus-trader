@@ -199,6 +199,77 @@ def test_runtime_bots_fallback_preserves_cached_payload_shape(monkeypatch, tmp_p
     assert payload["bots"][0]["id"] == "cached-bot"
 
 
+def test_api_neutral_scan_returns_empty_timeout_fallback_when_cold_scan_is_slow(
+    monkeypatch,
+    tmp_path,
+):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+
+    call_state = {"calls": 0}
+
+    def _slow_scan(symbols):
+        call_state["calls"] += 1
+        time.sleep(3.0)
+        return [{"symbol": "BTCUSDT"}]
+
+    app_module.neutral_scanner = SimpleNamespace(scan=_slow_scan)
+
+    flask_app = app_module.app
+    flask_app.config["TESTING"] = True
+
+    with flask_app.test_client() as client:
+        response = client.get("/api/neutral-scan", headers=_basic_auth_headers())
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["results"] == []
+    assert payload["stale_data"] is True
+    assert payload["error"] == "neutral_scan_timeout"
+    assert payload["snapshot_source"] == "neutral_scan_fallback"
+    assert call_state["calls"] == 1
+
+
+def test_api_neutral_scan_returns_stale_cached_payload_while_refresh_runs(
+    monkeypatch,
+    tmp_path,
+):
+    app_module = _load_app_module(monkeypatch, tmp_path)
+
+    with app_module.DASHBOARD_SNAPSHOT_LOCK:
+        app_module.DASHBOARD_SNAPSHOT_CACHE["neutral_scan"] = {
+            "ts": time.time() - 31.0,
+            "value": {
+                "results": [{"symbol": "ETHUSDT"}],
+                "error": None,
+                "stale_data": False,
+                "snapshot_source": "neutral_scan_live",
+            },
+        }
+
+    call_state = {"calls": 0}
+
+    def _slow_scan(symbols):
+        call_state["calls"] += 1
+        time.sleep(3.0)
+        return [{"symbol": "BTCUSDT"}]
+
+    app_module.neutral_scanner = SimpleNamespace(scan=_slow_scan)
+
+    flask_app = app_module.app
+    flask_app.config["TESTING"] = True
+
+    with flask_app.test_client() as client:
+        response = client.get("/api/neutral-scan", headers=_basic_auth_headers())
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["results"] == [{"symbol": "ETHUSDT"}]
+    assert payload["stale_data"] is True
+    assert payload["error"] == "neutral_scan_stale"
+    assert payload["snapshot_source"] == "neutral_scan_live"
+    assert call_state["calls"] == 1
+
+
 def test_api_bot_config_returns_canonical_persisted_bot_for_editor_hydration(
     monkeypatch,
     tmp_path,

@@ -3,6 +3,9 @@
 Update this file for meaningful patches. Keep entries short.
 
 ## 2026-03-18
+- Watchdog platform direct-runtime health fix: the external watchdog now probes direct `/var/www/venv/bin/python /var/www/app.py` and `/var/www/venv/bin/python /var/www/runner.py` runtime truth, using app port `8000` as the primary trader liveness signal while preserving stale `opus_trader.service` / `opus_runner.service` state only as secondary metadata
+- Neutral Scanner dashboard timeout fix: the default `/api/neutral-scan` heat-map path now uses the existing stale-while-refresh snapshot pattern with a short wait budget, so cached scanner results are returned immediately while a cold full-universe refresh continues in the background instead of timing out the dashboard request after 30s
+- Entry readiness stopped-preview fix: when no bots are actively running, the stopped-preview builder now refreshes every stopped candidate instead of demoting most of the board to `preview_disabled`, so stopped bots keep real readiness labels and setup scores while mixed live/stopped boards still honor the bounded preview budget
 - Runtime bridge `bots_runtime_light` final local optimization: the light builder now reuses one per-build `now_dt` / readiness cache across all bots, avoids recomputing blocker/cooldown state from fresh exchange-truth copies inside each light dict build, and emits bounded `runtime_window_ms`, `session_timer_ms`, and `exchange_guard_ms` sub-diagnostics so the remaining light-runtime cost can be separated from the already-fixed storage and shared-PnL phases without changing payload semantics or trading behavior
 
 ## 2026-03-17

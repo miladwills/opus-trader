@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 # Load .env from watchdog directory
@@ -17,6 +18,17 @@ WATCHDOG_AUTH_PASS = os.getenv("WATCHDOG_AUTH_PASS", "changeme")
 OPUS_BASE_URL = os.getenv("OPUS_TRADER_BASE_URL", "http://127.0.0.1:8000")
 OPUS_AUTH_USER = os.getenv("OPUS_TRADER_AUTH_USER", "admin")
 OPUS_AUTH_PASS = os.getenv("OPUS_TRADER_AUTH_PASS", "")
+_parsed_opus_base = urlparse(OPUS_BASE_URL)
+OPUS_TRADER_PORT = int(
+    os.getenv(
+        "OPUS_TRADER_PORT",
+        str(_parsed_opus_base.port or (443 if _parsed_opus_base.scheme == "https" else 8000)),
+    )
+)
+OPUS_APP_PATH = os.getenv("OPUS_APP_PATH", "/var/www/app.py")
+OPUS_RUNNER_PATH = os.getenv("OPUS_RUNNER_PATH", "/var/www/runner.py")
+OPUS_TRADER_SYSTEMD_UNIT = os.getenv("OPUS_TRADER_SYSTEMD_UNIT", "opus_trader")
+OPUS_RUNNER_SYSTEMD_UNIT = os.getenv("OPUS_RUNNER_SYSTEMD_UNIT", "opus_runner")
 
 # --- Paths to monitor ---
 OPUS_RUNNER_LOG = os.getenv("OPUS_RUNNER_LOG", "/var/www/storage/runner.log")

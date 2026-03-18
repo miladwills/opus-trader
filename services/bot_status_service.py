@@ -4364,6 +4364,11 @@ class BotStatusService:
             int(getattr(self, "stopped_preview_max_bots", 0) or 0),
             0,
         )
+        has_live_runtime_owner = any(
+            str((bot or {}).get("status") or "").strip().lower()
+            in ACTIVE_POSITION_OWNER_STATUSES
+            for bot in (bots or [])
+        )
 
         now_ts = time.time()
         lookup: Dict[str, Dict[str, Any]] = {}
@@ -4433,7 +4438,14 @@ class BotStatusService:
             )
         )
 
-        for _, _, bot in refresh_candidates[:stopped_preview_max_bots]:
+        refresh_budget = stopped_preview_max_bots
+        if not has_live_runtime_owner:
+            # When every bot is inactive, stopped-preview becomes the only
+            # readiness surface. Refresh every stopped candidate instead of
+            # demoting most of the board to preview_disabled.
+            refresh_budget = max(refresh_budget, len(refresh_candidates))
+
+        for _, _, bot in refresh_candidates[:refresh_budget]:
             bot_id = str(bot.get("id") or "").strip()
             try:
                 payload = readiness_service.evaluate_bot(

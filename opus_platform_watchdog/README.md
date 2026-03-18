@@ -37,8 +37,8 @@ sudo nginx -t && sudo systemctl reload nginx
 | Bridge JSON file | File read | 10s |
 | Runner lock file | File read | 15s |
 | Log freshness | File stat | 15s |
-| opus_trader service | systemctl | 30s |
-| opus_runner service | systemctl | 30s |
+| app.py runtime | PID + port probe | 30s |
+| runner.py runtime | PID probe | 30s |
 | System resources | /proc read | 30s |
 | Runner log patterns | File tail | 10s |
 | App log patterns | File tail | 15s |

@@ -82,15 +82,18 @@ class HealthScorer:
         score = 100.0
         details = {}
 
-        # Systemd check
+        # Direct runtime process health
         proc = probes.get("proc_runner")
         if proc:
-            details["systemd"] = proc.status
+            details["runtime"] = proc.status
+            details["runtime_state"] = proc.detail.get("state")
+            if proc.detail.get("systemd_state") is not None:
+                details["systemd_state"] = proc.detail.get("systemd_state")
             if proc.status != "ok":
                 score -= 50
         else:
             score -= 25
-            details["systemd"] = "no_data"
+            details["runtime"] = "no_data"
 
         # Lock file check
         lock = probes.get("file_runner_lock")
@@ -124,12 +127,15 @@ class HealthScorer:
 
         proc = probes.get("proc_trader")
         if proc:
-            details["systemd"] = proc.status
+            details["runtime"] = proc.status
+            details["runtime_state"] = proc.detail.get("state")
+            if proc.detail.get("systemd_state") is not None:
+                details["systemd_state"] = proc.detail.get("systemd_state")
             if proc.status != "ok":
                 score -= 60
         else:
             score -= 30
-            details["systemd"] = "no_data"
+            details["runtime"] = "no_data"
 
         bootstrap = probes.get("http_bootstrap")
         if bootstrap:

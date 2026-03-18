@@ -61,7 +61,7 @@
 
 <!-- Critical probes quick view -->
 <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
-    {% set probe_labels = {'http_bootstrap': 'Bootstrap API', 'http_bridge_diag': 'Bridge Diag API', 'http_services': 'Services API', 'proc_trader': 'opus_trader', 'proc_runner': 'opus_runner', 'file_bridge': 'Bridge File'} %}
+    {% set probe_labels = {'http_bootstrap': 'Bootstrap API', 'http_bridge_diag': 'Bridge Diag API', 'http_services': 'Services API', 'proc_trader': 'app.py', 'proc_runner': 'runner.py', 'file_bridge': 'Bridge File'} %}
     {% for pname, plabel in probe_labels.items() %}
         {% set p = probes.get(pname, {}) %}
         {% set pst = p.get('status', 'unknown') if p else 'unknown' %}

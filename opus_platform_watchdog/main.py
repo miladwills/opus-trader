@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 from . import config, db
 from .probes.http_probes import BootstrapProbe, BridgeDiagnosticsProbe, ServicesStatusProbe
 from .probes.file_probes import BridgeJsonProbe, RunnerLockProbe, LogFreshnessProbe
-from .probes.process_probes import SystemdProbe, SystemResourcesProbe
+from .probes.process_probes import DirectRuntimeProbe, SystemResourcesProbe
 from .probes.log_probes import LogScanProbe
 from .classifiers.incident_classifier import IncidentClassifier
 from .scoring.health_scorer import HealthScorer
@@ -87,8 +87,24 @@ async def lifespan(app: FastAPI):
         BridgeJsonProbe(),
         RunnerLockProbe(),
         LogFreshnessProbe(),
-        SystemdProbe("opus_trader", "proc_trader"),
-        SystemdProbe("opus_runner", "proc_runner"),
+        DirectRuntimeProbe(
+            probe_name="proc_trader",
+            script_path=config.OPUS_APP_PATH,
+            label="app.py",
+            match_terms=[
+                "./venv/bin/python app.py",
+                "gunicorn -c gunicorn.conf.py app:app",
+            ],
+            port=config.OPUS_TRADER_PORT,
+            systemd_unit=config.OPUS_TRADER_SYSTEMD_UNIT,
+        ),
+        DirectRuntimeProbe(
+            probe_name="proc_runner",
+            script_path=config.OPUS_RUNNER_PATH,
+            label="runner.py",
+            match_terms=["./venv/bin/python runner.py"],
+            systemd_unit=config.OPUS_RUNNER_SYSTEMD_UNIT,
+        ),
         SystemResourcesProbe(),
         log_runner,
         log_app,
