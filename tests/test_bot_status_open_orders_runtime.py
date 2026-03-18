@@ -17,6 +17,8 @@ def _make_service():
 
 def test_get_live_open_order_summary_by_symbol_uses_all_orders_fast_path():
     svc = _make_service()
+    svc.position_service.client.stream_service = MagicMock()
+    svc.position_service.client.stream_service.get_open_orders_fresh.return_value = None
     svc.position_service.client.get_open_orders.return_value = {
         "success": True,
         "data": {
@@ -62,10 +64,20 @@ def test_get_live_open_order_summary_by_symbol_uses_all_orders_fast_path():
     assert diagnostics["order_row_count"] == 2
     assert diagnostics["client_query_ms"] >= 0.0
     assert diagnostics["shaping_ms"] >= 0.0
+    assert diagnostics["matched_order_row_count"] == 1
+    assert svc._live_open_orders_cache["BTCUSDT"]["orders"] == [
+        {
+            "symbol": "BTCUSDT",
+            "reduceOnly": False,
+        }
+    ]
+    assert svc._live_open_orders_cache["ETHUSDT"]["orders"] == []
 
 
 def test_get_live_open_order_summary_by_symbol_falls_back_when_fast_path_is_unsafe():
     svc = _make_service()
+    svc.position_service.client.stream_service = MagicMock()
+    svc.position_service.client.stream_service.get_open_orders_fresh.return_value = None
     svc.position_service.client.get_open_orders.return_value = {
         "success": True,
         "data": {
@@ -104,3 +116,61 @@ def test_get_live_open_order_summary_by_symbol_falls_back_when_fast_path_is_unsa
     assert diagnostics["path"] == "per_symbol_fallback"
     assert diagnostics["fallback_reason"] == "all_orders_limit_reached"
     assert diagnostics["fallback_build_ms"] >= 0.0
+
+
+def test_get_live_open_order_summary_by_symbol_uses_per_symbol_stream_when_complete():
+    svc = _make_service()
+    svc.position_service.client.stream_service = MagicMock()
+    svc.position_service.client.stream_service.get_open_orders_fresh.side_effect = [
+        {
+            "success": True,
+            "data": {
+                "list": [
+                    {
+                        "symbol": "BTCUSDT",
+                        "reduceOnly": False,
+                    }
+                ]
+            },
+        },
+        {
+            "success": True,
+            "data": {
+                "list": [],
+            },
+        },
+    ]
+    bots = [
+        {"symbol": "BTCUSDT", "status": "running"},
+        {"symbol": "ETHUSDT", "status": "paused"},
+    ]
+
+    summary = svc.get_live_open_order_summary_by_symbol(bots)
+    diagnostics = svc.get_last_live_open_orders_diagnostics()
+
+    svc.position_service.client.get_open_orders.assert_not_called()
+    assert summary == {
+        "BTCUSDT": {
+            "open_order_count": 1,
+            "reduce_only_count": 0,
+            "entry_order_count": 1,
+        },
+        "ETHUSDT": {
+            "open_order_count": 0,
+            "reduce_only_count": 0,
+            "entry_order_count": 0,
+        },
+    }
+    assert diagnostics["path"] == "per_symbol_stream"
+    assert diagnostics["stream_hit_count"] == 2
+    assert diagnostics["stream_symbol_miss_count"] == 0
+    assert diagnostics["order_row_count"] == 1
+    assert diagnostics["matched_order_row_count"] == 1
+    assert diagnostics["stream_query_ms"] >= 0.0
+    assert svc._live_open_orders_cache["BTCUSDT"]["orders"] == [
+        {
+            "symbol": "BTCUSDT",
+            "reduceOnly": False,
+        }
+    ]
+    assert svc._live_open_orders_cache["ETHUSDT"]["orders"] == []

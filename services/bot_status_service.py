@@ -7,7 +7,7 @@ Provides enriched runtime view of all bots for the dashboard.
 import logging
 import time
 import threading
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timezone
 
 import config.strategy_config as strategy_cfg
@@ -1551,6 +1551,8 @@ class BotStatusService:
             "stream_query_ms": 0.0,
             "rest_query_ms": 0.0,
             "fallback_reason": None,
+            "stream_symbol_miss_count": 0,
+            "matched_order_row_count": 0,
         }
         if not symbols:
             diagnostics["path"] = "empty"
@@ -1562,6 +1564,20 @@ class BotStatusService:
             return {}
 
         client = getattr(self.position_service, "client", None)
+        stream_summary = self._build_stream_open_order_summary_by_symbol(
+            symbols=symbols,
+            client=client,
+            diagnostics=diagnostics,
+        )
+        if stream_summary is not None:
+            diagnostics["path"] = "per_symbol_stream"
+            diagnostics["total_ms"] = round(
+                max(time.monotonic() - started_mono, 0.0) * 1000.0,
+                3,
+            )
+            self._last_live_open_orders_diagnostics = diagnostics
+            return stream_summary
+
         if client is not None and hasattr(client, "get_open_orders"):
             query_started = time.monotonic()
             try:
@@ -1583,10 +1599,17 @@ class BotStatusService:
                     diagnostics["order_row_count"] = len(order_rows)
                     if len(order_rows) < 200:
                         shaping_started = time.monotonic()
-                        summary = self._summarize_order_rows_by_symbol(
-                            symbols=symbols,
-                            order_rows=order_rows,
+                        summary, grouped_rows_by_symbol, matched_order_row_count = (
+                            self._group_and_summarize_order_rows_by_symbol(
+                                symbols=symbols,
+                                order_rows=order_rows,
+                            )
                         )
+                        self._seed_live_open_orders_cache_from_symbol_rows(
+                            symbols=symbols,
+                            order_rows_by_symbol=grouped_rows_by_symbol,
+                        )
+                        diagnostics["matched_order_row_count"] = matched_order_row_count
                         diagnostics["shaping_ms"] = round(
                             max(time.monotonic() - shaping_started, 0.0) * 1000.0,
                             3,
@@ -1652,6 +1675,114 @@ class BotStatusService:
             }
         )
 
+    def _build_stream_open_order_summary_by_symbol(
+        self,
+        *,
+        symbols: List[str],
+        client: Any,
+        diagnostics: Dict[str, Any],
+    ) -> Optional[Dict[str, Dict[str, int]]]:
+        stream_service = getattr(client, "stream_service", None) if client is not None else None
+        if stream_service is None or not hasattr(stream_service, "get_open_orders_fresh"):
+            return None
+
+        order_rows_by_symbol: Dict[str, List[Dict[str, Any]]] = {}
+        total_rows = 0
+        for symbol in symbols or []:
+            stream_started = time.monotonic()
+            try:
+                response = stream_service.get_open_orders_fresh(
+                    symbol=symbol,
+                    limit=200,
+                )
+            except Exception:
+                response = None
+            diagnostics["stream_query_ms"] = round(
+                float(diagnostics.get("stream_query_ms") or 0.0)
+                + max(time.monotonic() - stream_started, 0.0) * 1000.0,
+                3,
+            )
+            if not response or not response.get("success"):
+                diagnostics["stream_symbol_miss_count"] = int(
+                    diagnostics.get("stream_symbol_miss_count") or 0
+                ) + 1
+                return None
+            data = response.get("data", {}) or {}
+            order_rows = data.get("list", []) if isinstance(data, dict) else data
+            if not isinstance(order_rows, list):
+                diagnostics["stream_symbol_miss_count"] = int(
+                    diagnostics.get("stream_symbol_miss_count") or 0
+                ) + 1
+                return None
+            normalized_rows = list(order_rows)
+            order_rows_by_symbol[symbol] = normalized_rows
+            total_rows += len(normalized_rows)
+            diagnostics["stream_hit_count"] = int(diagnostics.get("stream_hit_count") or 0) + 1
+
+        shaping_started = time.monotonic()
+        summary = self._summarize_order_rows_by_symbol(
+            symbols=symbols,
+            order_rows_by_symbol=order_rows_by_symbol,
+        )
+        self._seed_live_open_orders_cache_from_symbol_rows(
+            symbols=symbols,
+            order_rows_by_symbol=order_rows_by_symbol,
+        )
+        diagnostics["order_row_count"] = total_rows
+        diagnostics["matched_order_row_count"] = total_rows
+        diagnostics["shaping_ms"] = round(
+            max(time.monotonic() - shaping_started, 0.0) * 1000.0,
+            3,
+        )
+        return summary
+
+    def _seed_live_open_orders_cache_from_symbol_rows(
+        self,
+        *,
+        symbols: List[str],
+        order_rows_by_symbol: Dict[str, List[Dict[str, Any]]],
+    ) -> None:
+        cached_at = time.monotonic()
+        for symbol in symbols or []:
+            self._live_open_orders_cache[symbol] = {
+                "cached_at": cached_at,
+                "orders": list(order_rows_by_symbol.get(symbol) or []),
+            }
+
+    @staticmethod
+    def _group_and_summarize_order_rows_by_symbol(
+        *,
+        symbols: List[str],
+        order_rows: List[Dict[str, Any]],
+    ) -> Tuple[Dict[str, Dict[str, int]], Dict[str, List[Dict[str, Any]]], int]:
+        summary = {
+            symbol: {
+                "open_order_count": 0,
+                "reduce_only_count": 0,
+                "entry_order_count": 0,
+            }
+            for symbol in (symbols or [])
+        }
+        grouped_rows_by_symbol = {
+            symbol: []
+            for symbol in (symbols or [])
+        }
+        tracked_symbols = set(symbols or [])
+        matched_order_row_count = 0
+        for order in list(order_rows or []):
+            symbol = str((order or {}).get("symbol") or "").strip().upper()
+            if symbol not in tracked_symbols:
+                continue
+            grouped_rows_by_symbol[symbol].append(dict(order or {}))
+            matched_order_row_count += 1
+            summary_row = summary[symbol]
+            summary_row["open_order_count"] += 1
+            if bool((order or {}).get("reduceOnly")):
+                summary_row["reduce_only_count"] += 1
+            else:
+                summary_row["entry_order_count"] += 1
+        return summary, grouped_rows_by_symbol, matched_order_row_count
+
     @staticmethod
     def _summarize_order_rows_by_symbol(
         *,
@@ -1678,18 +1809,11 @@ class BotStatusService:
                         summary_row["entry_order_count"] += 1
             return summary
 
-        tracked_symbols = set(symbols or [])
-        for order in list(order_rows or []):
-            symbol = str((order or {}).get("symbol") or "").strip().upper()
-            if symbol not in tracked_symbols:
-                continue
-            summary_row = summary[symbol]
-            summary_row["open_order_count"] += 1
-            if bool((order or {}).get("reduceOnly")):
-                summary_row["reduce_only_count"] += 1
-            else:
-                summary_row["entry_order_count"] += 1
-        return summary
+        grouped_summary, _, _ = BotStatusService._group_and_summarize_order_rows_by_symbol(
+            symbols=symbols,
+            order_rows=list(order_rows or []),
+        )
+        return grouped_summary
 
     def get_last_runtime_cache_status(self) -> Dict[str, Any]:
         return dict(self._last_runtime_cache_status)
