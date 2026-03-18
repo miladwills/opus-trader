@@ -35,23 +35,30 @@ def analyze_truth(bots):
                 "status": status,
             })
 
-        # Score shown for non-actionable blocked/late stages
+        # Score/stage alignment check for blocked/late stages.
+        # A blocked bot CAN show a low score (the score explains why it's blocked).
+        # Only flag as a mismatch if the score is high enough to contradict the stage,
+        # suggesting the bot should not actually be blocked.
         if score is not None and stage in ("blocked", "late"):
-            score_stage_mismatches.append({
-                "bot_id": bot_id,
-                "symbol": symbol,
-                "stage": stage,
-                "score": score,
-            })
-            verdicts.append(Verdict(
-                key=f"truth:score_stage_mismatch:{bot_id}",
-                category="truth",
-                severity="high",
-                summary=f"Score {score} displayed for {stage} bot {symbol}",
-                evidence=[f"stage={stage}, score={score}, reason={reason}"],
-                affected_bot_id=bot_id,
-                affected_symbol=symbol,
-            ))
+            # High score + blocked = suspicious mismatch (score contradicts stage)
+            # Low score + blocked = truthful (score confirms the block reason)
+            is_contradictory = (stage == "blocked" and score >= 60) or (stage == "late" and score >= 70)
+            if is_contradictory:
+                score_stage_mismatches.append({
+                    "bot_id": bot_id,
+                    "symbol": symbol,
+                    "stage": stage,
+                    "score": score,
+                })
+                verdicts.append(Verdict(
+                    key=f"truth:score_stage_mismatch:{bot_id}",
+                    category="truth",
+                    severity="high",
+                    summary=f"Score {score} contradicts {stage} stage for {symbol}",
+                    evidence=[f"stage={stage}, score={score}, reason={reason}"],
+                    affected_bot_id=bot_id,
+                    affected_symbol=symbol,
+                ))
 
         # Score present for score-clear reasons
         score_clear_reasons = {

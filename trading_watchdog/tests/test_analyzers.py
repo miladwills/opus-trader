@@ -44,12 +44,20 @@ class TestTruthAnalyzer:
         assert data["score_stage_mismatch_count"] == 0
         assert len(verdicts) == 0
 
-    def test_score_at_blocked_stage(self):
+    def test_high_score_at_blocked_stage_is_mismatch(self):
+        """High score + blocked = contradictory, flagged as mismatch."""
         bots = [_bot({"stable_readiness_stage": "blocked", "display_readiness_score": 72})]
         data, verdicts = analyze_truth(bots)
         assert data["score_stage_mismatch_count"] == 1
         assert len(verdicts) == 1
         assert verdicts[0].severity == "high"
+
+    def test_low_score_at_blocked_stage_is_truthful(self):
+        """Low score + blocked = truthful (score confirms the block), no mismatch."""
+        bots = [_bot({"stable_readiness_stage": "blocked", "display_readiness_score": 28})]
+        data, verdicts = analyze_truth(bots)
+        assert data["score_stage_mismatch_count"] == 0
+        assert not any("score_stage_mismatch" in v.key for v in verdicts)
 
     def test_score_clear_violation(self):
         bots = [_bot({"stable_readiness_reason": "preview_disabled", "display_readiness_score": 50})]
