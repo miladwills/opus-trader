@@ -44,3 +44,9 @@ logs/
 *.db
 *.db-shm
 *.db-wal
+venv/
+watchdog-venv/
+logs/
+data/
+run/
+.env
