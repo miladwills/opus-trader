@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Watchdog v1</title>
+    <link rel="stylesheet" href="/static/tw/css/watchdog.css">
+</head>
+<body>
+    <header id="header">
+        <div class="header-left">
+            <span class="logo">TW</span>
+            <span class="title">Trading Watchdog <span class="shadow-badge">shadow</span></span>
+        </div>
+        <div class="header-right">
+            <span id="last-update" class="meta-text">--</span>
+            <span id="refresh-indicator" class="meta-text"></span>
+            <span id="bridge-status" class="chip chip-neutral">bridge: --</span>
+        </div>
+    </header>
+
+    <main>
+        <!-- Overview Cards -->
+        <section id="overview" class="section">
+            <div class="overview-grid">
+                <div class="overview-card" id="ov-health">
+                    <div class="ov-label">Health</div>
+                    <div class="ov-value" id="ov-health-score">--</div>
+                    <div class="ov-sub" id="ov-health-label"></div>
+                </div>
+                <div class="overview-card" id="ov-blocked">
+                    <div class="ov-label">Setup Ready / Blocked</div>
+                    <div class="ov-value" id="ov-blocked-count">--</div>
+                    <div class="ov-sub">bots ready but execution-blocked</div>
+                </div>
+                <div class="overview-card" id="ov-top-blocker">
+                    <div class="ov-label">Top Blocker</div>
+                    <div class="ov-value" id="ov-top-blocker-name">--</div>
+                    <div class="ov-sub" id="ov-top-blocker-count"></div>
+                </div>
+                <div class="overview-card" id="ov-repeat">
+                    <div class="ov-label">Repeat Failures</div>
+                    <div class="ov-value" id="ov-repeat-count">--</div>
+                    <div class="ov-sub">symbols repeatedly blocked</div>
+                </div>
+                <div class="overview-card" id="ov-fit">
+                    <div class="ov-label">Poor Fit</div>
+                    <div class="ov-value" id="ov-fit-count">--</div>
+                    <div class="ov-sub">symbols structurally poor</div>
+                </div>
+                <div class="overview-card" id="ov-drift">
+                    <div class="ov-label">Drift / Stale</div>
+                    <div class="ov-value" id="ov-drift-count">--</div>
+                    <div class="ov-sub">staleness risk items</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Two-column layout for Truth + Readiness -->
+        <div class="grid-2col">
+            <!-- Truth Section -->
+            <section id="truth" class="section">
+                <h2 class="section-title">Truth</h2>
+                <div class="truth-grid">
+                    <div class="truth-cell">
+                        <span class="truth-num" id="truth-mismatch">0</span>
+                        <span class="truth-label">Score/stage mismatches</span>
+                    </div>
+                    <div class="truth-cell">
+                        <span class="truth-num" id="truth-null-score">0</span>
+                        <span class="truth-label">Null-score bots</span>
+                    </div>
+                    <div class="truth-cell">
+                        <span class="truth-num" id="truth-stability">0</span>
+                        <span class="truth-label">Stability in-flight</span>
+                    </div>
+                    <div class="truth-cell">
+                        <span class="truth-num" id="truth-hard-inv">0</span>
+                        <span class="truth-label">Hard invalidated</span>
+                    </div>
+                </div>
+                <div id="truth-details" class="detail-list"></div>
+            </section>
+
+            <!-- Readiness Section -->
+            <section id="readiness" class="section">
+                <h2 class="section-title">Readiness</h2>
+                <div id="readiness-distribution" class="bar-chart"></div>
+                <div class="readiness-meta">
+                    <span class="chip chip-info" id="rd-running">0 running</span>
+                    <span class="chip chip-info" id="rd-stopped">0 stopped</span>
+                    <span class="chip chip-info" id="rd-actionable">0 actionable</span>
+                    <span class="chip chip-info" id="rd-near">0 near-trigger</span>
+                </div>
+            </section>
+        </div>
+
+        <!-- Two-column: Blockers + Funnel -->
+        <div class="grid-2col">
+            <!-- Execution Blockers -->
+            <section id="blockers" class="section">
+                <h2 class="section-title">Execution Blockers</h2>
+                <table class="tw-table" id="blocker-table">
+                    <thead><tr><th>Blocker</th><th>Count</th><th>Symbols</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+                <div id="blocker-buckets" class="chip-row"></div>
+            </section>
+
+            <!-- Opportunity Funnel -->
+            <section id="funnel" class="section">
+                <h2 class="section-title">Opportunity Funnel</h2>
+                <div id="funnel-flow" class="funnel-flow"></div>
+                <div class="funnel-meta">
+                    <div id="funnel-top-blocker" class="meta-text"></div>
+                    <div id="funnel-rates" class="meta-text"></div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Two-column: Symbol Fit + Drift -->
+        <div class="grid-2col">
+            <!-- Symbol Fit -->
+            <section id="symbol-fit" class="section">
+                <h2 class="section-title">Symbol Fit</h2>
+                <table class="tw-table" id="fit-table">
+                    <thead><tr><th>Symbol</th><th>Net PnL</th><th>WR%</th><th>Issues</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+                <div id="fit-suppressed" class="detail-list"></div>
+            </section>
+
+            <!-- Drift / Staleness -->
+            <section id="drift" class="section">
+                <h2 class="section-title">Drift / Staleness</h2>
+                <div class="drift-grid">
+                    <div class="drift-cell">
+                        <span class="drift-num" id="drift-stale-preview">0</span>
+                        <span class="drift-label">Stale previews</span>
+                    </div>
+                    <div class="drift-cell">
+                        <span class="drift-num" id="drift-runtime-stale">0</span>
+                        <span class="drift-label">Runtime stale</span>
+                    </div>
+                    <div class="drift-cell">
+                        <span class="drift-num" id="drift-preview-disabled">0</span>
+                        <span class="drift-label">Preview disabled</span>
+                    </div>
+                    <div class="drift-cell">
+                        <span class="drift-num" id="drift-preview-unavail">0</span>
+                        <span class="drift-label">Preview unavailable</span>
+                    </div>
+                </div>
+                <div id="drift-kill-switch" class="alert-banner hidden"></div>
+            </section>
+        </div>
+
+        <!-- Experiments (conditional) -->
+        <section id="experiments" class="section hidden">
+            <h2 class="section-title">Experiments</h2>
+            <div id="exp-unavailable" class="meta-text"></div>
+            <table class="tw-table" id="exp-table">
+                <thead><tr><th>Tag</th><th>Count</th><th>Blocked</th><th>Active</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </section>
+
+        <!-- Verdicts Table -->
+        <section id="verdicts" class="section">
+            <h2 class="section-title">Verdicts <span id="verdict-count" class="chip chip-neutral">0</span></h2>
+            <table class="tw-table" id="verdict-table">
+                <thead><tr><th>Sev</th><th>Cat</th><th>Summary</th><th>Symbol</th><th>Time</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </section>
+
+        <!-- Account Summary (compact) -->
+        <section id="account" class="section">
+            <div class="account-row">
+                <span class="acct-item">Equity: <strong id="acct-equity">--</strong></span>
+                <span class="acct-item">Available: <strong id="acct-available">--</strong></span>
+                <span class="acct-item">Unrealized: <strong id="acct-unrealized">--</strong></span>
+                <span class="acct-item">Today: <strong id="acct-today">--</strong></span>
+                <span class="acct-item">Daily Loss: <strong id="acct-daily-loss">--</strong></span>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <span>Trading Watchdog v1 &middot; Shadow Mode &middot; Read-Only Observer</span>
+    </footer>
+
+    <script src="/static/tw/js/watchdog.js"></script>
+</body>
+</html>
