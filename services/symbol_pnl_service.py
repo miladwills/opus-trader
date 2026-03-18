@@ -180,6 +180,15 @@ class SymbolPnlService:
         data = self._read_data()
         return data.get(symbol)
 
+    def get_all_pnl_data(self) -> Dict[str, Any]:
+        """
+        Get the raw persisted PnL payload in one read.
+
+        Returns:
+            Dict containing both symbol-level rows and ``bot:<id>`` rows.
+        """
+        return self._read_data()
+
     def get_all_symbols_pnl(self) -> Dict[str, Any]:
         """
         Get PnL data for all symbols.
@@ -187,7 +196,7 @@ class SymbolPnlService:
         Returns:
             Dict of symbol -> pnl data, excluding bot-scoped entries
         """
-        data = self._read_data()
+        data = self.get_all_pnl_data()
         return {
             key: value
             for key, value in data.items()
@@ -293,7 +302,7 @@ class SymbolPnlService:
         Returns:
             Dict of bot_id -> pnl data (excluding symbol-level entries)
         """
-        data = self._read_data()
+        data = self.get_all_pnl_data()
         return {k.replace("bot:", ""): v for k, v in data.items() if k.startswith("bot:")}
 
     def rebuild_from_logs(self, trade_logs: List[Dict[str, Any]]) -> None:

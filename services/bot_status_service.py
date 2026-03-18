@@ -1372,13 +1372,24 @@ class BotStatusService:
             record_phase("runtime_merge_index_ms", phase_started)
 
             phase_started = time.monotonic()
-            count_operation("symbol_pnl_service.get_all_symbols_pnl")
-            symbol_pnl_lookup = self.symbol_pnl_service.get_all_symbols_pnl()
+            count_operation("symbol_pnl_service.get_all_pnl_data")
+            all_pnl_data = self.symbol_pnl_service.get_all_pnl_data()
+            record_phase("shared_pnl_read_ms", phase_started)
+
+            phase_started = time.monotonic()
+            symbol_pnl_lookup = {
+                key: value
+                for key, value in (all_pnl_data or {}).items()
+                if not str(key).startswith("bot:")
+            }
             record_phase("symbol_pnl_lookup_ms", phase_started)
 
             phase_started = time.monotonic()
-            count_operation("symbol_pnl_service.get_all_bot_pnl")
-            bot_pnl_lookup = self.symbol_pnl_service.get_all_bot_pnl()
+            bot_pnl_lookup = {
+                str(key)[4:]: value
+                for key, value in (all_pnl_data or {}).items()
+                if str(key).startswith("bot:")
+            }
             record_phase("bot_pnl_lookup_ms", phase_started)
 
             phase_started = time.monotonic()
@@ -1498,6 +1509,9 @@ class BotStatusService:
                 "stopped_preview_lookup": True,
                 "live_open_orders_lookup": True,
             },
+            "pnl_row_count": len(all_pnl_data or {}),
+            "symbol_pnl_row_count": len(symbol_pnl_lookup),
+            "bot_pnl_row_count": len(bot_pnl_lookup),
             "phase_ms": phase_ms,
             "storage": dict(storage_diag),
             "operation_counts": operation_counts,

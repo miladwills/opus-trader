@@ -358,8 +358,13 @@ class TestLightPathIsolation:
             )
         )
         svc.symbol_pnl_service = MagicMock()
-        svc.symbol_pnl_service.get_all_symbols_pnl.return_value = {}
-        svc.symbol_pnl_service.get_all_bot_pnl.return_value = {}
+        svc.symbol_pnl_service.get_all_pnl_data.return_value = {}
+        svc.symbol_pnl_service.get_all_symbols_pnl.side_effect = AssertionError(
+            "light path must not read symbol pnl separately"
+        )
+        svc.symbol_pnl_service.get_all_bot_pnl.side_effect = AssertionError(
+            "light path must not read bot pnl separately"
+        )
         svc.position_service = MagicMock()
         svc.position_service.get_positions.return_value = {"positions": []}
         svc.entry_readiness_service = None
@@ -451,10 +456,40 @@ class TestLightPathIsolation:
 
         assert diagnostics["bot_count"] == len(result)
         assert diagnostics["operation_counts"]["bot_storage.list_bots"] == 1
+        assert diagnostics["operation_counts"]["symbol_pnl_service.get_all_pnl_data"] == 1
+        assert diagnostics["phase_ms"]["shared_pnl_read_ms"] >= 0.0
         assert diagnostics["phase_ms"]["source_bot_load_ms"] >= 0.0
+        assert diagnostics["phase_ms"]["symbol_pnl_lookup_ms"] >= 0.0
+        assert diagnostics["phase_ms"]["bot_pnl_lookup_ms"] >= 0.0
         assert diagnostics["phase_ms"]["per_bot_enrich_ms"] >= 0.0
         assert diagnostics["phase_ms"]["readiness_stability_ms"] >= 0.0
         assert diagnostics["storage"]["storage_read_call_count"] == 1
+
+    def test_light_path_reads_pnl_payload_once_and_partitions_in_memory(self):
+        svc = self._make_service()
+        svc.symbol_pnl_service.get_all_pnl_data.return_value = {
+            "BTCUSDT": {"symbol": "BTCUSDT", "net_pnl": 12.5, "trade_count": 2, "win_count": 1},
+            "bot:bot-001": {"bot_id": "bot-001", "symbol": "BTCUSDT", "net_pnl": 7.5, "trade_count": 1, "win_count": 1},
+            "bot:bot-002": {"bot_id": "bot-002", "symbol": "ETHUSDT", "net_pnl": -1.0, "trade_count": 1, "win_count": 0},
+        }
+
+        with patch.object(svc, "_get_scanner_recommendation_lookup", return_value={}):
+            with patch.object(svc, "_build_stopped_preview_lookup", return_value={}):
+                with patch.object(svc, "_get_runtime_positions_payload", return_value={"positions": []}):
+                    with patch.object(svc, "_build_live_open_orders_by_symbol", return_value={}):
+                        result = svc.get_runtime_bots_light()
+
+        svc.symbol_pnl_service.get_all_pnl_data.assert_called_once_with()
+        svc.symbol_pnl_service.get_all_symbols_pnl.assert_not_called()
+        svc.symbol_pnl_service.get_all_bot_pnl.assert_not_called()
+        by_id = {bot["id"]: bot for bot in result}
+        assert by_id["bot-001"]["symbol_pnl"]["net_pnl"] == 12.5
+        assert by_id["bot-001"]["bot_pnl"]["net_pnl"] == 7.5
+        assert by_id["bot-002"]["bot_pnl"]["net_pnl"] == -1.0
+        diagnostics = svc.get_last_runtime_light_diagnostics()
+        assert diagnostics["pnl_row_count"] == 3
+        assert diagnostics["symbol_pnl_row_count"] == 1
+        assert diagnostics["bot_pnl_row_count"] == 2
 
 
 # ---------------------------------------------------------------------------
