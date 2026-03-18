@@ -40,6 +40,19 @@ def extract_market_symbol_bot(bot: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def extract_position_attribution_bot(bot: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "symbol": bot.get("symbol"),
+        "status": bot.get("status"),
+        "id": bot.get("id"),
+        "mode": bot.get("mode"),
+        "range_mode": bot.get("range_mode"),
+        "tp_pct": bot.get("tp_pct"),
+        "auto_stop": bot.get("auto_stop"),
+        "auto_stop_target_usdt": bot.get("auto_stop_target_usdt", 0),
+    }
+
+
 class RuntimeSnapshotBridgeService:
     """Atomic JSON snapshot bridge between runner and app."""
 
@@ -1473,6 +1486,19 @@ class RuntimeSnapshotBridgeService:
         self,
         account_payload: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        positions_runtime_diagnostics: Dict[str, Any] = {
+            "path": None,
+            "fetch_ms": 0.0,
+            "normalize_ms": 0.0,
+            "position_count": 0,
+            "bot_storage_cache_result_counts": {},
+            "bot_storage_phase_ms": {},
+            "bot_storage_lock_wait_ms": {},
+            "attribution_bot_count": 0,
+            "attribution_ms": 0.0,
+            "error": None,
+            "stale_data": None,
+        }
         result = {
             "positions": [],
             "summary": {
@@ -1501,15 +1527,33 @@ class RuntimeSnapshotBridgeService:
                     )
                     or result
                 )
+                if hasattr(
+                    self.bot_status_service,
+                    "get_last_runtime_positions_diagnostics",
+                ):
+                    positions_runtime_diagnostics.update(
+                        dict(
+                            self.bot_status_service.get_last_runtime_positions_diagnostics()
+                            or {}
+                        )
+                    )
             except Exception as exc:
                 logger.warning("Runtime snapshot bridge positions build failed: %s", exc)
                 result["error"] = str(exc)
+                positions_runtime_diagnostics["error"] = str(exc)
         elif self.position_service:
             try:
+                fetch_started = time.monotonic()
                 result = self.position_service.get_positions(skip_cache=False) or result
+                positions_runtime_diagnostics["fetch_ms"] = round(
+                    max(time.monotonic() - fetch_started, 0.0) * 1000.0,
+                    3,
+                )
+                positions_runtime_diagnostics["path"] = "position_service"
             except Exception as exc:
                 logger.warning("Runtime snapshot bridge positions build failed: %s", exc)
                 result["error"] = str(exc)
+                positions_runtime_diagnostics["error"] = str(exc)
 
         account = account_payload or self._get_cached_account_snapshot(force=False)
         account_equity = self._safe_float(
@@ -1540,11 +1584,40 @@ class RuntimeSnapshotBridgeService:
         )
 
         bots = []
+        attribution_started = time.monotonic()
         if self.bot_storage:
             try:
-                bots = self.bot_storage.list_bots()
+                with self.bot_storage.capture_read_diagnostics(
+                    "runtime_snapshot_bridge.positions_attribution"
+                ) as storage_diag:
+                    bots = self.bot_storage.list_bots(
+                        source="runtime_bridge_positions_attribution",
+                        projector=extract_position_attribution_bot,
+                        read_only_projected_cache=True,
+                    )
+                positions_runtime_diagnostics["bot_storage_cache_result_counts"] = dict(
+                    storage_diag.get("cache_result_counts") or {}
+                )
+                positions_runtime_diagnostics["bot_storage_phase_ms"] = {
+                    key: round(float(value or 0.0), 3)
+                    for key, value in (storage_diag.get("phase_ms") or {}).items()
+                }
+                positions_runtime_diagnostics["bot_storage_lock_wait_ms"] = {
+                    key: round(float(value or 0.0), 3)
+                    for key, value in (storage_diag.get("lock_wait_ms") or {}).items()
+                }
             except Exception as exc:
                 logger.debug("Runtime snapshot bridge bot list failed: %s", exc)
+                positions_runtime_diagnostics["bot_storage_error"] = str(exc)
+                bots = list(self._get_bots_cached())
+                positions_runtime_diagnostics["attribution_source"] = "bridge_bots_cache_fallback"
+
+        positions_runtime_diagnostics["attribution_bot_count"] = len(bots or [])
+        positions_runtime_diagnostics["attribution_ms"] = round(
+            max(time.monotonic() - attribution_started, 0.0) * 1000.0,
+            3,
+        )
+        positions_runtime_diagnostics.setdefault("attribution_source", "projected_bot_storage")
 
         bot_lookup: Dict[str, List[Dict[str, Any]]] = {}
         bot_ids_by_symbol: Dict[str, List[str]] = {}
@@ -1591,6 +1664,10 @@ class RuntimeSnapshotBridgeService:
                 position["bot_range_modes"] = [
                     bot.get("range_mode", "fixed") for bot in matching_bots
                 ]
+        positions_runtime_diagnostics["position_count"] = len(result.get("positions", []) or [])
+        positions_runtime_diagnostics["stale_data"] = bool(result.get("stale_data"))
+        positions_runtime_diagnostics["error"] = result.get("error")
+        result["positions_runtime_diagnostics"] = positions_runtime_diagnostics
         result.setdefault("stale_data", False)
         return result
 

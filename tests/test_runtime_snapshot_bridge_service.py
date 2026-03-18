@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from services.runtime_snapshot_bridge_service import (
     RuntimeSnapshotBridgeService,
     extract_market_symbol_bot,
+    extract_position_attribution_bot,
 )
 
 
@@ -698,5 +699,107 @@ def test_market_payload_includes_runtime_diagnostics_and_reuses_meta_health(tmp_
             "symbols": ["BTCUSDT"],
             "include_health": False,
             "symbols_are_normalized": True,
+        }
+    ]
+
+
+def test_positions_payload_includes_runtime_diagnostics_and_projected_bot_attribution(tmp_path):
+    bridge = RuntimeSnapshotBridgeService(file_path=str(tmp_path / "runtime_snapshot_bridge.json"))
+
+    class FakeCapture:
+        def __init__(self, trace):
+            self.trace = trace
+
+        def __enter__(self):
+            return self.trace
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeBotStatusService:
+        def get_runtime_positions_payload(self, skip_cache=False):
+            assert skip_cache is False
+            return {
+                "positions": [
+                    {
+                        "symbol": "BTCUSDT",
+                        "position_value": 125.0,
+                        "unrealized_pnl": 1.25,
+                    }
+                ],
+                "summary": {
+                    "total_positions": 1,
+                    "longs": 1,
+                    "shorts": 0,
+                    "total_unrealized_pnl": 1.25,
+                },
+                "stale_data": False,
+                "error": None,
+            }
+
+        def get_last_runtime_positions_diagnostics(self):
+            return {
+                "path": "stream",
+                "fetch_ms": 0.35,
+                "normalize_ms": 0.08,
+                "position_count": 1,
+                "stale_data": False,
+                "error": None,
+            }
+
+    class FakeBotStorage:
+        def __init__(self):
+            self.calls = []
+
+        def capture_read_diagnostics(self, label):
+            return FakeCapture(
+                {
+                    "cache_result_counts": {"hit": 1},
+                    "phase_ms": {"projection_cache_lookup_ms": 0.04},
+                    "lock_wait_ms": {"cache_lock": 0.0},
+                }
+            )
+
+        def list_bots(self, **kwargs):
+            self.calls.append(kwargs)
+            return [
+                {
+                    "symbol": "BTCUSDT",
+                    "status": "running",
+                    "id": "bot-1",
+                    "mode": "long",
+                    "range_mode": "dynamic",
+                    "tp_pct": 1.5,
+                    "auto_stop": True,
+                    "auto_stop_target_usdt": 10.0,
+                }
+            ]
+
+    bridge.bot_status_service = FakeBotStatusService()
+    bridge.bot_storage = FakeBotStorage()
+
+    payload = bridge._build_positions_payload(
+        account_payload={
+            "equity": 100.0,
+            "available_balance": 80.0,
+            "realized_pnl": 5.0,
+            "unrealized_pnl": 1.25,
+        }
+    )
+
+    diagnostics = payload["positions_runtime_diagnostics"]
+    assert payload["positions"][0]["bot_id"] == "bot-1"
+    assert payload["positions"][0]["bot_attribution"] == "unique_running_bot"
+    assert diagnostics["path"] == "stream"
+    assert diagnostics["position_count"] == 1
+    assert diagnostics["bot_storage_cache_result_counts"] == {"hit": 1}
+    assert diagnostics["attribution_source"] == "projected_bot_storage"
+    assert diagnostics["attribution_bot_count"] == 1
+    assert diagnostics["attribution_ms"] >= 0.0
+    assert bridge.bot_storage.calls == [
+        {
+            "source": "runtime_bridge_positions_attribution",
+            "projector": extract_position_attribution_bot,
+            "read_only_projected_cache": True,
         }
     ]

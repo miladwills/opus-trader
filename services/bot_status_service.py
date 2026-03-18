@@ -180,6 +180,7 @@ class BotStatusService:
             "stale_data": False,
             "error": None,
         }
+        self._last_runtime_positions_diagnostics: Dict[str, Any] = {}
         self._last_runtime_batch_context: Dict[str, Any] = {}
         self._last_runtime_light_diagnostics: Dict[str, Any] = {}
         self._runtime_light_diag_log_lock = threading.Lock()
@@ -1977,6 +1978,9 @@ class BotStatusService:
     def get_last_runtime_cache_status(self) -> Dict[str, Any]:
         return dict(self._last_runtime_cache_status)
 
+    def get_last_runtime_positions_diagnostics(self) -> Dict[str, Any]:
+        return dict(self._last_runtime_positions_diagnostics)
+
     def get_runtime_positions_payload(
         self,
         *,
@@ -1989,16 +1993,47 @@ class BotStatusService:
         *,
         skip_cache: bool = False,
     ) -> Dict[str, Any]:
+        diagnostics: Dict[str, Any] = {
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "skip_cache": bool(skip_cache),
+            "path": None,
+            "fetch_ms": 0.0,
+            "normalize_ms": 0.0,
+            "position_count": 0,
+            "stale_data": None,
+            "error": None,
+        }
         client = getattr(self.position_service, "client", None)
         if client is None:
-            return self.position_service.get_positions(skip_cache=skip_cache)
+            fetch_started = time.monotonic()
+            payload = self.position_service.get_positions(skip_cache=skip_cache)
+            diagnostics["fetch_ms"] = round(
+                max(time.monotonic() - fetch_started, 0.0) * 1000.0,
+                3,
+            )
+            diagnostics["path"] = "position_service_direct"
+            diagnostics["position_count"] = len((payload or {}).get("positions") or [])
+            diagnostics["stale_data"] = bool((payload or {}).get("stale_data"))
+            diagnostics["error"] = (payload or {}).get("error")
+            self._last_runtime_positions_diagnostics = diagnostics
+            return payload
 
         if not skip_cache:
             stream_service = getattr(client, "stream_service", None)
             if stream_service is not None and hasattr(stream_service, "get_positions_fresh"):
+                fetch_started = time.monotonic()
                 stream_response = stream_service.get_positions_fresh()
+                diagnostics["fetch_ms"] = round(
+                    max(time.monotonic() - fetch_started, 0.0) * 1000.0,
+                    3,
+                )
                 if stream_response and stream_response.get("success"):
+                    normalize_started = time.monotonic()
                     payload = self._normalize_runtime_positions_response(stream_response)
+                    diagnostics["normalize_ms"] = round(
+                        max(time.monotonic() - normalize_started, 0.0) * 1000.0,
+                        3,
+                    )
                     payload["stale_data"] = False
                     self._runtime_positions_cache = {
                         "payload": payload,
@@ -2008,6 +2043,11 @@ class BotStatusService:
                         "stale_data": False,
                         "error": None,
                     }
+                    diagnostics["path"] = "stream"
+                    diagnostics["position_count"] = len(payload.get("positions") or [])
+                    diagnostics["stale_data"] = False
+                    diagnostics["error"] = payload.get("error")
+                    self._last_runtime_positions_diagnostics = diagnostics
                     return payload
                 cached_payload = dict(self._runtime_positions_cache.get("payload") or {})
                 if cached_payload:
@@ -2017,6 +2057,11 @@ class BotStatusService:
                         "stale_data": True,
                         "error": cached_payload.get("error"),
                     }
+                    diagnostics["path"] = "cached_stale"
+                    diagnostics["position_count"] = len(cached_payload.get("positions") or [])
+                    diagnostics["stale_data"] = True
+                    diagnostics["error"] = cached_payload.get("error")
+                    self._last_runtime_positions_diagnostics = diagnostics
                     return cached_payload
                 stale_payload = {
                     "positions": [],
@@ -2028,9 +2073,19 @@ class BotStatusService:
                     "stale_data": True,
                     "error": stale_payload["error"],
                 }
+                diagnostics["path"] = "stale_empty"
+                diagnostics["position_count"] = 0
+                diagnostics["stale_data"] = True
+                diagnostics["error"] = stale_payload["error"]
+                self._last_runtime_positions_diagnostics = diagnostics
                 return stale_payload
 
+        fetch_started = time.monotonic()
         response = client.get_positions(skip_cache=skip_cache)
+        diagnostics["fetch_ms"] = round(
+            max(time.monotonic() - fetch_started, 0.0) * 1000.0,
+            3,
+        )
         if not response.get("success"):
             payload = {
                 "positions": [],
@@ -2042,10 +2097,20 @@ class BotStatusService:
                 "stale_data": bool(payload.get("stale_data")),
                 "error": payload.get("error"),
             }
+            diagnostics["path"] = "client_error"
+            diagnostics["position_count"] = 0
+            diagnostics["stale_data"] = bool(payload.get("stale_data"))
+            diagnostics["error"] = payload.get("error")
+            self._last_runtime_positions_diagnostics = diagnostics
             return payload
 
         raw_positions = ((response.get("data") or {}).get("list") or [])
+        normalize_started = time.monotonic()
         payload = self._normalize_runtime_positions_rows(raw_positions)
+        diagnostics["normalize_ms"] = round(
+            max(time.monotonic() - normalize_started, 0.0) * 1000.0,
+            3,
+        )
         payload["stale_data"] = False
         self._runtime_positions_cache = {
             "payload": payload,
@@ -2055,6 +2120,15 @@ class BotStatusService:
             "stale_data": False,
             "error": None,
         }
+        diagnostics["path"] = (
+            "client_stream"
+            if bool(response.get("from_stream"))
+            else ("client_skip_cache" if skip_cache else "client_rest")
+        )
+        diagnostics["position_count"] = len(payload.get("positions") or [])
+        diagnostics["stale_data"] = False
+        diagnostics["error"] = payload.get("error")
+        self._last_runtime_positions_diagnostics = diagnostics
         return payload
 
     def _normalize_runtime_positions_response(self, response: Dict[str, Any]) -> Dict[str, Any]:
