@@ -572,7 +572,7 @@ class BotStorageService:
         if not should_log or snapshot is None:
             return
         window_sec = max(now - float(snapshot.get("first_seen_at") or now), 0.001)
-        logger.info(
+        logger.debug(
             "BOT_RUNTIME_PERSIST path=%s bot_id=%s symbol=%s reason=%s class=%s count=%d rate_per_min=%.2f "
             "queued_flush=%d cache_only=%d skipped_unchanged=%d runtime_lock_timeout=%d save_bot_fallback=%d "
             "last_changed_fields=%d max_elapsed_ms=%.2f",
@@ -664,7 +664,7 @@ class BotStorageService:
         if not snapshot:
             return
         window_sec = max(now - float(snapshot.get("first_seen_at") or now), 0.001)
-        logger.info(
+        logger.debug(
             "BOT_STORAGE_READ path=%s source=%s bot_id=%s count=%d rate_per_min=%.2f "
             "cache_hit=%d cache_refill=%d direct_read=%d full_list_read=%d max_elapsed_ms=%.2f",
             snapshot.get("path"),

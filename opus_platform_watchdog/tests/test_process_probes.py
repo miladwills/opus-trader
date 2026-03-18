@@ -1,8 +1,13 @@
 """Tests for direct runtime process probes."""
 
 import asyncio
+from io import StringIO
+from pathlib import Path
 
-from opus_platform_watchdog.probes.process_probes import DirectRuntimeProbe
+from opus_platform_watchdog.probes.process_probes import (
+    DirectRuntimeProbe,
+    SystemResourcesProbe,
+)
 
 
 class _FakeProc:
@@ -221,6 +226,53 @@ def test_direct_runtime_probe_marks_runner_running_without_port(monkeypatch):
     assert result.detail["pid"] == 50659
     assert result.detail["state"] == "running"
     assert result.detail["systemd_state"] == "inactive"
+
+
+def test_system_resources_probe_reports_cpu_usage_after_second_sample(monkeypatch):
+    proc_stat_samples = iter(
+        [
+            "cpu  100 0 50 800 0 0 0 0 0 0\n",
+            "cpu  160 0 90 860 0 0 0 0 0 0\n",
+        ]
+    )
+
+    def _fake_open(path, *args, **kwargs):
+        if path == "/proc/loadavg":
+            return StringIO("1.00 0.80 0.50 1/100 12345\n")
+        if path == "/proc/meminfo":
+            return StringIO("MemTotal: 2048000 kB\nMemAvailable: 1024000 kB\n")
+        if path == "/proc/stat":
+            return StringIO(next(proc_stat_samples))
+        raise AssertionError(f"unexpected open path: {path}")
+
+    statvfs_result = type(
+        "FakeStatvfs",
+        (),
+        {"f_blocks": 1000, "f_frsize": 1024 * 1024, "f_bavail": 400},
+    )()
+
+    monkeypatch.setattr("builtins.open", _fake_open)
+    monkeypatch.setattr("os.statvfs", lambda _path: statvfs_result)
+
+    probe = SystemResourcesProbe()
+
+    first = asyncio.run(probe.execute())
+    second = asyncio.run(probe.execute())
+
+    assert first.status == "ok"
+    assert first.detail.get("cpu_used_pct") is None
+    assert second.detail["cpu_used_pct"] == 62.5
+    assert second.detail["mem_used_pct"] == 50.0
+
+
+def test_system_template_shows_cpu_resource_slot():
+    template_text = (
+        Path(__file__).resolve().parents[1] / "templates" / "system.html"
+    ).read_text()
+
+    assert "System Resources" in template_text
+    assert ">CPU<" in template_text
+    assert "cpu_used_pct" in template_text
 
 
 def test_direct_runtime_probe_matches_relative_runner_command(monkeypatch):

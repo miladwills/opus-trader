@@ -27,6 +27,7 @@ def _extract_function_source(js_text: str, name: str) -> str:
 def _run_active_bot_helper_scenario(assertions_js: str) -> dict:
     js_text = APP_JS.read_text()
     function_names = [
+        "pickFiniteReadinessScore",
         "getSetupReadiness",
         "getExecutionViability",
         "isTriggerReadyStatus",
@@ -88,6 +89,7 @@ def _run_active_bot_helper_scenario(assertions_js: str) -> dict:
 def _run_margin_warning_helper_scenario(assertions_js: str) -> dict:
     js_text = APP_JS.read_text()
     function_names = [
+        "pickFiniteReadinessScore",
         "getSetupReadiness",
         "getExecutionViability",
         "isTriggerReadyStatus",
@@ -128,11 +130,49 @@ def _run_margin_warning_helper_scenario(assertions_js: str) -> dict:
     return json.loads(result.stdout)
 
 
+def _run_readiness_display_scenario(function_names: list[str], assertions_js: str) -> dict:
+    js_text = APP_JS.read_text()
+    function_sources = [_extract_function_source(js_text, name) for name in function_names]
+
+    node_script = textwrap.dedent(
+        f"""
+        const vm = require("vm");
+        const functionSources = {json.dumps(function_sources)};
+        const context = {{
+          console,
+          Date,
+          Number,
+          String,
+          Boolean,
+          pendingBotActions: {{}},
+          recentlyStoppedBots: {{}},
+          STOP_TO_START_GUARD_MS: 5000,
+          humanizeReason: (value) => String(value ?? ""),
+          escapeHtml: (value) => String(value ?? ""),
+        }};
+        vm.createContext(context);
+        for (const source of functionSources) {{
+          vm.runInContext(source, context);
+        }}
+        {assertions_js}
+        """
+    )
+    result = subprocess.run(
+        ["node", "-e", node_script],
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+    )
+    return json.loads(result.stdout)
+
+
 def _run_exchange_truth_ui_scenario(assertions_js: str) -> dict:
     js_text = APP_JS.read_text()
     function_names = [
         "humanizeReason",
         "formatFeedClock",
+        "pickFiniteReadinessScore",
         "getSetupReadiness",
         "getExecutionViability",
         "isExchangeTruthExecutionReason",
@@ -477,4 +517,71 @@ def test_setup_readiness_prefers_stable_operator_facing_stage_over_raw_stage():
         "rawStatus": "watch",
         "reason": "good_continuation",
         "actionable": True,
+    }
+
+
+def test_setup_readiness_uses_entry_ready_score_when_earlier_scores_are_missing():
+    result = _run_readiness_display_scenario(
+        ["pickFiniteReadinessScore", "getSetupReadiness"],
+        """
+        const bot = {
+          id: "bot-score",
+          setup_timing_score: null,
+          setup_ready_score: undefined,
+          analysis_ready_score: "",
+          entry_ready_score: 61,
+        };
+        const setup = context.getSetupReadiness(bot);
+        process.stdout.write(JSON.stringify({ score: setup.score }));
+        """,
+    )
+
+    assert result == {"score": 61}
+
+
+def test_score_display_and_band_do_not_coerce_missing_readiness_to_zero_or_poor():
+    result = _run_readiness_display_scenario(
+        ["pickFiniteReadinessScore", "getSetupReadiness", "_scoreDisplay", "_bandDisplay"],
+        """
+        const bot = {
+          id: "bot-missing",
+          setup_timing_score: null,
+          setup_ready_score: null,
+          analysis_ready_score: undefined,
+          entry_ready_score: "",
+        };
+        process.stdout.write(JSON.stringify({
+          scoreText: context._scoreDisplay(bot),
+          bandText: context._bandDisplay(bot),
+        }));
+        """,
+    )
+
+    assert result == {
+        "scoreText": "—",
+        "bandText": "",
+    }
+
+
+def test_pending_stop_reuses_single_stop_button_markup():
+    result = _run_readiness_display_scenario(
+        ["buildBotActionButtons"],
+        """
+        context.pendingBotActions["bot-1"] = "stop";
+        const html = context.buildBotActionButtons({
+          id: "bot-1",
+          status: "running",
+        }, false);
+        process.stdout.write(JSON.stringify({
+          stopClassCount: (html.match(/bot-action-btn--stop/g) || []).length,
+          hasStoppingLabel: html.includes("Stopping"),
+          hasClickableStop: html.includes("onclick=\\"botAction('stop'"),
+        }));
+        """,
+    )
+
+    assert result == {
+        "stopClassCount": 1,
+        "hasStoppingLabel": True,
+        "hasClickableStop": False,
     }

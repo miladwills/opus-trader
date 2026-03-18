@@ -15,6 +15,10 @@ logger = logging.getLogger("watchdog.classifier")
 class IncidentClassifier:
     _SYNTHETIC_CONTEXT_WINDOW = 250
     _SYNTHETIC_BOT_ID_RE = re.compile(r"\[[^:\]]+:(bot-\d+)\]", re.IGNORECASE)
+    _NEUTRAL_SCAN_SNAPSHOT_RE = re.compile(
+        r"Dashboard snapshot timeout for neutral_scan\b",
+        re.IGNORECASE,
+    )
     _EXPLICIT_SYNTHETIC_MARKERS = (
         "[test]",
         "testusdt",
@@ -59,9 +63,14 @@ class IncidentClassifier:
         line_index: int,
         source: str,
     ) -> bool:
+        line = str(lines[line_index] if 0 <= line_index < len(lines) else "")
+        if (
+            pattern.key == "snapshot_timeout"
+            and cls._NEUTRAL_SCAN_SNAPSHOT_RE.search(line)
+        ):
+            return True
         if pattern.key != "bot_error_state" or str(source or "").strip().lower() != "runner":
             return False
-        line = str(lines[line_index] if 0 <= line_index < len(lines) else "")
         if not cls._SYNTHETIC_BOT_ID_RE.search(line):
             return False
         start = max(0, line_index - cls._SYNTHETIC_CONTEXT_WINDOW)

@@ -1299,7 +1299,7 @@ class BybitClient:
                             )
                         else:
                             logger.warning(
-                                f"Bybit API error: {error_msg} (retCode={ret_code})"
+                                f"Bybit API error on {path}: {error_msg} (retCode={ret_code})"
                             )
                     self._record_latency(-1.0)
                     return last_result

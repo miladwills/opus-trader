@@ -1,5 +1,6 @@
 from unittest.mock import Mock
 
+import config.strategy_config as strategy_config
 import services.grid_bot_service as grid_bot_module
 from services.grid_bot_service import GridBotService
 
@@ -407,3 +408,56 @@ def test_handle_upnl_hard_stoploss_uses_stop_cleanup_transition():
 
     service._transition_to_stop_cleanup_state.assert_called_once()
     assert updated["status"] == "stop_cleanup_pending"
+
+
+def test_emergency_partial_close_uses_stop_cleanup_when_close_outcome_is_ambiguous(
+    monkeypatch,
+):
+    monkeypatch.setattr(strategy_config, "EMERGENCY_PARTIAL_CLOSE_ENABLED", True)
+    monkeypatch.setattr(strategy_config, "EMERGENCY_PARTIAL_CLOSE_PCT", 25.0)
+    monkeypatch.setattr(strategy_config, "EMERGENCY_PARTIAL_CLOSE_TIER2_PCT", 50.0)
+    monkeypatch.setattr(strategy_config, "EMERGENCY_PARTIAL_CLOSE_COOLDOWN", 0.0)
+    monkeypatch.setattr(strategy_config, "EMERGENCY_PARTIAL_CLOSE_MAX_COUNT", 3)
+
+    service = _make_service()
+    service._get_instrument_info = Mock(return_value=None)
+    service._create_order_checked = Mock(
+        return_value={
+            "success": False,
+            "ambiguous": True,
+            "retry_safe": False,
+            "error": "ws_timeout_after_send",
+            "status": "unknown_outcome",
+        }
+    )
+    service._transition_to_stop_cleanup_state = Mock(
+        return_value={"id": "bot-1", "status": "stop_cleanup_pending"}
+    )
+
+    bot = {
+        "id": "bot-1",
+        "symbol": "ATOMUSDT",
+        "status": "running",
+        "_emergency_partial_close_count": 0,
+    }
+
+    result = GridBotService._emergency_partial_close(
+        service,
+        bot,
+        "ATOMUSDT",
+        position_size=4.0,
+        position_side="Buy",
+        pct_to_liq=3.0,
+        position_idx=1,
+        is_tier2=False,
+    )
+
+    assert result is True
+    service._create_order_checked.assert_called_once()
+    service._transition_to_stop_cleanup_state.assert_called_once()
+    kwargs = service._transition_to_stop_cleanup_state.call_args.kwargs
+    assert kwargs["target_status"] == "risk_stopped"
+    assert kwargs["cleanup_reason"] == "emergency_partial_close_ambiguous"
+    assert "CLOSE_AMBIGUOUS emergency_partial_close: ws_timeout_after_send" in kwargs[
+        "final_last_error"
+    ]

@@ -202,6 +202,7 @@ def test_runtime_bots_fallback_preserves_cached_payload_shape(monkeypatch, tmp_p
 def test_api_neutral_scan_returns_empty_timeout_fallback_when_cold_scan_is_slow(
     monkeypatch,
     tmp_path,
+    caplog,
 ):
     app_module = _load_app_module(monkeypatch, tmp_path)
 
@@ -227,6 +228,11 @@ def test_api_neutral_scan_returns_empty_timeout_fallback_when_cold_scan_is_slow(
     assert payload["error"] == "neutral_scan_timeout"
     assert payload["snapshot_source"] == "neutral_scan_fallback"
     assert call_state["calls"] == 1
+    assert not any(
+        record.levelname == "WARNING"
+        and "Dashboard snapshot timeout for neutral_scan" in record.getMessage()
+        for record in caplog.records
+    )
 
 
 def test_api_neutral_scan_returns_stale_cached_payload_while_refresh_runs(

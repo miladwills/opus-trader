@@ -127,6 +127,41 @@ def test_save_bot_preserves_control_fields_during_stale_control_state_merge(tmp_
     assert merged["last_error"] == "Manual stop"
 
 
+def test_save_bot_ignores_stale_error_state_behind_stop_cleanup_pending(tmp_path):
+    storage_path = tmp_path / "bots.json"
+    storage = BotStorageService(str(storage_path))
+
+    storage.save_bot(
+        {
+            "id": "bot-1",
+            "symbol": "ATOMUSDT",
+            "mode": "neutral",
+            "status": "stop_cleanup_pending",
+            "control_version": 2,
+            "control_updated_at": "2026-03-18T07:31:49+00:00",
+            "stop_cleanup_pending": True,
+            "stop_cleanup_target_status": "risk_stopped",
+            "last_error": "cleanup pending",
+        }
+    )
+
+    merged = storage.save_bot(
+        {
+            "id": "bot-1",
+            "symbol": "ATOMUSDT",
+            "mode": "neutral",
+            "status": "error",
+            "control_version": 1,
+            "control_updated_at": "2026-03-18T07:31:30+00:00",
+            "last_error": "CLOSE_FAILED emergency_partial_close: ws_timeout_after_send",
+        }
+    )
+
+    assert merged["status"] == "stop_cleanup_pending"
+    assert merged["control_version"] == 2
+    assert merged["last_error"] == "cleanup pending"
+
+
 def test_save_bot_clears_stale_stop_cleanup_and_pause_fields_on_restart(tmp_path):
     storage_path = tmp_path / "bots.json"
     storage = BotStorageService(str(storage_path))

@@ -175,6 +175,7 @@ class BotStatusService:
         self._last_live_open_orders_diagnostics: Dict[str, Any] = {}
         self._runtime_positions_cache: Dict[str, Any] = {}
         self._stopped_preview_cache: Dict[str, Dict[str, Any]] = {}
+        self._stopped_preview_refresh_cursor = 0
         self._readiness_stability_cache: Dict[str, Dict[str, Any]] = {}
         self._last_runtime_cache_status: Dict[str, Any] = {
             "stale_data": False,
@@ -4392,12 +4393,14 @@ class BotStatusService:
             return lookup
 
         refresh_candidates = []
+        cold_start_candidates = 0
         for bot in candidates:
             bot_id = str(bot.get("id") or "").strip()
             cached = dict(self._stopped_preview_cache.get(bot_id) or {})
             cached_at = self._safe_float(cached.get("cached_at"), 0.0)
             age_sec = now_ts - cached_at if cached_at > 0 else float("inf")
             cached_payload = dict(cached.get("payload") or {})
+            has_cached_payload = bool(cached_payload)
             windows = self._stopped_preview_time_windows(cached_payload)
             if cached and age_sec <= windows["ttl_sec"]:
                 cached_payload["readiness_source_kind"] = "stopped_preview"
@@ -4413,14 +4416,17 @@ class BotStatusService:
                 continue
             refresh_candidates.append(
                 (
+                    0 if not has_cached_payload else 1,
                     self._stopped_preview_refresh_priority(cached_payload),
                     age_sec,
                     bot,
                 )
             )
+            if not has_cached_payload:
+                cold_start_candidates += 1
 
         if cache_only:
-            for _, _, bot in refresh_candidates:
+            for _, _, _, bot in refresh_candidates:
                 bot_id = str(bot.get("id") or "").strip()
                 cached = dict(self._stopped_preview_cache.get(bot_id) or {})
                 cached_payload = dict(cached.get("payload") or {})
@@ -4432,9 +4438,10 @@ class BotStatusService:
             key=lambda item: (
                 item[0],
                 item[1],
-                str(item[2].get("last_run_at") or ""),
-                str(item[2].get("symbol") or ""),
-                str(item[2].get("id") or ""),
+                item[2],
+                str(item[3].get("last_run_at") or ""),
+                str(item[3].get("symbol") or ""),
+                str(item[3].get("id") or ""),
             )
         )
 
@@ -4444,8 +4451,32 @@ class BotStatusService:
             # readiness surface. Refresh every stopped candidate instead of
             # demoting most of the board to preview_disabled.
             refresh_budget = max(refresh_budget, len(refresh_candidates))
+        elif cold_start_candidates > 0:
+            # Keep the steady-state refresh budget bounded, but do not let the
+            # presence of one live bot suppress first-time truthful previews for
+            # every other stopped bot after a cold restart.
+            refresh_budget = max(refresh_budget, cold_start_candidates)
 
-        for _, _, bot in refresh_candidates[:refresh_budget]:
+        ordered_refresh_candidates = list(refresh_candidates)
+        if (
+            has_live_runtime_owner
+            and cold_start_candidates == 0
+            and refresh_budget > 0
+            and len(ordered_refresh_candidates) > refresh_budget
+        ):
+            cursor = int(getattr(self, "_stopped_preview_refresh_cursor", 0) or 0)
+            start = cursor % len(ordered_refresh_candidates)
+            ordered_refresh_candidates = (
+                ordered_refresh_candidates[start:]
+                + ordered_refresh_candidates[:start]
+            )
+            self._stopped_preview_refresh_cursor = (
+                start + refresh_budget
+            ) % len(refresh_candidates)
+        else:
+            self._stopped_preview_refresh_cursor = 0
+
+        for _, _, _, bot in ordered_refresh_candidates[:refresh_budget]:
             bot_id = str(bot.get("id") or "").strip()
             try:
                 payload = readiness_service.evaluate_bot(

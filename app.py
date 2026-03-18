@@ -478,7 +478,8 @@ def _dashboard_snapshot(
     try:
         return _copy_payload(future.result(timeout=wait_timeout))
     except FuturesTimeoutError:
-        logging.warning("Dashboard snapshot timeout for %s after %.1fs", key, wait_timeout)
+        timeout_log = logging.info if key == "neutral_scan" else logging.warning
+        timeout_log("Dashboard snapshot timeout for %s after %.1fs", key, wait_timeout)
         return fallback_builder(f"{key}_timeout")
     except Exception as exc:
         logging.warning("Dashboard snapshot error for %s: %s", key, exc)

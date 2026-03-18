@@ -60,6 +60,19 @@ async def test_multiple_patterns_detected(repo):
 
 
 @pytest.mark.asyncio
+async def test_neutral_scan_snapshot_timeout_is_suppressed(repo):
+    classifier = IncidentClassifier(repo)
+    lines = [
+        "2026-03-18 09:37:22,885 [INFO] Dashboard snapshot timeout for neutral_scan after 2.5s",
+        "2026-03-18 09:37:25,001 [WARNING] Dashboard snapshot timeout for summary after 3.0s",
+    ]
+    incidents = await classifier.scan_lines(lines, "app")
+    assert len(incidents) == 1
+    assert incidents[0].pattern_key == "snapshot_timeout"
+    assert incidents[0].detail["match_groups"] == ["summary"]
+
+
+@pytest.mark.asyncio
 async def test_no_match_returns_empty(repo):
     classifier = IncidentClassifier(repo)
     lines = ["Everything is fine, no errors here"]

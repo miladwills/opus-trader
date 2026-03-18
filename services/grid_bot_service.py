@@ -11949,6 +11949,28 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
                     bot.get("_emergency_partial_close_count", 0) + 1
                 )
                 return True
+            if self._is_ambiguous_order_result(order_result):
+                ambiguous_reason = (
+                    order_result.get("error")
+                    or order_result.get("status")
+                    or "ambiguous_outcome"
+                )
+                logger.warning(
+                    "[%s:%s] Emergency partial close outcome ambiguous: %s",
+                    symbol,
+                    bot_id[:8] if isinstance(bot_id, str) else bot_id,
+                    ambiguous_reason,
+                )
+                self._transition_to_stop_cleanup_state(
+                    bot,
+                    symbol,
+                    target_status="risk_stopped",
+                    cleanup_reason="emergency_partial_close_ambiguous",
+                    final_last_error=(
+                        f"CLOSE_AMBIGUOUS emergency_partial_close: {ambiguous_reason}"
+                    ),
+                )
+                return True
             else:
                 self._hard_fail_close(
                     bot, symbol, "emergency_partial_close", order_result.get("error")

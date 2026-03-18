@@ -164,6 +164,9 @@ class SystemResourcesProbe(BaseProbe):
     cadence_sec = 30.0
     timeout_sec = 3.0
 
+    def __init__(self):
+        self._previous_cpu_sample: tuple[int, int] | None = None
+
     async def execute(self) -> ProbeResult:
         t0 = time.monotonic()
         try:
@@ -205,6 +208,17 @@ class SystemResourcesProbe(BaseProbe):
             total = sum(int(x) for x in cpu_line[1:])
             detail["cpu_idle_jiffies"] = idle
             detail["cpu_total_jiffies"] = total
+            previous_cpu_sample = self._previous_cpu_sample
+            if previous_cpu_sample is not None:
+                previous_idle, previous_total = previous_cpu_sample
+                delta_total = max(total - previous_total, 0)
+                delta_idle = max(idle - previous_idle, 0)
+                if delta_total > 0:
+                    detail["cpu_used_pct"] = round(
+                        max(0.0, min(100.0, (1 - (delta_idle / delta_total)) * 100.0)),
+                        1,
+                    )
+            self._previous_cpu_sample = (idle, total)
 
             latency = (time.monotonic() - t0) * 1000
             # Health based on memory and disk

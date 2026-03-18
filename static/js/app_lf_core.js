@@ -511,6 +511,16 @@ function parseOptionalDateTimeInput(inputId, getEl = $) {
 
 
 
+function pickFiniteReadinessScore(...candidates) {
+  for (const candidate of candidates) {
+    if (candidate === null || candidate === undefined) continue;
+    if (typeof candidate === "string" && candidate.trim() === "") continue;
+    const score = Number(candidate);
+    if (Number.isFinite(score)) return score;
+  }
+  return null;
+}
+
 function getSetupReadiness(bot) {
   const stableStatusRaw = String(
     bot?.stable_readiness_stage
@@ -545,7 +555,12 @@ function getSetupReadiness(bot) {
     direction: String(bot?.setup_timing_direction || bot?.setup_ready_direction || bot?.analysis_ready_direction || bot?.entry_ready_direction || "").trim().toLowerCase(),
     mode: String(bot?.setup_timing_mode || bot?.setup_ready_mode || bot?.analysis_ready_mode || bot?.entry_ready_mode || "").trim().toLowerCase(),
     updatedAt: String(bot?.stable_readiness_updated_at || bot?.setup_timing_updatedAt || bot?.setup_timing_updated_at || bot?.setup_ready_updated_at || bot?.analysis_ready_updated_at || bot?.entry_ready_updated_at || "").trim(),
-    score: Number.isFinite(Number(bot?.setup_timing_score)) ? Number(bot?.setup_timing_score) : (Number.isFinite(Number(bot?.setup_ready_score)) ? Number(bot?.setup_ready_score) : (Number.isFinite(Number(bot?.analysis_ready_score)) ? Number(bot?.analysis_ready_score) : (Number.isFinite(Number(bot?.entry_ready_score)) ? Number(bot?.entry_ready_score) : null))),
+    score: pickFiniteReadinessScore(
+      bot?.setup_timing_score,
+      bot?.setup_ready_score,
+      bot?.analysis_ready_score,
+      bot?.entry_ready_score,
+    ),
     severity: String(bot?.setup_ready_severity || bot?.analysis_ready_severity || "").trim().toUpperCase(),
     next: String(bot?.stable_readiness_next || bot?.setup_timing_next || bot?.setup_ready_next || bot?.analysis_ready_next || "").trim(),
     fallbackUsed: Boolean(bot?.setup_ready_fallback_used || bot?.analysis_ready_fallback_used),
@@ -558,6 +573,11 @@ function getSetupReadiness(bot) {
     flipSuppressed: Boolean(bot?.readiness_flip_suppressed),
     hardInvalidated: Boolean(bot?.readiness_hard_invalidated),
   };
+}
+
+function getSetupReadinessSortScore(bot) {
+  const score = getSetupReadiness(bot)?.score;
+  return Number.isFinite(score) ? score : Number.NEGATIVE_INFINITY;
 }
 
 function getAnalysisReadiness(bot) {
@@ -1566,7 +1586,6 @@ function buildBotActionButtons(bot, mobile = false) {
     ? "bot-action-btn bot-action-btn--mobile"
     : "bot-action-btn bot-action-btn--compact";
 
-  const hasPendingNonPauseResume = activePendingAction && activePendingAction !== "pause" && activePendingAction !== "resume";
   const primaryClass = `${baseClass} bot-action-btn--primary`;
 
   // Top row: utility buttons (Pause, Resume, Edit, Config, Delete)
@@ -1587,22 +1606,21 @@ function buildBotActionButtons(bot, mobile = false) {
   ].filter(Boolean).join("");
 
   // Bottom row: primary action (Start or Stop) — bigger, full-width
-  const primaryButtons = [
-    hasPendingNonPauseResume
-      ? `<button disabled class="${primaryClass} bot-action-btn--disabled"><span class="animate-spin inline-block">↻</span><span>${escapeHtml(humanizeReason(activePendingAction))}</span></button>`
-      : canStart && !stopGuardActive
-        ? `<button onclick="botAction('start', '${bot.id}', event)" class="${primaryClass} bot-action-btn--start"><span>▶</span><span>Start</span></button>`
-        : "",
-    stopGuardActive
-      ? `<button disabled class="${primaryClass} bot-action-btn--disabled"><span>⏳</span><span>Wait ${stopGuardSec}s</span></button>`
-      : "",
-    bot.status !== "stopped"
-      ? `<button onclick="botAction('stop', '${bot.id}', event)" class="${primaryClass} bot-action-btn--stop"><span>⏹</span><span>Stop</span></button>`
-      : "",
-  ].filter(Boolean).join("");
+  let primaryButton = "";
+  if (bot.status !== "stopped") {
+    primaryButton = activePendingAction === "stop"
+      ? `<button disabled class="${primaryClass} bot-action-btn--stop" style="opacity:0.7;cursor:not-allowed"><span class="animate-spin inline-block">↻</span><span>Stopping…</span></button>`
+      : `<button onclick="botAction('stop', '${bot.id}', event)" class="${primaryClass} bot-action-btn--stop"><span>⏹</span><span>Stop</span></button>`;
+  } else if (stopGuardActive) {
+    primaryButton = `<button disabled class="${primaryClass} bot-action-btn--disabled"><span>⏳</span><span>Wait ${stopGuardSec}s</span></button>`;
+  } else if (canStart) {
+    primaryButton = activePendingAction === "start"
+      ? `<button disabled class="${primaryClass} bot-action-btn--start" style="opacity:0.7;cursor:not-allowed"><span class="animate-spin inline-block">↻</span><span>Starting…</span></button>`
+      : `<button onclick="botAction('start', '${bot.id}', event)" class="${primaryClass} bot-action-btn--start"><span>▶</span><span>Start</span></button>`;
+  }
 
   const utilityRow = `<div class="bot-action-group--utility">${utilityButtons}</div>`;
-  const primaryRow = primaryButtons ? `<div class="bot-action-primary">${primaryButtons}</div>` : "";
+  const primaryRow = primaryButton ? `<div class="bot-action-primary">${primaryButton}</div>` : "";
   return `<div class="bot-action-stack">${utilityRow}${primaryRow}</div>`;
 }
 
@@ -2479,7 +2497,7 @@ function detectBotRuntimeEvents(bots) {
       && isTradeableBotSymbol(bot.symbol)
     ) {
       const setup = getSetupReadiness(bot);
-      const score = Number(setup.score || 0);
+      const score = pickFiniteReadinessScore(setup.score);
       const direction = normalizeMarketStateHint(setup.direction || bot.mode);
       appendActivityEvent({
         key: `entry-ready:${bot.id}:${setup.updatedAt || Date.now()}`,
@@ -4212,7 +4230,7 @@ function updateEmergencyReadyHistory(readyBots, symbolContext = null) {
     let dir = normalizeMarketStateHint(setup.direction || bot?.price_action_direction || bot?.mode);
     if (dir === "neutral" && _prevReadyBotDirections[botId]) dir = _prevReadyBotDirections[botId];
     if (dir !== "neutral") _prevReadyBotDirections[botId] = dir;
-    const score = Number(setup.score || 0);
+    const score = pickFiniteReadinessScore(setup.score);
     const price = parseFloat(bot?.mark_price) || parseFloat(bot?.market_data_price) || parseFloat(bot?.exchange_mark_price) || parseFloat(bot?.current_price) || 0;
     const botMode = normalizeBotModeValue(bot?.configured_mode || bot?.mode || "neutral");
     if (existing) {
@@ -4221,7 +4239,7 @@ function updateEmergencyReadyHistory(readyBots, symbolContext = null) {
       }
       existing.still_ready = true;
       existing.direction = dir;
-      if (score > 0) existing.score = score;
+      if (Number.isFinite(score)) existing.score = score;
       existing.bot_id = botId || existing.bot_id || "";
       existing.bot_status = String(bot?.status || "").trim().toLowerCase();
       existing.bot_mode = botMode;
@@ -4235,7 +4253,7 @@ function updateEmergencyReadyHistory(readyBots, symbolContext = null) {
         bot_status: String(bot?.status || "").trim().toLowerCase(),
         bot_mode: botMode,
         direction: dir,
-        score,
+        score: Number.isFinite(score) ? score : null,
         readyAt: now,
         still_ready: true,
         entry_price: price || null,
@@ -4304,7 +4322,7 @@ function _updateReadyNavbar() {
         </span>
         <span class="flex items-center gap-1.5">
           <span class="${dirClass} font-bold text-[10px]">${dirLabel}</span>
-          ${entry.score ? `<span class="text-[9px] px-1 py-0.5 rounded bg-emerald-900/40 text-emerald-300 font-semibold">${entry.score.toFixed(1)}</span>` : ""}
+          ${Number.isFinite(entry.score) ? `<span class="text-[9px] px-1 py-0.5 rounded bg-emerald-900/40 text-emerald-300 font-semibold">${entry.score.toFixed(1)}</span>` : ""}
           <span class="text-[9px] text-slate-500">${time}</span>
         </span>
       </div>`;
@@ -4421,8 +4439,8 @@ function updateRunningBotsStatus(bots) {
       : `<span class="text-xs font-semibold ${runningEarned.class}">${runningEarned.text}</span>`;
 
     // Readiness score badge (same style as emergency card)
-    const readyScore = Number(getSetupReadiness(bot).score || 0);
-    const readyScoreBadge = readyScore
+    const readyScore = pickFiniteReadinessScore(getSetupReadiness(bot).score);
+    const readyScoreBadge = Number.isFinite(readyScore)
       ? `<span class="text-[9px] px-1.5 py-0.5 rounded border border-emerald-700/40 bg-emerald-900/30 text-emerald-300 font-semibold">${readyScore.toFixed(1)}</span>`
       : "";
 
@@ -5779,7 +5797,7 @@ async function botAction(action, botId, event, silent = false) {
     }
   }
 
-  // Disable button with loading state for feedback
+  // Keep the clicked button busy until the lifecycle refresh settles.
   if (["start", "stop", "pause", "resume"].includes(action) && btn) {
     originalHtml = btn.innerHTML;
     btn.disabled = true;
@@ -5795,17 +5813,6 @@ async function botAction(action, botId, event, silent = false) {
   if (action === "delete" && !silent && !confirm("Are you sure you want to delete this bot?")) {
     delete pendingBotActions[botId];
     return;
-  }
-
-  // C4: Optimistic UI — fire the API call without awaiting it.
-  // The pendingBotActions badge already shows the transition state.
-  // Restore button immediately so the UI feels instant.
-  if (["start", "stop", "pause", "resume"].includes(action) && btn) {
-    // Restore button after a short flash so the spinner is visible briefly
-    setTimeout(() => {
-      btn.disabled = false;
-      if (originalHtml !== null) btn.innerHTML = originalHtml;
-    }, 400);
   }
 
   if (action === "start") {
@@ -5844,9 +5851,17 @@ async function botAction(action, botId, event, silent = false) {
         await Promise.allSettled([refreshBots(), refreshPositions(), refreshSummary()]);
       } catch (_) {}
       delete pendingBotActions[botId];
+      if (btn && btn.isConnected && originalHtml !== null) {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+      }
     }, action === "stop" ? 1200 : 900);
   }).catch((error) => {
     delete pendingBotActions[botId];
+    if (btn && btn.isConnected && originalHtml !== null) {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
     if (!silent) {
       showToast(`${action} failed: ${error.message}`, "error");
     } else {
