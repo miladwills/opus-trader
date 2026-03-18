@@ -321,6 +321,67 @@ class Repository:
             for r in await cursor.fetchall()
         ]
 
+    async def get_agent_run_stats(self, agent_id: str, limit: int = 50) -> dict:
+        """Derive run statistics from recent agent_runs."""
+        cursor = await self._db.execute(
+            "SELECT status, started_at, finished_at FROM agent_runs "
+            "WHERE agent_id = ? ORDER BY started_at DESC LIMIT ?",
+            (agent_id, limit),
+        )
+        rows = await cursor.fetchall()
+        completed = 0
+        errors = 0
+        durations = []
+        for r in rows:
+            if r["status"] == "completed":
+                completed += 1
+            elif r["status"] == "error":
+                errors += 1
+            if r["started_at"] and r["finished_at"]:
+                durations.append(r["finished_at"] - r["started_at"])
+        avg_dur = sum(durations) / len(durations) if durations else None
+        return {
+            "total": len(rows),
+            "completed": completed,
+            "errors": errors,
+            "avg_duration_sec": round(avg_dur, 2) if avg_dur is not None else None,
+            "min_duration_sec": round(min(durations), 2) if durations else None,
+            "max_duration_sec": round(max(durations), 2) if durations else None,
+        }
+
+    async def get_last_successful_run(self, agent_id: str) -> dict | None:
+        cursor = await self._db.execute(
+            "SELECT * FROM agent_runs WHERE agent_id = ? AND status = 'completed' "
+            "ORDER BY finished_at DESC LIMIT 1",
+            (agent_id,),
+        )
+        r = await cursor.fetchone()
+        if not r:
+            return None
+        return {"id": r["id"], "agent_id": r["agent_id"], "started_at": r["started_at"],
+                "finished_at": r["finished_at"], "status": r["status"],
+                "result_summary": r["result_summary"], "error": r["error"]}
+
+    async def get_last_failed_run(self, agent_id: str) -> dict | None:
+        cursor = await self._db.execute(
+            "SELECT * FROM agent_runs WHERE agent_id = ? AND status = 'error' "
+            "ORDER BY finished_at DESC LIMIT 1",
+            (agent_id,),
+        )
+        r = await cursor.fetchone()
+        if not r:
+            return None
+        return {"id": r["id"], "agent_id": r["agent_id"], "started_at": r["started_at"],
+                "finished_at": r["finished_at"], "status": r["status"],
+                "result_summary": r["result_summary"], "error": r["error"]}
+
+    async def get_agent_related_proposals(self, agent_id: str, limit: int = 10) -> list[dict]:
+        cursor = await self._db.execute(
+            "SELECT * FROM proposals WHERE source_agent = ? ORDER BY created_at DESC LIMIT ?",
+            (agent_id, limit),
+        )
+        return [self._row_to_proposal_dict(r) for r in await cursor.fetchall()]
+
     # --- Agent activity ---
 
     async def record_activity(self, agent_id: str, event_type: str, summary: str, detail: dict | None = None):

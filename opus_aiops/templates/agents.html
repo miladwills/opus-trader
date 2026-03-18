@@ -55,6 +55,7 @@
             {% endif %}
             <button onclick="agentAction('{{ a.agent_id }}', 'run-once')" class="px-2.5 py-1 text-xs bg-slate-800 text-gray-400 rounded hover:bg-slate-700 border border-slate-700">Run Once</button>
             <button onclick="agentAction('{{ a.agent_id }}', 'restart')" class="px-2.5 py-1 text-xs bg-slate-800 text-gray-400 rounded hover:bg-slate-700 border border-slate-700">Restart</button>
+            <a href="/agents/{{ a.agent_id }}" class="px-2.5 py-1 text-xs bg-cyan-900/30 text-cyan-400 rounded hover:bg-cyan-900/60 border border-cyan-900/50">Details</a>
         </div>
     </div>
 
