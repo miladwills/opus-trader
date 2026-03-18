@@ -170,6 +170,7 @@ class BotStatusService:
         self.scanner_cache_ttl_seconds = max(int(scanner_cache_ttl_seconds or 0), 5)
         self._scanner_cache: Dict[str, Dict[str, Any]] = {}
         self._live_open_orders_cache: Dict[str, Dict[str, Any]] = {}
+        self._live_open_orders_all_cache: Dict[str, Any] = {}
         self._live_open_orders_cache_ttl_seconds = 5
         self._last_live_open_orders_diagnostics: Dict[str, Any] = {}
         self._runtime_positions_cache: Dict[str, Any] = {}
@@ -1565,8 +1566,11 @@ class BotStatusService:
             "stream_query_ms": 0.0,
             "rest_query_ms": 0.0,
             "fallback_reason": None,
+            "stream_handoff_reason": None,
             "stream_symbol_miss_count": 0,
             "matched_order_row_count": 0,
+            "all_orders_cache_hit_count": 0,
+            "all_orders_cache_age_ms": None,
         }
         if not symbols:
             diagnostics["path"] = "empty"
@@ -1591,6 +1595,35 @@ class BotStatusService:
             )
             self._last_live_open_orders_diagnostics = diagnostics
             return stream_summary
+
+        cached_order_rows, cached_age_ms = self._get_cached_live_all_order_rows()
+        if cached_order_rows is not None:
+            shaping_started = time.monotonic()
+            summary, grouped_rows_by_symbol, matched_order_row_count = (
+                self._group_and_summarize_order_rows_by_symbol(
+                    symbols=symbols,
+                    order_rows=cached_order_rows,
+                )
+            )
+            self._seed_live_open_orders_cache_from_symbol_rows(
+                symbols=symbols,
+                order_rows_by_symbol=grouped_rows_by_symbol,
+            )
+            diagnostics["order_row_count"] = len(cached_order_rows)
+            diagnostics["matched_order_row_count"] = matched_order_row_count
+            diagnostics["all_orders_cache_hit_count"] = 1
+            diagnostics["all_orders_cache_age_ms"] = cached_age_ms
+            diagnostics["shaping_ms"] = round(
+                max(time.monotonic() - shaping_started, 0.0) * 1000.0,
+                3,
+            )
+            diagnostics["path"] = "all_orders_cache"
+            diagnostics["total_ms"] = round(
+                max(time.monotonic() - started_mono, 0.0) * 1000.0,
+                3,
+            )
+            self._last_live_open_orders_diagnostics = diagnostics
+            return summary
 
         if client is not None and hasattr(client, "get_open_orders"):
             query_started = time.monotonic()
@@ -1619,6 +1652,7 @@ class BotStatusService:
                                 order_rows=order_rows,
                             )
                         )
+                        self._seed_live_open_orders_all_cache(order_rows)
                         self._seed_live_open_orders_cache_from_symbol_rows(
                             symbols=symbols,
                             order_rows_by_symbol=grouped_rows_by_symbol,
@@ -1720,6 +1754,7 @@ class BotStatusService:
                 diagnostics["stream_symbol_miss_count"] = int(
                     diagnostics.get("stream_symbol_miss_count") or 0
                 ) + 1
+                diagnostics["stream_handoff_reason"] = "stream_query_failed"
                 return None
             data = response.get("data", {}) or {}
             order_rows = data.get("list", []) if isinstance(data, dict) else data
@@ -1727,6 +1762,7 @@ class BotStatusService:
                 diagnostics["stream_symbol_miss_count"] = int(
                     diagnostics.get("stream_symbol_miss_count") or 0
                 ) + 1
+                diagnostics["stream_handoff_reason"] = "stream_invalid_payload"
                 return None
             normalized_rows = list(order_rows)
             order_rows_by_symbol[symbol] = normalized_rows
@@ -1762,6 +1798,28 @@ class BotStatusService:
                 "cached_at": cached_at,
                 "orders": list(order_rows_by_symbol.get(symbol) or []),
             }
+
+    def _seed_live_open_orders_all_cache(
+        self,
+        order_rows: List[Dict[str, Any]],
+    ) -> None:
+        self._live_open_orders_all_cache = {
+            "cached_at": time.monotonic(),
+            "orders": [dict(row) for row in list(order_rows or [])],
+        }
+
+    def _get_cached_live_all_order_rows(
+        self,
+    ) -> Tuple[Optional[List[Dict[str, Any]]], Optional[float]]:
+        cached = getattr(self, "_live_open_orders_all_cache", {}) or {}
+        cached_at = self._safe_float(cached.get("cached_at"), 0.0)
+        order_rows = cached.get("orders")
+        if cached_at <= 0.0 or not isinstance(order_rows, list):
+            return None, None
+        age_sec = max(time.monotonic() - cached_at, 0.0)
+        if age_sec >= self._live_open_orders_cache_ttl_seconds:
+            return None, None
+        return list(order_rows), round(age_sec * 1000.0, 3)
 
     @staticmethod
     def _group_and_summarize_order_rows_by_symbol(
