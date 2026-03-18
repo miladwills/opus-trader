@@ -1022,31 +1022,53 @@ class BybitStreamService:
             for topic in (topics or ())
         )
 
-    def get_dashboard_snapshot(self, symbols: Iterable[str]) -> Dict[str, Any]:
-        normalized_symbols = [
-            symbol for symbol in (self._normalize_symbol(s) for s in symbols) if symbol
-        ]
-        ticker_rows = self.get_ticker_rows(normalized_symbols)
+    def get_dashboard_snapshot(
+        self,
+        symbols: Iterable[str],
+        *,
+        include_health: bool = True,
+        symbols_are_normalized: bool = False,
+    ) -> Dict[str, Any]:
+        if symbols_are_normalized:
+            normalized_symbols = [
+                str(symbol).strip().upper()
+                for symbol in (symbols or [])
+                if str(symbol or "").strip()
+            ]
+        else:
+            normalized_symbols = [
+                symbol for symbol in (self._normalize_symbol(s) for s in symbols) if symbol
+            ]
         prices: Dict[str, Any] = {}
         price_received_at: Dict[str, float] = {}
-        for symbol in normalized_symbols:
-            ticker = ticker_rows.get(symbol)
-            if not ticker:
-                continue
-            prices[symbol] = {
-                "lastPrice": ticker.get("lastPrice"),
-                "bid1Price": ticker.get("bid1Price"),
-                "ask1Price": ticker.get("ask1Price"),
-            }
-            received_at = float(ticker.get("_received_at") or 0.0)
-            if received_at > 0:
+        missing_symbols: List[str] = []
+        topic_fresh = None
+        age_limit = self.ticker_max_age_sec
+        now_ts = time.time()
+        with self._state_lock:
+            if normalized_symbols:
+                last_message_at = self._topic_last_message_at.get("ticker", 0.0)
+                topic_fresh = (
+                    last_message_at > 0 and (now_ts - last_message_at) <= age_limit
+                )
+            for symbol in normalized_symbols:
+                cached = self._ticker_cache.get(symbol)
+                if not cached:
+                    missing_symbols.append(symbol)
+                    continue
+                received_at = float(cached.get("received_at") or 0.0)
+                if received_at <= 0 or (now_ts - received_at) > age_limit:
+                    missing_symbols.append(symbol)
+                    continue
+                ticker = cached.get("data") or {}
+                prices[symbol] = {
+                    "lastPrice": ticker.get("lastPrice"),
+                    "bid1Price": ticker.get("bid1Price"),
+                    "ask1Price": ticker.get("ask1Price"),
+                }
                 price_received_at[symbol] = received_at
-        missing_symbols = [
-            symbol for symbol in normalized_symbols if symbol not in ticker_rows
-        ]
-        topic_fresh = self.is_topic_fresh("ticker") if normalized_symbols else None
         return {
-            "health": self.get_health_snapshot(),
+            "health": self.get_health_snapshot() if include_health else {},
             "prices": prices,
             "symbols": normalized_symbols,
             "price_received_at": price_received_at,

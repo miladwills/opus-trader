@@ -220,6 +220,40 @@ def test_stream_service_maps_execution_order_link_id_from_order_stream():
     assert result["data"]["list"][0]["orderLinkId"] == "bot-slot-1"
 
 
+def test_stream_dashboard_snapshot_can_skip_health_and_use_normalized_symbols():
+    stream_service = BybitStreamService(
+        api_key="key",
+        api_secret="secret",
+        base_url="https://api.bybit.com",
+        owner_name="test",
+    )
+    now = time.time()
+    with stream_service._state_lock:
+        stream_service._ticker_cache["BTCUSDT"] = {
+            "data": {
+                "symbol": "BTCUSDT",
+                "lastPrice": "50000",
+                "bid1Price": "49999",
+                "ask1Price": "50001",
+            },
+            "received_at": now,
+        }
+        stream_service._topic_last_message_at["ticker"] = now
+
+    snapshot = stream_service.get_dashboard_snapshot(
+        ["BTCUSDT"],
+        include_health=False,
+        symbols_are_normalized=True,
+    )
+
+    assert snapshot["health"] == {}
+    assert snapshot["symbols"] == ["BTCUSDT"]
+    assert snapshot["fresh_symbol_count"] == 1
+    assert snapshot["missing_symbols"] == []
+    assert snapshot["ticker_topic_fresh"] is True
+    assert snapshot["prices"]["BTCUSDT"]["lastPrice"] == "50000"
+
+
 def test_stream_service_filters_closed_orders_from_open_order_snapshot():
     stream_service = BybitStreamService(
         api_key="key",

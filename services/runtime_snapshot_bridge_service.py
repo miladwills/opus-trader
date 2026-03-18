@@ -33,6 +33,13 @@ LIVE_POSITION_OWNER_STATUSES = {
 }
 
 
+def extract_market_symbol_bot(bot: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "symbol": bot.get("symbol"),
+        "status": bot.get("status"),
+    }
+
+
 class RuntimeSnapshotBridgeService:
     """Atomic JSON snapshot bridge between runner and app."""
 
@@ -169,6 +176,7 @@ class RuntimeSnapshotBridgeService:
         self._cached_bots_runtime_payload: Optional[Dict[str, Any]] = None
         self._cached_bots_list: Optional[List[Dict[str, Any]]] = None
         self._cached_bots_list_at: float = 0.0
+        self._last_market_symbol_diagnostics: Dict[str, Any] = {}
         self._last_full_enrich_at: float = 0.0
 
         # Background full-enrichment thread — runs independently so the fast
@@ -631,7 +639,9 @@ class RuntimeSnapshotBridgeService:
                 "market",
                 lambda: self._build_market_payload(
                     symbols=self._collect_market_symbols(),
-                    health=self._build_market_health(now_ts),
+                    health=dict(
+                        ((snapshot.get("meta") or {}).get("stream_health") or {})
+                    ),
                 ),
             )
             market_published_at = time.time()
@@ -1248,10 +1258,39 @@ class RuntimeSnapshotBridgeService:
         return bots
 
     def _collect_market_symbols(self) -> List[str]:
+        started_at = time.monotonic()
+        diagnostics: Dict[str, Any] = {
+            "path": "running_bots",
+            "symbol_count": 0,
+            "symbol_collection_ms": 0.0,
+            "bot_storage_cache_result_counts": {},
+            "bot_storage_phase_ms": {},
+            "bot_storage_lock_wait_ms": {},
+        }
         symbols = set()
         if self.bot_storage:
             try:
-                for bot in self._get_bots_cached():
+                with self.bot_storage.capture_read_diagnostics(
+                    "runtime_snapshot_bridge.market_symbols"
+                ) as storage_diag:
+                    bots = self.bot_storage.list_bots(
+                        source="runtime_bridge_market_symbols",
+                        projector=extract_market_symbol_bot,
+                        read_only_projected_cache=True,
+                    )
+                diagnostics["bot_storage_cache_result_counts"] = dict(
+                    storage_diag.get("cache_result_counts") or {}
+                )
+                diagnostics["bot_storage_phase_ms"] = {
+                    key: round(float(value or 0.0), 3)
+                    for key, value in (storage_diag.get("phase_ms") or {}).items()
+                }
+                diagnostics["bot_storage_lock_wait_ms"] = {
+                    key: round(float(value or 0.0), 3)
+                    for key, value in (storage_diag.get("lock_wait_ms") or {}).items()
+                }
+                diagnostics["bot_candidate_count"] = len(bots or [])
+                for bot in bots or []:
                     if bot.get("status") != "running":
                         continue
                     symbol = str(bot.get("symbol") or "").strip().upper()
@@ -1259,6 +1298,7 @@ class RuntimeSnapshotBridgeService:
                         continue
                     symbols.add(symbol)
             except Exception as exc:
+                diagnostics["bot_storage_error"] = str(exc)
                 logger.debug("Runtime snapshot bridge symbol collection failed: %s", exc)
 
         if not symbols and self.bot_status_service and hasattr(
@@ -1269,7 +1309,16 @@ class RuntimeSnapshotBridgeService:
             now = time.monotonic()
             cache = getattr(self, "_market_symbols_cache", None)
             if cache and (now - cache.get("at", 0)) < 30.0:
-                return list(cache.get("symbols", []))
+                cached_symbols = list(cache.get("symbols", []))
+                diagnostics["path"] = "positions_cache"
+                diagnostics["positions_cached"] = True
+                diagnostics["symbol_count"] = len(cached_symbols)
+                diagnostics["symbol_collection_ms"] = round(
+                    max(time.monotonic() - started_at, 0.0) * 1000.0,
+                    3,
+                )
+                self._last_market_symbol_diagnostics = diagnostics
+                return cached_symbols
             try:
                 positions_payload = self.bot_status_service.get_runtime_positions_payload(
                     skip_cache=False
@@ -1279,13 +1328,23 @@ class RuntimeSnapshotBridgeService:
                     if symbol:
                         symbols.add(symbol)
                 self._market_symbols_cache = {"symbols": sorted(symbols), "at": now}
+                diagnostics["path"] = "positions_payload"
+                diagnostics["positions_cached"] = False
             except Exception as exc:
+                diagnostics["positions_error"] = str(exc)
                 logger.debug(
                     "Runtime snapshot bridge position symbol collection failed: %s",
                     exc,
                 )
 
-        return sorted(symbols)
+        sorted_symbols = sorted(symbols)
+        diagnostics["symbol_count"] = len(sorted_symbols)
+        diagnostics["symbol_collection_ms"] = round(
+            max(time.monotonic() - started_at, 0.0) * 1000.0,
+            3,
+        )
+        self._last_market_symbol_diagnostics = diagnostics
+        return sorted_symbols
 
     def _build_market_payload(
         self,
@@ -1293,6 +1352,8 @@ class RuntimeSnapshotBridgeService:
         symbols: List[str],
         health: Dict[str, Any],
     ) -> Dict[str, Any]:
+        build_started = time.monotonic()
+        shaping_ms = 0.0
         prices = {}
         stale_data = False
         missing_symbols: List[str] = []
@@ -1300,9 +1361,27 @@ class RuntimeSnapshotBridgeService:
         requested_symbol_count = len(list(symbols or []))
         price_received_at: Dict[str, float] = {}
         ticker_topic_fresh: Optional[bool] = None
+        runtime_diagnostics = self._copy(
+            getattr(self, "_last_market_symbol_diagnostics", None) or {}
+        )
+        runtime_diagnostics["symbol_source"] = runtime_diagnostics.get("path")
+        runtime_diagnostics["path"] = "stream_dashboard_snapshot"
+        runtime_diagnostics["health_source"] = (
+            "meta_stream_health" if health else "stream_snapshot"
+        )
+        snapshot_fetch_started = time.monotonic()
         if self.stream_service and hasattr(self.stream_service, "get_dashboard_snapshot"):
             try:
-                snapshot = self.stream_service.get_dashboard_snapshot(symbols) or {}
+                snapshot = self.stream_service.get_dashboard_snapshot(
+                    symbols,
+                    include_health=False,
+                    symbols_are_normalized=True,
+                ) or {}
+                runtime_diagnostics["snapshot_fetch_ms"] = round(
+                    max(time.monotonic() - snapshot_fetch_started, 0.0) * 1000.0,
+                    3,
+                )
+                shaping_started = time.monotonic()
                 prices = dict(snapshot.get("prices") or {})
                 stale_data = bool(snapshot.get("stale_data"))
                 missing_symbols = list(snapshot.get("missing_symbols") or [])
@@ -1320,9 +1399,34 @@ class RuntimeSnapshotBridgeService:
                     )
                 if not health:
                     health = dict(snapshot.get("health") or {})
+                    runtime_diagnostics["health_source"] = "stream_snapshot"
+                shaping_ms = round(
+                    max(time.monotonic() - shaping_started, 0.0) * 1000.0,
+                    3,
+                )
             except Exception as exc:
                 logger.debug("Runtime snapshot bridge market snapshot failed: %s", exc)
                 stale_data = True
+                runtime_diagnostics["path"] = "stream_dashboard_snapshot_error"
+                runtime_diagnostics["error"] = str(exc)
+                runtime_diagnostics["snapshot_fetch_ms"] = round(
+                    max(time.monotonic() - snapshot_fetch_started, 0.0) * 1000.0,
+                    3,
+                )
+        else:
+            runtime_diagnostics["path"] = "stream_service_unavailable"
+            runtime_diagnostics["snapshot_fetch_ms"] = round(
+                max(time.monotonic() - snapshot_fetch_started, 0.0) * 1000.0,
+                3,
+            )
+        runtime_diagnostics["shaping_ms"] = shaping_ms
+        runtime_diagnostics["requested_symbol_count"] = requested_symbol_count
+        runtime_diagnostics["fresh_symbol_count"] = fresh_symbol_count
+        runtime_diagnostics["missing_symbol_count"] = len(missing_symbols)
+        runtime_diagnostics["total_ms"] = round(
+            max(time.monotonic() - build_started, 0.0) * 1000.0,
+            3,
+        )
         return {
             "health": health,
             "prices": prices,
@@ -1333,6 +1437,7 @@ class RuntimeSnapshotBridgeService:
             "requested_symbol_count": requested_symbol_count,
             "price_received_at": price_received_at,
             "ticker_topic_fresh": ticker_topic_fresh,
+            "market_runtime_diagnostics": runtime_diagnostics,
         }
 
     def _get_cached_account_snapshot(self, *, force: bool) -> Dict[str, Any]:

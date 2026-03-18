@@ -10,7 +10,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 
-from services.runtime_snapshot_bridge_service import RuntimeSnapshotBridgeService
+from services.runtime_snapshot_bridge_service import (
+    RuntimeSnapshotBridgeService,
+    extract_market_symbol_bot,
+)
 
 
 def test_read_section_exposes_snapshot_ownership_metadata(tmp_path):
@@ -594,3 +597,106 @@ def test_open_orders_payload_includes_runtime_diagnostics_when_available(tmp_pat
     assert payload["symbols"]["BTCUSDT"]["entry_order_count"] == 1
     assert payload["open_orders_runtime_diagnostics"]["path"] == "all_orders_stream"
     assert payload["open_orders_runtime_diagnostics"]["symbol_count"] == 1
+
+
+def test_collect_market_symbols_uses_projected_bot_storage_path(tmp_path):
+    bridge = RuntimeSnapshotBridgeService(file_path=str(tmp_path / "runtime_snapshot_bridge.json"))
+
+    class FakeCapture:
+        def __init__(self, trace):
+            self.trace = trace
+
+        def __enter__(self):
+            return self.trace
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeBotStorage:
+        def __init__(self):
+            self.calls = []
+
+        def capture_read_diagnostics(self, label):
+            return FakeCapture(
+                {
+                    "cache_result_counts": {"hit": 1},
+                    "phase_ms": {"projection_cache_lookup_ms": 0.05},
+                    "lock_wait_ms": {"cache_lock": 0.0},
+                }
+            )
+
+        def list_bots(self, **kwargs):
+            self.calls.append(kwargs)
+            return [
+                {"symbol": "BTCUSDT", "status": "running"},
+                {"symbol": "ETHUSDT", "status": "paused"},
+                {"symbol": "AUTO-PILOT", "status": "running"},
+            ]
+
+    bridge.bot_storage = FakeBotStorage()
+
+    symbols = bridge._collect_market_symbols()
+
+    assert symbols == ["BTCUSDT"]
+    assert bridge.bot_storage.calls == [
+        {
+            "source": "runtime_bridge_market_symbols",
+            "projector": extract_market_symbol_bot,
+            "read_only_projected_cache": True,
+        }
+    ]
+    diagnostics = bridge._last_market_symbol_diagnostics
+    assert diagnostics["path"] == "running_bots"
+    assert diagnostics["symbol_count"] == 1
+    assert diagnostics["bot_storage_cache_result_counts"] == {"hit": 1}
+
+
+def test_market_payload_includes_runtime_diagnostics_and_reuses_meta_health(tmp_path):
+    bridge = RuntimeSnapshotBridgeService(file_path=str(tmp_path / "runtime_snapshot_bridge.json"))
+    bridge._last_market_symbol_diagnostics = {
+        "path": "running_bots",
+        "symbol_collection_ms": 1.25,
+        "symbol_count": 1,
+    }
+
+    class FakeStreamService:
+        def __init__(self):
+            self.calls = []
+
+        def get_dashboard_snapshot(self, symbols, **kwargs):
+            self.calls.append({"symbols": list(symbols or []), **kwargs})
+            return {
+                "prices": {"BTCUSDT": {"lastPrice": "100.0"}},
+                "missing_symbols": [],
+                "fresh_symbol_count": 1,
+                "requested_symbol_count": 1,
+                "price_received_at": {"BTCUSDT": 1234.5},
+                "ticker_topic_fresh": True,
+                "stale_data": False,
+                "health": {"transport": "stream"},
+            }
+
+    bridge.stream_service = FakeStreamService()
+
+    payload = bridge._build_market_payload(
+        symbols=["BTCUSDT"],
+        health={"transport": "meta_stream"},
+    )
+
+    diagnostics = payload["market_runtime_diagnostics"]
+    assert payload["health"] == {"transport": "meta_stream"}
+    assert diagnostics["path"] == "stream_dashboard_snapshot"
+    assert diagnostics["symbol_source"] == "running_bots"
+    assert diagnostics["health_source"] == "meta_stream_health"
+    assert diagnostics["requested_symbol_count"] == 1
+    assert diagnostics["fresh_symbol_count"] == 1
+    assert diagnostics["missing_symbol_count"] == 0
+    assert diagnostics["snapshot_fetch_ms"] >= 0.0
+    assert diagnostics["shaping_ms"] >= 0.0
+    assert bridge.stream_service.calls == [
+        {
+            "symbols": ["BTCUSDT"],
+            "include_health": False,
+            "symbols_are_normalized": True,
+        }
+    ]
