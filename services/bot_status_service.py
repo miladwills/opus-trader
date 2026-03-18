@@ -1568,6 +1568,9 @@ class BotStatusService:
             "fallback_reason": None,
             "stream_handoff_reason": None,
             "stream_symbol_miss_count": 0,
+            "stream_miss_reason": None,
+            "stream_miss_symbol": None,
+            "stream_miss_state": None,
             "matched_order_row_count": 0,
             "all_orders_cache_hit_count": 0,
             "all_orders_cache_age_ms": None,
@@ -1787,7 +1790,12 @@ class BotStatusService:
                 diagnostics["stream_symbol_miss_count"] = int(
                     diagnostics.get("stream_symbol_miss_count") or 0
                 ) + 1
-                diagnostics["stream_handoff_reason"] = "stream_query_failed"
+                self._record_open_order_stream_miss(
+                    diagnostics=diagnostics,
+                    stream_service=stream_service,
+                    symbol=symbol,
+                    default_reason="stream_query_failed",
+                )
                 return None
             data = response.get("data", {}) or {}
             order_rows = data.get("list", []) if isinstance(data, dict) else data
@@ -1795,7 +1803,12 @@ class BotStatusService:
                 diagnostics["stream_symbol_miss_count"] = int(
                     diagnostics.get("stream_symbol_miss_count") or 0
                 ) + 1
-                diagnostics["stream_handoff_reason"] = "stream_invalid_payload"
+                self._record_open_order_stream_miss(
+                    diagnostics=diagnostics,
+                    stream_service=stream_service,
+                    symbol=symbol,
+                    default_reason="stream_invalid_payload",
+                )
                 return None
             normalized_rows = list(order_rows)
             order_rows_by_symbol[symbol] = normalized_rows
@@ -1818,6 +1831,47 @@ class BotStatusService:
             3,
         )
         return summary
+
+    @staticmethod
+    def _record_open_order_stream_miss(
+        *,
+        diagnostics: Dict[str, Any],
+        stream_service: Any,
+        symbol: str,
+        default_reason: str,
+    ) -> None:
+        diagnostics["stream_handoff_reason"] = default_reason
+        diagnostics["stream_miss_symbol"] = symbol
+        helper = getattr(stream_service, "get_open_orders_stream_diagnostics", None)
+        if not callable(helper):
+            diagnostics["stream_miss_reason"] = default_reason
+            return
+        try:
+            miss_state = helper(symbol=symbol)
+        except Exception:
+            diagnostics["stream_miss_reason"] = default_reason
+            return
+        if not isinstance(miss_state, dict):
+            diagnostics["stream_miss_reason"] = default_reason
+            return
+        diagnostics["stream_miss_reason"] = str(
+            miss_state.get("miss_reason") or default_reason
+        )
+        diagnostics["stream_miss_state"] = {
+            "symbol": miss_state.get("symbol"),
+            "topic_fresh": miss_state.get("topic_fresh"),
+            "topic_age_sec": miss_state.get("topic_age_sec"),
+            "topic_max_age_sec": miss_state.get("topic_max_age_sec"),
+            "topic_source": miss_state.get("topic_source"),
+            "topic_bootstrapped": miss_state.get("topic_bootstrapped"),
+            "private_connected": miss_state.get("private_connected"),
+            "private_authenticated": miss_state.get("private_authenticated"),
+            "epoch_matches": miss_state.get("epoch_matches"),
+            "all_dirty": miss_state.get("all_dirty"),
+            "symbol_dirty": miss_state.get("symbol_dirty"),
+            "symbol_bootstrapped": miss_state.get("symbol_bootstrapped"),
+            "cache_order_count": miss_state.get("cache_order_count"),
+        }
 
     def _seed_live_open_orders_cache_from_symbol_rows(
         self,

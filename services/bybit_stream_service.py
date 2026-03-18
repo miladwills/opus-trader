@@ -556,6 +556,89 @@ class BybitStreamService:
             max_age_sec=max_age_sec,
         )
 
+    def get_open_orders_stream_diagnostics(
+        self,
+        symbol: Optional[str] = None,
+        max_age_sec: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        age_limit = (
+            self.private_max_age_sec
+            if max_age_sec is None
+            else max(float(max_age_sec or 0.0), 0.1)
+        )
+        normalized = self._normalize_symbol(symbol) if symbol else None
+        now = time.time()
+        with self._state_lock:
+            state = dict(self._private_topic_state.get("order") or {})
+            private_connected = bool(self._private_connected)
+            private_authenticated = bool(self._private_authenticated)
+            topic_bootstrapped = bool(state.get("bootstrapped"))
+            epoch_matches = int(state.get("epoch") or 0) == int(
+                self._private_reconnect_epoch or 0
+            )
+            last_update_at = float(state.get("last_update_at") or 0.0)
+            topic_age_sec = (now - last_update_at) if last_update_at > 0 else None
+            topic_fresh = bool(
+                private_connected
+                and private_authenticated
+                and topic_bootstrapped
+                and epoch_matches
+                and topic_age_sec is not None
+                and topic_age_sec <= age_limit
+            )
+            if normalized:
+                symbol_bootstrapped = normalized in self._open_orders_bootstrapped_symbols
+                symbol_dirty = normalized in self._open_orders_dirty_symbols
+                cache_order_count = len(self._open_order_cache.get(normalized, {}))
+            else:
+                symbol_bootstrapped = bool(self._open_orders_bootstrapped_all)
+                symbol_dirty = bool(self._open_orders_dirty_all)
+                cache_order_count = sum(
+                    len(rows_by_id) for rows_by_id in self._open_order_cache.values()
+                )
+            all_dirty = bool(self._open_orders_dirty_all)
+
+        miss_reason = None
+        if not private_connected:
+            miss_reason = "private_not_connected"
+        elif not private_authenticated:
+            miss_reason = "private_not_authenticated"
+        elif not topic_bootstrapped:
+            miss_reason = "order_topic_not_bootstrapped"
+        elif not epoch_matches:
+            miss_reason = "order_topic_epoch_mismatch"
+        elif topic_age_sec is None or topic_age_sec > age_limit:
+            miss_reason = "order_topic_stale"
+        elif normalized:
+            if all_dirty:
+                miss_reason = "all_orders_dirty"
+            elif symbol_dirty:
+                miss_reason = "symbol_dirty"
+            elif not symbol_bootstrapped:
+                miss_reason = "symbol_not_bootstrapped"
+        else:
+            if all_dirty:
+                miss_reason = "all_orders_dirty"
+            elif not symbol_bootstrapped:
+                miss_reason = "all_orders_not_bootstrapped"
+
+        return {
+            "symbol": normalized,
+            "topic_fresh": topic_fresh,
+            "topic_age_sec": round(topic_age_sec, 3) if topic_age_sec is not None else None,
+            "topic_max_age_sec": age_limit,
+            "topic_source": state.get("source"),
+            "topic_bootstrapped": topic_bootstrapped,
+            "private_connected": private_connected,
+            "private_authenticated": private_authenticated,
+            "epoch_matches": epoch_matches,
+            "all_dirty": all_dirty,
+            "symbol_dirty": symbol_dirty,
+            "symbol_bootstrapped": symbol_bootstrapped,
+            "cache_order_count": cache_order_count,
+            "miss_reason": miss_reason,
+        }
+
     def mark_open_orders_dirty(self, symbol: Optional[str] = None) -> None:
         normalized = self._normalize_symbol(symbol) if symbol else None
         with self._state_lock:

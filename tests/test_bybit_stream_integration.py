@@ -352,6 +352,34 @@ def test_stream_service_requires_bootstrapped_open_orders_before_using_order_cac
     assert result["data"]["list"][0]["orderId"] == "open-1"
 
 
+def test_stream_service_reports_open_order_stream_miss_reason_for_stale_topic():
+    stream_service = BybitStreamService(
+        api_key="key",
+        api_secret="secret",
+        base_url="https://api.bybit.com",
+        owner_name="test",
+    )
+
+    with stream_service._state_lock:
+        stream_service._private_connected = True
+        stream_service._private_authenticated = True
+        state = stream_service._private_topic_state["order"]
+        state["bootstrapped"] = True
+        state["epoch"] = stream_service._private_reconnect_epoch
+        state["source"] = "rest_fallback"
+        state["last_update_at"] = time.time() - 12.0
+        stream_service._open_orders_bootstrapped_symbols.add("BTCUSDT")
+
+    diagnostics = stream_service.get_open_orders_stream_diagnostics(symbol="BTCUSDT")
+
+    assert diagnostics["miss_reason"] == "order_topic_stale"
+    assert diagnostics["topic_fresh"] is False
+    assert diagnostics["topic_bootstrapped"] is True
+    assert diagnostics["symbol_bootstrapped"] is True
+    assert diagnostics["topic_age_sec"] is not None
+    assert diagnostics["topic_age_sec"] > diagnostics["topic_max_age_sec"]
+
+
 def test_stream_service_ingests_kline_rows_and_emits_confirmed_event():
     stream_service = BybitStreamService(
         api_key="key",

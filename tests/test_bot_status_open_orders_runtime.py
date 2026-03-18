@@ -20,6 +20,22 @@ def test_get_live_open_order_summary_by_symbol_uses_all_orders_fast_path():
     svc = _make_service()
     svc.position_service.client.stream_service = MagicMock()
     svc.position_service.client.stream_service.get_open_orders_fresh.return_value = None
+    svc.position_service.client.stream_service.get_open_orders_stream_diagnostics.return_value = {
+        "symbol": "BTCUSDT",
+        "topic_fresh": False,
+        "topic_age_sec": 12.4,
+        "topic_max_age_sec": 5.0,
+        "topic_source": "rest_fallback",
+        "topic_bootstrapped": True,
+        "private_connected": True,
+        "private_authenticated": True,
+        "epoch_matches": True,
+        "all_dirty": False,
+        "symbol_dirty": False,
+        "symbol_bootstrapped": True,
+        "cache_order_count": 0,
+        "miss_reason": "order_topic_stale",
+    }
     svc.position_service.client.get_open_orders.return_value = {
         "success": True,
         "data": {
@@ -67,6 +83,10 @@ def test_get_live_open_order_summary_by_symbol_uses_all_orders_fast_path():
     assert diagnostics["shaping_ms"] >= 0.0
     assert diagnostics["matched_order_row_count"] == 1
     assert diagnostics["stream_handoff_reason"] == "stream_query_failed"
+    assert diagnostics["stream_miss_reason"] == "order_topic_stale"
+    assert diagnostics["stream_miss_symbol"] == "BTCUSDT"
+    assert diagnostics["stream_miss_state"]["topic_fresh"] is False
+    assert diagnostics["stream_miss_state"]["topic_age_sec"] == 12.4
     assert svc._live_open_orders_cache["BTCUSDT"]["orders"] == [
         {
             "symbol": "BTCUSDT",
