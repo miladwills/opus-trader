@@ -209,6 +209,6 @@
     <script src="./assets/js/multi-sort.js?v=20260314"></script>
     <script src="./assets/js/filters.js?v=20260314"></script>
     <script src="./assets/js/presets.js?v=20260314c"></script>
-    <script src="./assets/js/app.js?v=20260314"></script>
+    <script src="./assets/js/app.js?v=20260318"></script>
 </body>
 </html>

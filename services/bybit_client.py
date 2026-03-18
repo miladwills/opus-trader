@@ -343,7 +343,7 @@ class BybitClient:
             ws_resp = stream.send_trade_command(
                 op="order.create",
                 args=[body],
-                timeout_sec=3.0,
+                timeout_sec=5.0,
             )
             ws_error = ws_resp.get("error")
             # Pre-send failures: safe to fall back to REST (order was never sent)

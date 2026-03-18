@@ -5,6 +5,7 @@ Scans symbols to find candidates suitable for neutral grid trading.
 """
 
 from typing import List, Dict, Any, Optional, Set
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import copy
 import logging
 import math
@@ -1358,259 +1359,235 @@ class NeutralScannerService:
         )
         btc_closes = [c["close"] for c in btc_candles] if btc_candles else []
 
-        for symbol in scan_symbols:
+        def _scan_one_symbol(symbol):
+            """Scan a single symbol — designed for concurrent execution."""
+            prediction_score = None
+            prediction_direction = None
             try:
-                # Run prediction first so the largest 15m OHLCV pull can warm the
-                # indicator cache for the lighter indicator and correlation reads.
-                prediction_score = None
-                prediction_direction = None
-                try:
-                    prediction = self.prediction_service.predict(symbol, timeframe="15")
-                    if prediction:
-                        prediction_score = prediction.score
-                        prediction_direction = prediction.direction
-                except Exception:
-                    pass
+                prediction = self.prediction_service.predict(symbol, timeframe="15")
+                if prediction:
+                    prediction_score = prediction.score
+                    prediction_direction = prediction.direction
+            except Exception:
+                pass
 
-                # Compute indicators
-                indicators = self.indicator_service.compute_indicators(
-                    symbol=symbol, interval="15", limit=200
+            indicators = self.indicator_service.compute_indicators(
+                symbol=symbol, interval="15", limit=200
+            )
+
+            ticker_data = self._get_ticker_data(
+                symbol,
+                ticker_snapshot=ticker_snapshot,
+            )
+            volume_24h_usdt = ticker_data["volume_24h_usdt"]
+            funding_rate = ticker_data["funding_rate"]
+            price_change_24h_pct = ticker_data["price_change_24h_pct"]
+            volume = volume_24h_usdt
+
+            regime_info = self.entry_filter_service.classify_regime(
+                symbol=symbol,
+                indicators=indicators,
+                turnover_24h_usdt=volume_24h_usdt,
+            )
+            regime = regime_info["regime"]
+
+            rsi = indicators.get("rsi")
+            adx = indicators.get("adx")
+            atr_pct = indicators.get("atr_pct")
+            bbw_pct = indicators.get("bbw_pct")
+            close = indicators.get("close")
+            price_velocity = indicators.get("price_velocity")
+
+            btc_correlation = None
+            if btc_closes and symbol != "BTCUSDT":
+                sym_candles = self.indicator_service.get_ohlcv(
+                    symbol, interval="15", limit=200
                 )
-
-                # Reuse the same per-scan ticker row for regime, scoring, and output.
-                ticker_data = self._get_ticker_data(
-                    symbol,
-                    ticker_snapshot=ticker_snapshot,
+                sym_closes = (
+                    [c["close"] for c in sym_candles] if sym_candles else []
                 )
-                volume_24h_usdt = ticker_data["volume_24h_usdt"]
-                funding_rate = ticker_data["funding_rate"]
-                price_change_24h_pct = ticker_data["price_change_24h_pct"]
-                volume = volume_24h_usdt  # Use USDT volume for scoring
-
-                # Classify regime
-                regime_info = self.entry_filter_service.classify_regime(
-                    symbol=symbol,
-                    indicators=indicators,
-                    turnover_24h_usdt=volume_24h_usdt,
-                )
-                regime = regime_info["regime"]
-
-                # Extract indicator values
-                rsi = indicators.get("rsi")
-                adx = indicators.get("adx")
-                atr_pct = indicators.get("atr_pct")
-                bbw_pct = indicators.get("bbw_pct")
-                close = indicators.get("close")
-                price_velocity = indicators.get("price_velocity")
-
-                # Compute correlation with BTC
-                btc_correlation = None
-                if btc_closes and symbol != "BTCUSDT":
-                    # Reuse the same limit as indicators (200) to maximize cache hits
-                    sym_candles = self.indicator_service.get_ohlcv(
-                        symbol, interval="15", limit=200
+                if sym_closes:
+                    btc_correlation = self._compute_correlation(
+                        btc_closes, sym_closes
                     )
-                    sym_closes = (
-                        [c["close"] for c in sym_candles] if sym_candles else []
+
+            htf_adx = None
+            try:
+                from config.strategy_config import (
+                    AUTO_PILOT_HTF_CONFIRMATION_ENABLED,
+                    AUTO_PILOT_HTF_INTERVAL,
+                    AUTO_PILOT_HTF_TREND_ADX_THRESHOLD,
+                    AUTO_PILOT_HTF_FLAT_ADX_THRESHOLD,
+                )
+                if AUTO_PILOT_HTF_CONFIRMATION_ENABLED:
+                    htf_ind = self.indicator_service.compute_indicators(
+                        symbol=symbol, interval=AUTO_PILOT_HTF_INTERVAL, limit=50
                     )
-                    if sym_closes:
-                        btc_correlation = self._compute_correlation(
-                            btc_closes, sym_closes
-                        )
+                    htf_adx = htf_ind.get("adx")
+            except Exception:
+                pass
 
-                # Multi-timeframe confirmation (1h ADX)
-                htf_adx = None
-                try:
-                    from config.strategy_config import (
-                        AUTO_PILOT_HTF_CONFIRMATION_ENABLED,
-                        AUTO_PILOT_HTF_INTERVAL,
-                        AUTO_PILOT_HTF_TREND_ADX_THRESHOLD,
-                        AUTO_PILOT_HTF_FLAT_ADX_THRESHOLD,
+            speed = self._classify_speed(atr_pct, bbw_pct)
+
+            neutral_score = self._compute_neutral_score(
+                regime=regime, adx=adx, rsi=rsi, bbw_pct=bbw_pct, volume=volume
+            )
+
+            if htf_adx is not None:
+                if regime == "choppy" and htf_adx > AUTO_PILOT_HTF_TREND_ADX_THRESHOLD:
+                    neutral_score -= 15
+                elif htf_adx < AUTO_PILOT_HTF_FLAT_ADX_THRESHOLD:
+                    neutral_score += 5
+
+            smart_data = self._calculate_smart_momentum_score(
+                adx=adx,
+                rsi=rsi,
+                volume=volume,
+                price_velocity=price_velocity,
+                atr_pct=atr_pct,
+                trend=self._detect_trend_direction(indicators),
+            )
+
+            trend = self._detect_trend_direction(indicators)
+
+            is_neutral = (
+                regime == "choppy" and neutral_score >= self.NEUTRAL_SCORE_THRESHOLD
+            )
+
+            mode_rec = self._recommend_mode(
+                neutral_score=neutral_score,
+                regime=regime,
+                trend=trend,
+                rsi=rsi,
+                adx=adx,
+                atr_pct=atr_pct,
+                speed=speed,
+                prediction_score=prediction_score,
+                prediction_direction=prediction_direction,
+                price_change_24h_pct=price_change_24h_pct,
+                funding_rate=funding_rate,
+            )
+            recommended_mode = mode_rec["recommended_mode"]
+            recommended_range_mode = self._recommend_range_mode(
+                recommended_mode=recommended_mode,
+                atr_pct=atr_pct,
+                bbw_pct=bbw_pct,
+                btc_correlation=btc_correlation,
+                trend=trend,
+                adx=adx,
+                prediction_score=prediction_score,
+                prediction_direction=prediction_direction,
+            )
+
+            if recommended_mode == "neutral" and regime == "too_strong":
+                recommended_mode = "scalp_pnl"
+                recommended_range_mode = "dynamic"
+                mode_rec["mode_reasoning"] = self._append_reason(
+                    mode_rec.get("mode_reasoning", ""),
+                    "Regime too_strong - neutral unsafe, using scalp_pnl instead",
+                )
+            elif recommended_mode == "neutral":
+                neutral_variant = self._select_neutral_variant(adx, atr_pct)
+                if neutral_variant == "classic":
+                    recommended_mode = "neutral_classic_bybit"
+                    recommended_range_mode = "fixed"
+                    mode_rec["mode_reasoning"] = self._append_reason(
+                        mode_rec.get("mode_reasoning", ""),
+                        "Auto-neutral: low ADX/ATR -> neutral classic (fixed)",
                     )
-                    if AUTO_PILOT_HTF_CONFIRMATION_ENABLED:
-                        htf_ind = self.indicator_service.compute_indicators(
-                            symbol=symbol, interval=AUTO_PILOT_HTF_INTERVAL, limit=50
-                        )
-                        htf_adx = htf_ind.get("adx")
-                except Exception:
-                    pass
-
-                # Classify speed
-                speed = self._classify_speed(atr_pct, bbw_pct)
-
-                # Compute neutral score
-                neutral_score = self._compute_neutral_score(
-                    regime=regime, adx=adx, rsi=rsi, bbw_pct=bbw_pct, volume=volume
-                )
-
-                # HTF score adjustments
-                if htf_adx is not None:
-                    if regime == "choppy" and htf_adx > AUTO_PILOT_HTF_TREND_ADX_THRESHOLD:
-                        neutral_score -= 15  # 15m choppy but 1h trending — hidden trend
-                    elif htf_adx < AUTO_PILOT_HTF_FLAT_ADX_THRESHOLD:
-                        neutral_score += 5  # Both timeframes agree: truly flat
-
-                # Compute Smart Momentum Score
-                smart_data = self._calculate_smart_momentum_score(
-                    adx=adx,
-                    rsi=rsi,
-                    volume=volume,
-                    price_velocity=price_velocity,
-                    atr_pct=atr_pct,
-                    trend=self._detect_trend_direction(indicators),
-                )
-
-                # Detect trend direction (uptrend/downtrend/neutral)
-                trend = self._detect_trend_direction(indicators)
-
-                # Determine if neutral candidate
-                is_neutral = (
-                    regime == "choppy" and neutral_score >= self.NEUTRAL_SCORE_THRESHOLD
-                )
-
-                # Compute recommendations
-                mode_rec = self._recommend_mode(
-                    neutral_score=neutral_score,
-                    regime=regime,
-                    trend=trend,
-                    rsi=rsi,
-                    adx=adx,
-                    atr_pct=atr_pct,
-                    speed=speed,
-                    prediction_score=prediction_score,
-                    prediction_direction=prediction_direction,
-                    price_change_24h_pct=price_change_24h_pct,
-                    funding_rate=funding_rate,
-                )
-                recommended_mode = mode_rec["recommended_mode"]
-                recommended_range_mode = self._recommend_range_mode(
-                    recommended_mode=recommended_mode,
-                    atr_pct=atr_pct,
-                    bbw_pct=bbw_pct,
-                    btc_correlation=btc_correlation,
-                    trend=trend,
-                    adx=adx,
-                    prediction_score=prediction_score,
-                    prediction_direction=prediction_direction,
-                )
-
-                # If neutral is recommended, pick classic vs dynamic using auto-neutral thresholds
-                # BUT: if regime is "too_strong", neutral grids are dangerous — use scalp instead
-                if recommended_mode == "neutral" and regime == "too_strong":
-                    # Conflict detection downgraded directional→neutral, but regime is dangerous
-                    recommended_mode = "scalp_pnl"
+                elif neutral_variant == "dynamic":
                     recommended_range_mode = "dynamic"
                     mode_rec["mode_reasoning"] = self._append_reason(
                         mode_rec.get("mode_reasoning", ""),
-                        "Regime too_strong - neutral unsafe, using scalp_pnl instead",
-                    )
-                elif recommended_mode == "neutral":
-                    neutral_variant = self._select_neutral_variant(adx, atr_pct)
-                    if neutral_variant == "classic":
-                        recommended_mode = "neutral_classic_bybit"
-                        recommended_range_mode = "fixed"
-                        mode_rec["mode_reasoning"] = self._append_reason(
-                            mode_rec.get("mode_reasoning", ""),
-                            "Auto-neutral: low ADX/ATR -> neutral classic (fixed)",
-                        )
-                    elif neutral_variant == "dynamic":
-                        recommended_range_mode = "dynamic"
-                        mode_rec["mode_reasoning"] = self._append_reason(
-                            mode_rec.get("mode_reasoning", ""),
-                            "Auto-neutral: elevated ADX/ATR -> neutral dynamic",
-                        )
-
-                # Build suggested range after mode recommendation so the bot form
-                # matches the width floor the runtime will actually use.
-                suggested_range = {"lower": 0.0, "upper": 0.0, "width_pct": 0.0}
-                if close and close > 0:
-                    range_settings = cfg.get_dynamic_range_settings(recommended_mode)
-                    suggested_range = self.range_engine.build_neutral_range(
-                        last_price=close,
-                        atr_pct=atr_pct,
-                        bbw_pct=bbw_pct,
-                        width_floor_pct=range_settings.get("width_floor_pct"),
+                        "Auto-neutral: elevated ADX/ATR -> neutral dynamic",
                     )
 
-                recommended_profile = self._recommend_profile(
-                    volume_24h_usdt=volume_24h_usdt,
+            suggested_range = {"lower": 0.0, "upper": 0.0, "width_pct": 0.0}
+            if close and close > 0:
+                range_settings = cfg.get_dynamic_range_settings(recommended_mode)
+                suggested_range = self.range_engine.build_neutral_range(
+                    last_price=close,
                     atr_pct=atr_pct,
-                    speed=speed,
-                )
-                recommended_leverage = self._recommend_leverage(atr_pct, speed)
-                recommended_grid_levels = self._recommend_grid_levels(
-                    suggested_range.get("width_pct", 0.06)
+                    bbw_pct=bbw_pct,
+                    width_floor_pct=range_settings.get("width_floor_pct"),
                 )
 
-                # Compute entry zone analysis
-                entry_zone = self._compute_entry_zone_analysis(
-                    adx=adx,
-                    rsi=rsi,
-                    atr_pct=atr_pct,
-                    regime=regime,
-                    trend=trend,
-                    speed=speed,
-                    neutral_score=neutral_score,
-                    smart_score=smart_data["score"],
-                    volume_24h_usdt=volume_24h_usdt,
-                    funding_rate=funding_rate,
-                    price_change_24h_pct=price_change_24h_pct,
-                    recommended_mode=recommended_mode,
-                    recommended_range_mode=recommended_range_mode,
-                    recommended_profile=recommended_profile,
-                    recommended_leverage=recommended_leverage,
-                    recommended_grid_levels=recommended_grid_levels,
-                )
+            recommended_profile = self._recommend_profile(
+                volume_24h_usdt=volume_24h_usdt,
+                atr_pct=atr_pct,
+                speed=speed,
+            )
+            recommended_leverage = self._recommend_leverage(atr_pct, speed)
+            recommended_grid_levels = self._recommend_grid_levels(
+                suggested_range.get("width_pct", 0.06)
+            )
 
-                result = {
-                    "symbol": symbol,
-                    "rsi": rsi,
-                    "adx": adx,
-                    "atr_pct": round(atr_pct, 6) if atr_pct is not None else None,
-                    "bbw_pct": round(bbw_pct, 4) if bbw_pct is not None else None,
-                    "volume_24h_usdt": volume_24h_usdt,  # 24hr volume in USDT
-                    "funding_rate": funding_rate,
-                    "price_change_24h_pct": price_change_24h_pct,
-                    "btc_correlation": btc_correlation,
-                    "htf_adx": round(htf_adx, 2) if htf_adx is not None else None,
-                    "neutral_score": neutral_score,
-                    "regime": regime,
-                    "trend": trend,  # uptrend/downtrend/neutral
-                    "suggested_range": suggested_range,
-                    "speed": speed,
-                    "price_velocity": round(price_velocity, 6)
-                    if price_velocity is not None
-                    else None,
-                    "velocity_display": self._format_velocity(price_velocity),
-                    "neutral": is_neutral,
-                    # Recommendations
-                    "recommended_mode": recommended_mode,
-                    "recommended_range_mode": recommended_range_mode,
-                    "recommended_profile": recommended_profile,
-                    "recommended_leverage": recommended_leverage,
-                    "recommended_grid_levels": recommended_grid_levels,
-                    "mode_confidence": mode_rec["mode_confidence"],
-                    "mode_reasoning": mode_rec["mode_reasoning"],
-                    "prediction_score": round(prediction_score, 1)
-                    if prediction_score is not None
-                    else None,
-                    "prediction_direction": prediction_direction,
-                    # Smart Momentum Data
-                    "smart_score": smart_data["score"],
-                    "smart_details": smart_data["details"],
-                    "smart_pump_risk": smart_data["pump_risk"],
-                    # Entry Zone Analysis
-                    "entry_zone": entry_zone,
-                }
+            entry_zone = self._compute_entry_zone_analysis(
+                adx=adx,
+                rsi=rsi,
+                atr_pct=atr_pct,
+                regime=regime,
+                trend=trend,
+                speed=speed,
+                neutral_score=neutral_score,
+                smart_score=smart_data["score"],
+                volume_24h_usdt=volume_24h_usdt,
+                funding_rate=funding_rate,
+                price_change_24h_pct=price_change_24h_pct,
+                recommended_mode=recommended_mode,
+                recommended_range_mode=recommended_range_mode,
+                recommended_profile=recommended_profile,
+                recommended_leverage=recommended_leverage,
+                recommended_grid_levels=recommended_grid_levels,
+            )
 
-                results.append(result)
+            return {
+                "symbol": symbol,
+                "rsi": rsi,
+                "adx": adx,
+                "atr_pct": round(atr_pct, 6) if atr_pct is not None else None,
+                "bbw_pct": round(bbw_pct, 4) if bbw_pct is not None else None,
+                "volume_24h_usdt": volume_24h_usdt,
+                "funding_rate": funding_rate,
+                "price_change_24h_pct": price_change_24h_pct,
+                "btc_correlation": btc_correlation,
+                "htf_adx": round(htf_adx, 2) if htf_adx is not None else None,
+                "neutral_score": neutral_score,
+                "regime": regime,
+                "trend": trend,
+                "suggested_range": suggested_range,
+                "speed": speed,
+                "price_velocity": round(price_velocity, 6)
+                if price_velocity is not None
+                else None,
+                "velocity_display": self._format_velocity(price_velocity),
+                "neutral": is_neutral,
+                "recommended_mode": recommended_mode,
+                "recommended_range_mode": recommended_range_mode,
+                "recommended_profile": recommended_profile,
+                "recommended_leverage": recommended_leverage,
+                "recommended_grid_levels": recommended_grid_levels,
+                "mode_confidence": mode_rec["mode_confidence"],
+                "mode_reasoning": mode_rec["mode_reasoning"],
+                "prediction_score": round(prediction_score, 1)
+                if prediction_score is not None
+                else None,
+                "prediction_direction": prediction_direction,
+                "smart_score": smart_data["score"],
+                "smart_details": smart_data["details"],
+                "smart_pump_risk": smart_data["pump_risk"],
+                "entry_zone": entry_zone,
+            }
 
-            except Exception as scan_err:
-                # Log first few failures for debugging
-                if len(results) == 0:
-                    import logging as _log
-                    _log.getLogger(__name__).debug(f"[Scanner] {symbol} scan failed: {scan_err}")
-                continue
+        # Scan symbols concurrently (each symbol makes independent API calls)
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {executor.submit(_scan_one_symbol, sym): sym for sym in scan_symbols}
+            for future in as_completed(futures):
+                sym = futures[future]
+                try:
+                    results.append(future.result())
+                except Exception as scan_err:
+                    logger.debug("[Scanner] %s scan failed: %s", sym, scan_err)
 
         # Sort by neutral_score descending
         results.sort(key=lambda x: x["neutral_score"], reverse=True)

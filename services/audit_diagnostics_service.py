@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timezone
 from hashlib import sha1
 from pathlib import Path
-from tempfile import gettempdir
+from tempfile import gettempdir, mkstemp
 from typing import Any, Dict, List, Optional
 
 from config.strategy_config import (
@@ -52,6 +52,19 @@ class AuditDiagnosticsService:
                 json.dumps(self._default_review_snapshot(), ensure_ascii=False, sort_keys=True),
                 encoding="utf-8",
             )
+
+    @staticmethod
+    def _write_json_atomic(path, data):
+        """Write JSON atomically using tempfile + os.replace (POSIX rename)."""
+        fd, temp_path = mkstemp(dir=os.path.dirname(str(path)), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(data, handle, ensure_ascii=False, sort_keys=True)
+            os.replace(temp_path, str(path))
+        except Exception:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            raise
 
     @staticmethod
     def _resolve_file_path(file_path: str) -> Path:
@@ -713,8 +726,7 @@ class AuditDiagnosticsService:
         payload = self._default_review_snapshot()
         payload["updated_at"] = summary.get("updated_at")
         payload["bots"] = dict(summary.get("bot_review_snapshot") or {})
-        with open(self.review_path, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, sort_keys=True)
+        self._write_json_atomic(self.review_path, payload)
 
     def _resolve_health_status(self, health: Dict[str, Any]) -> str:
         cap_hits = self._recent_count(health, "position_cap_hit")
@@ -1074,8 +1086,7 @@ class AuditDiagnosticsService:
             with file_lock(self.summary_lock_path, exclusive=True):
                 summary = self._read_summary()
                 summary = self._apply_event_to_summary(summary, record)
-                with open(self.summary_path, "w", encoding="utf-8") as handle:
-                    json.dump(summary, handle, ensure_ascii=False, sort_keys=True)
+                self._write_json_atomic(self.summary_path, summary)
                 self._write_review_snapshot(summary)
         except Exception as exc:
             logger.warning("Failed to update audit diagnostics summary: %s", exc)

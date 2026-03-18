@@ -1110,6 +1110,7 @@ def test_build_preview_disabled_stopped_payload_keeps_setup_fields_in_sync():
                 "setup_ready_reason": "good_continuation",
             }
 
+    # When preview is enabled, deferred bots compute full analysis
     service = make_service()
     service.entry_readiness_service = FakeEntryReadinessService()
     service.stopped_preview_enabled = True
@@ -1118,10 +1119,24 @@ def test_build_preview_disabled_stopped_payload_keeps_setup_fields_in_sync():
         {"id": "bot-stop-2", "symbol": "ETHUSDT", "mode": "long", "status": "stopped"}
     )
 
-    assert payload["analysis_ready_status"] == "watch"
-    assert payload["setup_ready_status"] == "watch"
-    assert payload["setup_ready_reason"] == "preview_disabled"
-    assert payload["readiness_source_kind"] == "stopped_preview_unavailable"
+    assert payload["analysis_ready_status"] == "ready"
+    assert payload["setup_ready_status"] == "ready"
+    assert payload["setup_ready_reason"] == "good_continuation"
+    assert payload["readiness_source_kind"] == "stopped_preview_deferred"
+
+    # When preview is disabled, fields are overwritten to watch/preview_disabled
+    service2 = make_service()
+    service2.entry_readiness_service = FakeEntryReadinessService()
+    service2.stopped_preview_enabled = False
+
+    payload2 = service2._build_preview_disabled_stopped_payload(
+        {"id": "bot-stop-3", "symbol": "ETHUSDT", "mode": "long", "status": "stopped"}
+    )
+
+    assert payload2["analysis_ready_status"] == "watch"
+    assert payload2["setup_ready_status"] == "watch"
+    assert payload2["setup_ready_reason"] == "preview_disabled"
+    assert payload2["readiness_source_kind"] == "stopped_preview_unavailable"
 
 
 def test_enrich_bot_uses_symbol_wide_pnl_and_investment_based_tp_progress():

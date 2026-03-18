@@ -3071,6 +3071,37 @@
     .bot-ops-kpi--poor-score .bot-ops-kpi__value { color: rgb(148, 163, 184); }
     .bot-ops-kpi--poor-score .bot-ops-kpi__hint { color: rgb(100, 116, 139); }
 
+    /* Motion KPI */
+    .bot-ops-kpi--motion { min-width: 4.5rem; }
+    .bot-ops-kpi__bar { width: 100%; height: 3px; border-radius: 1.5px; background: rgba(51, 65, 85, 0.5); overflow: hidden; margin-top: 2px; }
+    .bot-ops-kpi__bar-fill { height: 100%; border-radius: 1.5px; transition: width 0.6s ease; background: rgb(148, 163, 184); }
+
+    /* Motion tint variants */
+    .bot-ops-kpi--motion-healthy { border-color: rgba(52, 211, 153, 0.3); background: rgba(52, 211, 153, 0.06); }
+    .bot-ops-kpi--motion-healthy .bot-ops-kpi__value { color: rgb(52, 211, 153); }
+    .bot-ops-kpi--motion-healthy .bot-ops-kpi__hint { color: rgb(110, 231, 183); }
+    .bot-ops-kpi--motion-healthy .bot-ops-kpi__bar-fill { background: rgb(52, 211, 153); }
+
+    .bot-ops-kpi--motion-fast { border-color: rgba(34, 211, 238, 0.3); background: rgba(34, 211, 238, 0.06); }
+    .bot-ops-kpi--motion-fast .bot-ops-kpi__value { color: rgb(34, 211, 238); }
+    .bot-ops-kpi--motion-fast .bot-ops-kpi__hint { color: rgb(103, 232, 249); }
+    .bot-ops-kpi--motion-fast .bot-ops-kpi__bar-fill { background: rgb(34, 211, 238); }
+
+    .bot-ops-kpi--motion-slow { border-color: rgba(245, 158, 11, 0.3); background: rgba(245, 158, 11, 0.06); }
+    .bot-ops-kpi--motion-slow .bot-ops-kpi__value { color: rgb(245, 158, 11); }
+    .bot-ops-kpi--motion-slow .bot-ops-kpi__hint { color: rgb(251, 191, 36); }
+    .bot-ops-kpi--motion-slow .bot-ops-kpi__bar-fill { background: rgb(245, 158, 11); }
+
+    .bot-ops-kpi--motion-chaotic { border-color: rgba(244, 63, 94, 0.3); background: rgba(244, 63, 94, 0.06); }
+    .bot-ops-kpi--motion-chaotic .bot-ops-kpi__value { color: rgb(244, 63, 94); }
+    .bot-ops-kpi--motion-chaotic .bot-ops-kpi__hint { color: rgb(251, 113, 133); }
+    .bot-ops-kpi--motion-chaotic .bot-ops-kpi__bar-fill { background: rgb(244, 63, 94); }
+
+    .bot-ops-kpi--motion-dead { border-color: rgba(100, 116, 139, 0.3); background: rgba(100, 116, 139, 0.06); }
+    .bot-ops-kpi--motion-dead .bot-ops-kpi__value { color: rgb(100, 116, 139); }
+    .bot-ops-kpi--motion-dead .bot-ops-kpi__hint { color: rgb(71, 85, 105); }
+    .bot-ops-kpi--motion-dead .bot-ops-kpi__bar-fill { background: rgb(100, 116, 139); }
+
     /* Muted KPI (TP) — lower visual priority */
     .bot-ops-kpi--muted .bot-ops-kpi__value {
       color: rgb(203 213 225);

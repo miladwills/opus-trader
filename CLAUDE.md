@@ -63,10 +63,13 @@
 
 ## Delivery Rules
 - Never work directly on `main`. Always create a task branch (`fix/`, `feature/`, `chore/`, `audit/`).
+- **MANDATORY BACKUP: After EVERY set of changes, create a ZIP backup BEFORE committing.** ZIP the entire project excluding: `venv/`, `aiops-venv/`, `watchdog-venv/`, `.cache/`, `.npm/`, `.local/`, `node_modules/`, `__pycache__/`, `*.zip`, `storage/runner.log.*`, and other heavy/junk folders. Name: `opus-trader-backup-YYYY-MM-DD-HHMMSS.zip`. This is non-negotiable.
+- **Always commit to a NEW branch.** Never reuse old branches for new work.
 - After any meaningful patch: restart `app.py` and `runner.py`, verify final PIDs, commit and push the task branch to GitHub.
 - Update `CLAUDE.me` with a structured entry before committing.
-- GitHub branch push is the canonical deliverable. ZIP only if explicitly requested.
+- GitHub branch push is the canonical deliverable.
 - Never push `.env`, `venv`, logs, or other sensitive/heavy artifacts (covered by `.gitignore`).
+- **NEVER run `git stash`, `git checkout --`, `git restore`, `git reset --hard`, or ANY destructive git command.** The working tree is sacred. Use `git show HEAD:<path>` or worktrees to compare against baseline.
 
 ## Do Not Break
 - Reduce-only exits and cleanup truth

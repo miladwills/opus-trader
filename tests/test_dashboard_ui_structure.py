@@ -99,6 +99,66 @@ def test_ready_counts_and_bot_actions_remain_wired():
     assert "limitedCount" in js
 
 
+def test_active_bots_score_kpi_surfaces_unavailable_readiness_states():
+    js = (ROOT / "static" / "js" / "app_lf.js").read_text()
+
+    assert 'if (reason === "preview_disabled") return "Off";' in js
+    assert 'if (reason === "preview_limited") return "Lim";' in js
+    assert 'if (reason.includes("stale")) return "Stale";' in js
+    assert 'if (reason === "preview_disabled") return "Preview";' in js
+    assert 'if (reason === "preview_limited") return "Limited";' in js
+    assert 'if (reason.includes("stale")) return "Snapshot";' in js
+
+
+def test_stopped_preview_score_shows_preview_band_not_live_band():
+    """Stopped-preview bots with valid scores show 'Preview' band, not Strong/Good/etc."""
+    js = (ROOT / "static" / "js" / "app_lf.js").read_text()
+
+    # _bandDisplay checks readiness_source_kind for stopped preview distinction
+    assert 'sourceKind.startsWith("stopped_preview")' in js
+    assert 'sourceKind === "stopped_preview_stale"' in js
+    # Fresh/deferred stopped previews show "Preview" as band
+    assert 'return "Preview";' in js
+    # Stale stopped previews show "Stale" as band
+    assert 'return "Stale";' in js
+
+
+def test_stopped_preview_pending_shows_pending_not_off():
+    """Unavailable stopped previews show PENDING, not PREVIEW OFF."""
+    js = (ROOT / "static" / "js" / "app_lf.js").read_text()
+
+    # _scoreDisplay returns "..." for unavailable/placeholder sources
+    assert 'sourceKind === "stopped_preview_unavailable"' in js
+    assert 'sourceKind === "stopped_placeholder"' in js
+    assert 'return "...";' in js
+    # _bandDisplay returns "Pending" for unavailable sources
+    assert 'return "Pending";' in js
+    # shortLabels includes preview_pending
+    assert 'preview_pending: "⏳ PENDING"' in js
+    # entryReadinessBadge overrides preview_disabled label for pending sources
+    assert 'label = shortLabels.preview_pending' in js
+
+
+def test_stopped_preview_freshness_meta_handles_deferred_source():
+    """getReadinessFreshnessMeta handles stopped_preview_deferred source kind."""
+    js = (ROOT / "static" / "js" / "app_lf.js").read_text()
+
+    assert 'sourceKind === "stopped_preview_deferred"' in js
+    # Deferred and unavailable show distinct freshness labels
+    assert '"Preview Pending"' in js
+
+
+def test_running_bot_score_display_unaffected():
+    """Running bots still show numeric score with Strong/Good/Caution/Poor band."""
+    js = (ROOT / "static" / "js" / "app_lf.js").read_text()
+
+    # Band thresholds for live scores remain
+    assert 'if (score >= 72) return "Strong";' in js
+    assert 'if (score >= 60) return "Good";' in js
+    assert 'if (score >= 50) return "Caution";' in js
+    assert 'return "Poor";' in js
+
+
 def test_active_bots_toolbar_and_bot_forms_expose_clear_and_save_start_controls():
     template = (ROOT / "templates" / "dashboard.html").read_text()
     js = (ROOT / "static" / "js" / "app_lf.js").read_text()

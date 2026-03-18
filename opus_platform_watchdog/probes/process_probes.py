@@ -80,20 +80,27 @@ class SystemResourcesProbe(BaseProbe):
             detail["disk_free_gb"] = round(free_bytes / (1024**3), 1)
             detail["disk_used_pct"] = round((1 - free_bytes / total_bytes) * 100, 1) if total_bytes else 0
 
-            # CPU usage from /proc/stat (simple instant snapshot)
+            # CPU usage from /proc/stat (two-sample delta for %)
             with open("/proc/stat") as f:
-                cpu_line = f.readline().split()
-            # cpu_line: cpu user nice system idle iowait irq softirq
-            idle = int(cpu_line[4])
-            total = sum(int(x) for x in cpu_line[1:])
-            detail["cpu_idle_jiffies"] = idle
-            detail["cpu_total_jiffies"] = total
+                c1 = f.readline().split()
+            idle1 = int(c1[4])
+            total1 = sum(int(x) for x in c1[1:])
+            await asyncio.sleep(0.25)
+            with open("/proc/stat") as f:
+                c2 = f.readline().split()
+            idle2 = int(c2[4])
+            total2 = sum(int(x) for x in c2[1:])
+            d_total = total2 - total1
+            d_idle = idle2 - idle1
+            detail["cpu_used_pct"] = round((1 - d_idle / d_total) * 100, 1) if d_total else 0
+            detail["cpu_idle_jiffies"] = idle2
+            detail["cpu_total_jiffies"] = total2
 
             latency = (time.monotonic() - t0) * 1000
-            # Health based on memory and disk
-            if detail["mem_used_pct"] > 95 or detail["disk_used_pct"] > 95:
+            # Health based on CPU, memory and disk
+            if detail["mem_used_pct"] > 95 or detail["disk_used_pct"] > 95 or detail["cpu_used_pct"] > 95:
                 status = "down"
-            elif detail["mem_used_pct"] > 85 or detail["disk_used_pct"] > 85:
+            elif detail["mem_used_pct"] > 85 or detail["disk_used_pct"] > 85 or detail["cpu_used_pct"] > 90:
                 status = "degraded"
             else:
                 status = "ok"

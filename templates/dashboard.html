@@ -83,10 +83,26 @@
           <span class="hidden sm:inline">Analytics</span>
         </button>
         <a href="https://trading-watchdog.madowlab.online/" target="_blank" rel="noopener noreferrer"
-          class="px-2 py-1 text-xs font-medium rounded bg-amber-600 hover:bg-amber-500 text-white transition flex items-center"
-          title="Open Trading Watchdog in a new tab">
+          class="relative px-2 py-1 text-xs font-medium rounded bg-amber-600 hover:bg-amber-500 text-white transition flex items-center"
+          title="Open Trading Watchdog in a new tab"
+          id="trading-watchdog-link">
+          <span id="trading-health-badge"
+            class="absolute -top-2 -right-2 min-w-[20px] h-5 px-1 rounded-full text-[10px] font-bold leading-5 text-center text-white bg-slate-500 shadow-lg border border-slate-900/50 hidden">
+            --
+          </span>
           <span class="sm:mr-1">🔍</span>
-          <span class="hidden sm:inline">Watchdog</span>
+          <span class="hidden sm:inline">Trading</span>
+        </a>
+        <a href="https://watchdog-platform.madowlab.online/" target="_blank" rel="noopener noreferrer"
+          class="relative px-2 py-1 text-xs font-medium rounded bg-cyan-600 hover:bg-cyan-500 text-white transition flex items-center"
+          title="Open Platform Watchdog in a new tab"
+          id="platform-watchdog-link">
+          <span id="platform-health-badge"
+            class="absolute -top-2 -right-2 min-w-[20px] h-5 px-1 rounded-full text-[10px] font-bold leading-5 text-center text-white bg-slate-500 shadow-lg border border-slate-900/50 hidden">
+            --
+          </span>
+          <span class="sm:mr-1">🛡️</span>
+          <span class="hidden sm:inline">Platform</span>
         </a>
         <a href="https://aiops.madowlab.online/overview" target="_blank" rel="noopener noreferrer"
           class="px-2 py-1 text-xs font-medium rounded bg-purple-600 hover:bg-purple-500 text-white transition flex items-center"
@@ -295,6 +311,7 @@
             <button onclick="filterBotList('watch')" class="bot-filter-chip lower-toolbar-chip text-amber-100" data-filter="watch">Watch <strong id="active-bots-watch">0</strong></button>
             <button onclick="filterBotList('blocked')" class="bot-filter-chip lower-toolbar-chip text-rose-100" data-filter="blocked">Blocked <strong id="active-bots-blocked">0</strong></button>
             <button onclick="filterBotList('limited')" class="bot-filter-chip lower-toolbar-chip text-slate-300" data-filter="limited">Preview/Stale <strong id="active-bots-limited">0</strong></button>
+            <button onclick="filterBotList('autopilot')" class="bot-filter-chip lower-toolbar-chip text-cyan-100" data-filter="autopilot">🚀 AI PILOT <strong id="active-bots-autopilot">0</strong></button>
             <button onclick="filterBotList('recent_stopped')" class="bot-filter-chip lower-toolbar-chip text-slate-400" data-filter="recent_stopped">Recent Stops <strong id="active-bots-recent-stopped">0</strong></button>
           </div>
         </div>
@@ -2357,7 +2374,7 @@
     window.__DASHBOARD_PRIMARY_SCRIPT__ = "app_lf";
   </script>
   <script src="{{ url_for('static', filename='js/app_v5.min.js') }}?v=20260317bridge"></script>
-  <script src="{{ url_for('static', filename='js/app_lf.min.js') }}?v=20260317bridge"></script>
+  <script src="{{ url_for('static', filename='js/app_lf.min.js') }}?v=20260319scanfix"></script>
 </body>
 
 </html>

@@ -79,7 +79,7 @@ class IndicatorService:
             return cached.get("data", [])
 
         best_cached = None
-        for (c_sym, c_int, c_lim), c_val in self._ohlcv_cache.items():
+        for (c_sym, c_int, c_lim), c_val in list(self._ohlcv_cache.items()):
             if c_sym == symbol and c_int == interval and c_lim >= limit:
                 if now - c_val.get("ts", 0) <= cache_ttl:
                     if best_cached is None or c_lim < best_cached[0]:
@@ -296,7 +296,7 @@ class IndicatorService:
         # 2. Smart reuse: Any valid larger limit for this (symbol, interval)
         # provides the same latest-candle indicators.
         best_cached = None
-        for (c_sym, c_int, c_lim), c_val in self._indicator_cache.items():
+        for (c_sym, c_int, c_lim), c_val in list(self._indicator_cache.items()):
             if c_sym == symbol and c_int == normalized_interval and c_lim >= limit:
                 if now - c_val.get("ts", 0) <= cache_ttl:
                     if best_cached is None or c_lim < best_cached[0]:

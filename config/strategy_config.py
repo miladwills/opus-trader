@@ -1030,9 +1030,9 @@ ENTRY_GATE_FAST_CANDLE_LIMIT = 300  # 300×5m = 25h lookback (matches 100×15m)
 # Dashboard/live preview behavior
 ENTRY_READINESS_LIVE_PREVIEW_ENABLED = False  # Opt-in live preview for non-active bots
 ENTRY_READINESS_STOPPED_PREVIEW_ENABLED = True  # Runner-bounded analysis preview for stopped bots
-ENTRY_READINESS_STOPPED_PREVIEW_MAX_BOTS = 2  # Cap preview refreshes per cycle (was 6 — too many API calls)
-ENTRY_READINESS_STOPPED_PREVIEW_TTL_SEC = 60  # Fresh stopped-bot analysis cache lifetime (was 30 — refresh less often)
-ENTRY_READINESS_STOPPED_PREVIEW_STALE_SEC = 300  # Stopped-bot analysis becomes stale after this (was 120)
+ENTRY_READINESS_STOPPED_PREVIEW_MAX_BOTS = 20  # Cap preview refreshes per cycle (widened from 2 to cover all realistic bot counts)
+ENTRY_READINESS_STOPPED_PREVIEW_TTL_SEC = 120  # Fresh stopped-bot analysis cache lifetime (widened from 60 — reduce refresh frequency)
+ENTRY_READINESS_STOPPED_PREVIEW_STALE_SEC = 1800  # Stopped-bot analysis becomes stale after this (widened from 300 — keep visible 30 min)
 ENTRY_READINESS_STRONG_DIRECTIONAL_MODE_FIT_MIN = 2.5  # Strong Enter-now label requires aligned directional mode fit
 ENTRY_READINESS_STRONG_CONTINUATION_PROMOTION_ENABLED = True  # Enabled: promote only a narrow strong continuation subset earlier
 ENTRY_READINESS_STRONG_CONTINUATION_SCORE_MIN = 74.0  # Require stronger-than-baseline quality before early continuation promotion
@@ -1955,7 +1955,7 @@ AUTO_PILOT_UNIVERSE_MODE = AUTO_PILOT_UNIVERSE_MODE_DEFAULT_SAFE
 AUTO_PILOT_STRONG_FILTERS_ENABLED = True
 AUTO_PILOT_EXCLUDE_INNOVATION_SYMBOLS = True
 AUTO_PILOT_EXCLUDE_NEW_LISTINGS_ENABLED = True
-AUTO_PILOT_NEW_LISTING_MIN_DAYS = 30
+AUTO_PILOT_NEW_LISTING_MIN_DAYS = 45  # was 30 — longer seasoning period to avoid pump-prone new coins
 AUTO_PILOT_MAX_SCAN_SYMBOLS = 80  # was 60 — wider scan for faster movers
 AUTO_PILOT_SYMBOL_BLACKLIST = (
     "BTCUSDT",
@@ -1969,15 +1969,22 @@ AUTO_PILOT_SYMBOL_NAME_BLACKLIST_PATTERNS = (
     r"^1000[A-Z0-9]+USDT$",
     r"^1000000[A-Z0-9]+USDT$",
     r"^(?:BANANAS?|BROCCOLI|FART|TRUMP|MELANIA|MOODENG|PNUT|MUBARAK)[A-Z0-9]*USDT$",
+    r"^(?:DOGE|SHIB|PEPE|FLOKI|BONK|WIF|BOME|MEW|NEIRO|BABYDOGE|ELON|MYRO|SAMO)[A-Z0-9]*USDT$",
+    r"^(?:LADYS|TURBO|AIDOGE|BOB|TOSHI|WOJAK|BRETT|POPCAT|SUNDOG|MAGA|GROK)[A-Z0-9]*USDT$",
+    r"^(?:SLERF|BOOK|SILLY|TREMP|BODEN|FIGHT|HAWK|MOTHER|DADDY|BEER|CAT)[A-Z0-9]*USDT$",
 )
-AUTO_PILOT_MIN_24H_TURNOVER_USDT = 5_000_000  # Was 10M — expanded to include mid-cap gems
+AUTO_PILOT_MIN_24H_TURNOVER_USDT = 8_000_000  # was 5M — raised to filter thin/manipulable coins
 AUTO_PILOT_MIN_24H_VOLUME = 0
-AUTO_PILOT_MIN_OPEN_INTEREST_USDT = 500_000
+AUTO_PILOT_MIN_OPEN_INTEREST_USDT = 1_000_000  # was 500K — stronger liquidity floor
 AUTO_PILOT_VOLATILITY_CAP_ENABLED = True
 AUTO_PILOT_MIN_ATR_PCT = 0.01  # 1.0% minimum — reject dead-slow coins
-AUTO_PILOT_MAX_ATR_PCT = 0.08  # was 0.05 — allow faster movers
-AUTO_PILOT_MAX_INTRADAY_MOVE_PCT = 0.15  # was 0.18 — tighten pump guard
-AUTO_PILOT_MAX_PRICE_VELOCITY_PER_HOUR = 0.05  # was 0.03 — widen velocity cap
+AUTO_PILOT_MAX_ATR_PCT = 0.06  # was 0.08 — tighter volatility ceiling
+AUTO_PILOT_MAX_INTRADAY_MOVE_PCT = 0.12  # was 0.15 — stricter pump guard
+AUTO_PILOT_MAX_PRICE_VELOCITY_PER_HOUR = 0.035  # was 0.05 — tighter rapid-move guard
+# Pump-and-dump detection
+AUTO_PILOT_PUMP_DUMP_GUARD_ENABLED = True
+AUTO_PILOT_MAX_TURNOVER_OI_RATIO = 15.0  # Turnover/OI > 15x = speculative frenzy
+AUTO_PILOT_MAX_PUMP_24H_PCT = 0.10  # Block coins that pumped >10% in 24h (directional, not abs)
 # Optional aggressive mode for explicit high-risk Auto-Pilot coverage.
 # This does not affect the default production-safe universe unless selected.
 AUTO_PILOT_AGGRESSIVE_FULL_STRONG_FILTERS_ENABLED = True
@@ -1995,6 +2002,9 @@ AUTO_PILOT_AGGRESSIVE_FULL_MIN_ATR_PCT = 0.008  # 0.8% min for aggressive mode
 AUTO_PILOT_AGGRESSIVE_FULL_MAX_ATR_PCT = 0.12
 AUTO_PILOT_AGGRESSIVE_FULL_MAX_INTRADAY_MOVE_PCT = 0.40
 AUTO_PILOT_AGGRESSIVE_FULL_MAX_PRICE_VELOCITY_PER_HOUR = 0.10
+AUTO_PILOT_AGGRESSIVE_FULL_PUMP_DUMP_GUARD_ENABLED = True
+AUTO_PILOT_AGGRESSIVE_FULL_MAX_TURNOVER_OI_RATIO = 30.0
+AUTO_PILOT_AGGRESSIVE_FULL_MAX_PUMP_24H_PCT = 0.25
 AUTO_PILOT_CANDIDATE_CACHE_ENABLED = True
 AUTO_PILOT_CANDIDATE_CACHE_REFRESH_SECONDS = 180
 AUTO_PILOT_CANDIDATE_CACHE_MAX_ITEMS = 12
@@ -2020,6 +2030,11 @@ AUTO_PILOT_UNIVERSE_MOMENTUM_SORT_WEIGHT = 0.35  # 35% momentum, 65% turnover
 # Pending rotation timeout (prevents infinite stuck on losing coin)
 AUTO_PILOT_PENDING_ROTATION_TIMEOUT_SEC = 1800  # 30 min max wait for position to flatten
 AUTO_PILOT_IDLE_NO_FILL_ROTATION_SECONDS = 600  # 10 min with no fills triggers rotation
+AUTO_PILOT_FORCED_ROTATION_BACKOFF_SECONDS = 60  # Cooldown after forced rotation blocked by opening guard
+
+# Emergency-stop rotation cooldown
+AUTO_PILOT_ESTOP_ROTATION_COOLDOWN_SECONDS = 3600   # 1h cooldown after estop
+AUTO_PILOT_ROTATION_COOLDOWN_STALE_SECONDS = 86400   # 24h max TTL for cooldown entries
 
 # Multi-timeframe confirmation
 AUTO_PILOT_HTF_CONFIRMATION_ENABLED = True

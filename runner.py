@@ -385,6 +385,135 @@ def _cancel_orders_on_error(grid_bot_service, bot: dict, symbol: str) -> None:
         bot["exit_orders_open"] = 0
 
 
+_AUTO_RESUME_CHECK_STATUSES = {"stopped", "error"}
+_last_auto_resume_check_ts = 0.0
+_AUTO_RESUME_INTERVAL_SEC = 30.0
+
+
+def _auto_resume_exposed_bots(grid_bot_service, bot_storage, bots: list[dict]) -> list[dict]:
+    """Auto-resume a stopped/error bot that has open positions or orders.
+
+    Safety rules:
+    - Never resume risk_stopped bots (stopped for a safety reason)
+    - Only resume ONE bot per symbol (most recent started_at wins)
+    - Skip symbols that already have a running bot managing them
+    """
+    global _last_auto_resume_check_ts
+    now = time.time()
+    if now - _last_auto_resume_check_ts < _AUTO_RESUME_INTERVAL_SEC:
+        return bots
+    _last_auto_resume_check_ts = now
+
+    client = getattr(grid_bot_service, "client", None)
+    if not client:
+        return bots
+
+    # Build set of symbols already managed by a running/active bot
+    active_symbols = set()
+    for bot in bots:
+        status = str(bot.get("status") or "").strip().lower()
+        if status in {"running", "stop_cleanup_pending", "recovering"}:
+            sym = (bot.get("symbol") or "").upper()
+            if sym:
+                active_symbols.add(sym)
+
+    # Collect candidates — only stopped/error, NOT risk_stopped
+    candidates = []
+    for bot in bots:
+        status = str(bot.get("status") or "").strip().lower()
+        if status in _AUTO_RESUME_CHECK_STATUSES:
+            sym = (bot.get("symbol") or "").upper()
+            if sym and sym not in active_symbols:
+                candidates.append(bot)
+
+    if not candidates:
+        return bots
+
+    # Deduplicate: only keep ONE bot per symbol (most recently started)
+    best_per_symbol: dict[str, dict] = {}
+    for bot in candidates:
+        sym = (bot.get("symbol") or "").upper()
+        if not sym:
+            continue
+        existing = best_per_symbol.get(sym)
+        if existing is None:
+            best_per_symbol[sym] = bot
+        else:
+            bot_started = str(bot.get("started_at") or "")
+            existing_started = str(existing.get("started_at") or "")
+            if bot_started > existing_started:
+                best_per_symbol[sym] = bot
+
+    candidates = list(best_per_symbol.values())
+    if not candidates:
+        return bots
+
+    # Batch fetch all positions (single API call)
+    symbols_with_position = set()
+    try:
+        pos_resp = client.get_positions(skip_cache=True)
+        if pos_resp.get("success"):
+            pos_list = (
+                (pos_resp.get("result", {}) or pos_resp.get("data", {})).get("list", []) or []
+            )
+            for p in pos_list:
+                sym = (p.get("symbol") or "").upper()
+                if sym and float(p.get("size", 0)) > 0:
+                    symbols_with_position.add(sym)
+    except Exception as exc:
+        logging.warning("Auto-resume position check failed: %s", exc)
+        return bots
+
+    resumed_any = False
+    for bot in candidates:
+        symbol = (bot.get("symbol") or "").upper()
+        if not symbol:
+            continue
+        bot_id = str(bot.get("id") or "")[:8]
+        has_exposure = symbol in symbols_with_position
+
+        # If no position, check for open orders
+        if not has_exposure:
+            try:
+                ord_resp = client.get_open_orders(symbol=symbol, skip_cache=True)
+                if ord_resp.get("success"):
+                    orders = ((ord_resp.get("data", {}) or {}).get("list", []) or [])
+                    has_exposure = len(orders) > 0
+            except Exception:
+                pass
+
+        if not has_exposure:
+            continue
+
+        old_status = bot.get("status")
+        bot["status"] = "running"
+        bot["last_error"] = None
+        bot["error_code"] = None
+        bot["last_warning"] = (
+            f"Auto-resumed: exchange has unmanaged positions/orders (was {old_status})"
+        )
+        bot["_auto_resumed_from_exchange_exposure"] = True
+        # Bump control_version so bot_storage accepts the status change
+        bot["control_version"] = int(bot.get("control_version") or 0) + 1
+        try:
+            bot_storage.save_bot(bot)
+        except Exception:
+            pass
+        logging.warning(
+            "[%s:%s] AUTO-RESUMED from %s — exchange has unmanaged exposure",
+            symbol, bot_id, old_status,
+        )
+        resumed_any = True
+
+    if resumed_any:
+        try:
+            bots = list(bot_storage.list_bots() or [])
+        except Exception:
+            pass
+
+    return bots
+
+
 def _persist_bot_cycle_exception(bot_storage, grid_bot_service, bot: dict, exc: Exception) -> Optional[dict]:
     """
     Persist an uncaught cycle exception so the same bot does not loop forever in
@@ -766,6 +895,8 @@ def main():
     # =============================================================================
     neutral_scanner = NeutralScannerService(client, indicator_service, RangeEngineService())
     grid_bot_service.neutral_scanner = neutral_scanner  # Auto-Pilot needs this
+    from services.motion_signal_service import MotionSignalService
+    motion_signal_service = MotionSignalService(indicator_service)
     bot_status_service = BotStatusService(
         bot_storage,
         position_service,
@@ -773,6 +904,7 @@ def main():
         neutral_scanner=neutral_scanner,
         indicator_service=indicator_service,
         performance_baseline_service=performance_baseline_service,
+        motion_signal_service=motion_signal_service,
     )
     if stream_service is not None:
         private_account_cache_service = PrivateAccountCacheService(
@@ -1026,6 +1158,12 @@ def main():
                             bots,
                             reason="error_maintenance",
                         )
+                # Auto-resume any stopped/error bot with exchange exposure
+                try:
+                    bots = _auto_resume_exposed_bots(grid_bot_service, bot_storage, bots)
+                except Exception as ar_exc:
+                    logging.warning("Auto-resume check failed: %s", ar_exc)
+
                 running_count = 0
 
                 # Periodic cache cleanup to prevent memory leaks

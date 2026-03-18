@@ -175,15 +175,29 @@ _ENDPOINT_CACHE: Dict[str, Dict[str, Any]] = {}
 _ENDPOINT_CACHE_LOCK = threading.Lock()
 
 
-def _get_cached_or_compute(key: str, ttl_sec: float, compute_fn):
-    """Return cached result if fresh, otherwise compute and cache."""
+def _get_cached_or_compute(key: str, ttl_sec: float, compute_fn, *, timeout_sec: float = 0):
+    """Return cached result if fresh, otherwise compute and cache.
+
+    If timeout_sec > 0, run compute_fn in the snapshot executor with a timeout.
+    On timeout, return stale cache if available, else empty list.
+    """
     now = time.time()
     with _ENDPOINT_CACHE_LOCK:
         entry = _ENDPOINT_CACHE.get(key)
         if entry and now - entry["ts"] < ttl_sec:
             return entry["value"]
     # Compute outside lock to avoid blocking other requests
-    value = compute_fn()
+    if timeout_sec > 0:
+        future = DASHBOARD_SNAPSHOT_EXECUTOR.submit(compute_fn)
+        try:
+            value = future.result(timeout=timeout_sec)
+        except Exception:
+            # Timeout or error — return stale cache if available
+            if entry:
+                return entry["value"]
+            return []
+    else:
+        value = compute_fn()
     with _ENDPOINT_CACHE_LOCK:
         _ENDPOINT_CACHE[key] = {"ts": time.time(), "value": value}
     return value
@@ -1557,6 +1571,8 @@ def _build_app_runtime(runtime_cfg: Dict[str, Any]) -> Dict[str, Any]:
         runtime_bot_storage,
         runtime_bot_manager.audit_diagnostics_service,
     )
+    from services.motion_signal_service import MotionSignalService
+    runtime_motion_signal_service = MotionSignalService(runtime_indicator_service)
     runtime_bot_status_service = BotStatusService(
         runtime_bot_storage,
         runtime_position_service,
@@ -1565,6 +1581,7 @@ def _build_app_runtime(runtime_cfg: Dict[str, Any]) -> Dict[str, Any]:
         neutral_scanner=runtime_neutral_scanner,
         indicator_service=runtime_indicator_service,
         performance_baseline_service=runtime_performance_baseline_service,
+        motion_signal_service=runtime_motion_signal_service,
     )
     runtime_ai_advisor_analytics_service = AIAdvisorAnalyticsService(
         audit_diagnostics_service=(
@@ -6107,9 +6124,11 @@ def api_neutral_scan():
         # Custom symbol set — always compute fresh
         results = neutral_scanner.scan(symbols)
     else:
-        # Default universe — cache for 30s (scans 34 symbols, 2-5s cold)
+        # Default universe — cache for 30s (scans 34 symbols, 5-15s cold).
+        # timeout_sec avoids blocking Flask workers on cold scans.
         results = _get_cached_or_compute(
-            "neutral_scan", 30.0, lambda: neutral_scanner.scan(symbols)
+            "neutral_scan", 30.0, lambda: neutral_scanner.scan(symbols),
+            timeout_sec=20.0,
         )
     return jsonify({"results": results})
 
@@ -6709,6 +6728,48 @@ def api_services_status():
             "stop_flag_exists": os.path.exists(RUNNER_STOP_FLAG),
         }
     )
+
+
+@app.route("/api/trading-watchdog-health")
+@require_basic_auth
+def api_trading_watchdog_health():
+    """Proxy health score from Trading Watchdog (port 8200), cached 30s."""
+    def _fetch():
+        import urllib.request, urllib.error
+        url = "http://127.0.0.1:8200/api/health"
+        try:
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                return json.loads(resp.read())
+        except Exception:
+            return None
+    result = _get_cached_or_compute("trading_watchdog_health", 30.0, _fetch)
+    if result is None:
+        return _set_no_cache_headers(jsonify({"health_score": None, "health_label": "unreachable"}))
+    return _set_no_cache_headers(jsonify(result))
+
+
+@app.route("/api/platform-watchdog-health")
+@require_basic_auth
+def api_platform_watchdog_health():
+    """Proxy health score from Platform Watchdog (port 9000), cached 30s."""
+    def _fetch():
+        import urllib.request, urllib.error, base64
+        from dotenv import dotenv_values
+        url = "http://127.0.0.1:9000/api/health/current"
+        wdg_env = dotenv_values(os.path.join(os.path.dirname(__file__), "opus_platform_watchdog", ".env"))
+        auth_user = wdg_env.get("WATCHDOG_AUTH_USER", "admin")
+        auth_pass = wdg_env.get("WATCHDOG_AUTH_PASS", "")
+        creds = base64.b64encode(f"{auth_user}:{auth_pass}".encode()).decode()
+        req = urllib.request.Request(url, headers={"Authorization": f"Basic {creds}"})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return json.loads(resp.read())
+        except Exception:
+            return None
+    result = _get_cached_or_compute("platform_watchdog_health", 30.0, _fetch)
+    if result is None:
+        return _set_no_cache_headers(jsonify({"overall_score": None, "overall_status": "unreachable"}))
+    return _set_no_cache_headers(jsonify(result))
 
 
 @app.route("/api/services/restart", methods=["POST"])

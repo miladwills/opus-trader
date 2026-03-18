@@ -4773,13 +4773,33 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
                         reconcile_status = "auto_resolved_recheck"
                         mismatches = []
                     else:
-                        logger.warning(
-                            "[%s] Exchange recheck still diverged — keeping blocker active "
-                            "(flat=%s orders_cleared=%s)",
-                            _sym, _cleanup.get("flat"), _cleanup.get("orders_cleared"),
+                        bot_status = str(bot.get("status") or "").strip().lower()
+                        bot_pos_size = self._safe_float(
+                            bot.get("current_position_size"), 0.0
                         )
-                        reconcile["updated_at"] = datetime.now(timezone.utc).isoformat()
-                        bot["exchange_reconciliation"] = reconcile
+                        if (
+                            bot_status == "running"
+                            and bot_pos_size > 0
+                            and not _cleanup.get("flat")
+                        ):
+                            logger.info(
+                                "[%s] Exchange recheck: position exists but bot is running "
+                                "with known position (size=%.6f) — resolving as expected",
+                                _sym, bot_pos_size,
+                            )
+                            reconcile["status"] = "auto_resolved_expected_position"
+                            reconcile["mismatches"] = []
+                            bot["exchange_reconciliation"] = reconcile
+                            reconcile_status = "auto_resolved_expected_position"
+                            mismatches = []
+                        else:
+                            logger.warning(
+                                "[%s] Exchange recheck still diverged — keeping blocker active "
+                                "(flat=%s orders_cleared=%s)",
+                                _sym, _cleanup.get("flat"), _cleanup.get("orders_cleared"),
+                            )
+                            reconcile["updated_at"] = datetime.now(timezone.utc).isoformat()
+                            bot["exchange_reconciliation"] = reconcile
                 except Exception as _exc:
                     logger.warning(
                         "[%s] Exchange recheck failed — keeping divergence blocker: %s",
@@ -11727,11 +11747,49 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
                     bot.get("_emergency_partial_close_count", 0) + 1
                 )
                 return True
-            else:
-                self._hard_fail_close(
-                    bot, symbol, "emergency_partial_close", order_result.get("error")
-                )
-                return False
+
+            # WS timeout after send: order may have executed on exchange.
+            # Truth-check position before going ERROR.
+            order_error = order_result.get("error")
+            if order_error == "ws_timeout_after_send":
+                try:
+                    pos_resp = self.client.get_positions(skip_cache=True)
+                    if pos_resp.get("success"):
+                        positions = pos_resp.get("result", {}).get("list", [])
+                        current_size = 0.0
+                        for p in positions:
+                            if p.get("symbol") == symbol:
+                                current_size = abs(float(p.get("size", 0)))
+                                break
+                        pre_close_size = abs(position_size)
+                        if current_size < pre_close_size - (close_qty * 0.5):
+                            # Position decreased — close actually worked
+                            logger.warning(
+                                "[%s:%s] Emergency close WS timeout, but exchange position "
+                                "decreased (%.4f -> %.4f). Close succeeded.",
+                                symbol, bot_id[:8], pre_close_size, current_size,
+                            )
+                            bot["_last_emergency_partial_close"] = now
+                            bot["_emergency_partial_close_count"] = (
+                                bot.get("_emergency_partial_close_count", 0) + 1
+                            )
+                            return True
+                        else:
+                            logger.error(
+                                "[%s:%s] Emergency close WS timeout — exchange position "
+                                "unchanged (%.4f). Close truly failed.",
+                                symbol, bot_id[:8], current_size,
+                            )
+                except Exception as truth_err:
+                    logger.error(
+                        "[%s:%s] Emergency close truth-check failed: %s",
+                        symbol, bot_id[:8], truth_err,
+                    )
+
+            self._hard_fail_close(
+                bot, symbol, "emergency_partial_close", order_error
+            )
+            return False
 
         except Exception as e:
             self._hard_fail_close(bot, symbol, "emergency_partial_close_exception", e)
@@ -12954,10 +13012,15 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
             )
 
         # ===== AUTO-PILOT ROTATION: Periodically check for better coins =====
+        _range_valid = (
+            self._safe_float(bot.get("lower_price")) > 0
+            and self._safe_float(bot.get("upper_price")) > 0
+        )
         force_repick = (
             auto_pilot
             and symbol
             and symbol != "Auto-Pilot"
+            and _range_valid
             and self._auto_pilot_should_force_repick(bot, symbol)
         )
         pending_rotation_ready = (
@@ -13384,6 +13447,8 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
             logger.info(
                 "[%s] Opening guard active - blocking new opening orders", symbol
             )
+        else:
+            bot.pop("_auto_pilot_rotation_backoff_until", None)
 
         last_price = self._get_last_price(symbol)
         if last_price is None:

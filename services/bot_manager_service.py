@@ -1028,7 +1028,14 @@ class BotManagerService:
                 }
 
             logger.warning(f"🚨 EMERGENCY STOP TRIGGERED FOR {symbol} 🚨")
-            
+
+            # Record rotation cooldown for Auto-Pilot bots
+            if bot.get("auto_pilot") and symbol:
+                from config.strategy_config import AUTO_PILOT_ESTOP_ROTATION_COOLDOWN_SECONDS
+                cooldowns = bot.get("auto_pilot_rotation_cooldown") or {}
+                cooldowns[symbol] = time.time() + AUTO_PILOT_ESTOP_ROTATION_COOLDOWN_SECONDS
+                bot["auto_pilot_rotation_cooldown"] = cooldowns
+
         except Exception as e:
             logger.error(f"Error in emergency_stop for {bot_id}: {e}")
             return {"success": False, "error": str(e)}
@@ -1308,6 +1315,35 @@ class BotManagerService:
             "available_balance": available_balance,
         }
 
+    def _detect_existing_exchange_state(self, symbol: str) -> Dict[str, Any]:
+        """Check if exchange has existing positions or orders for a symbol."""
+        result = {
+            "has_position": False, "has_open_orders": False,
+            "has_exchange_exposure": False, "position_count": 0, "open_order_count": 0,
+        }
+        try:
+            pos_resp = self.client.get_positions(skip_cache=True)
+            if pos_resp.get("success"):
+                pos_list = (
+                    (pos_resp.get("result", {}) or pos_resp.get("data", {})).get("list", []) or []
+                )
+                for p in pos_list:
+                    if (p.get("symbol") or "").upper() == symbol and float(p.get("size", 0)) > 0:
+                        result["has_position"] = True
+                        result["position_count"] += 1
+        except Exception:
+            pass
+        try:
+            ord_resp = self.client.get_open_orders(symbol=symbol, skip_cache=True)
+            if ord_resp.get("success"):
+                orders = ((ord_resp.get("data", {}) or {}).get("list", []) or [])
+                result["open_order_count"] = len(orders)
+                result["has_open_orders"] = len(orders) > 0
+        except Exception:
+            pass
+        result["has_exchange_exposure"] = result["has_position"] or result["has_open_orders"]
+        return result
+
     def _get_symbol_launch_constraints(self, symbol: str) -> Dict[str, float]:
         constraints = {"max_leverage": 0.0, "min_notional_value": 5.1}
         if not self._is_tradeable_symbol(symbol):
@@ -1515,6 +1551,7 @@ class BotManagerService:
         self,
         bot: Dict[str, Any],
         action: str,
+        has_existing_exchange_state: bool = False,
     ) -> Dict[str, Any]:
         account_snapshot = self._get_account_snapshot()
         account_equity = account_snapshot.get("equity", 0.0)
@@ -1589,11 +1626,30 @@ class BotManagerService:
         )
 
         if not launch_analysis.get("affordable", True):
-            reasons_str = "; ".join(launch_analysis.get("reasons") or ["launch sizing failed"])
-            bot["last_error"] = f"{action} blocked: {reasons_str}"
-            bot["status"] = "stopped"
-            self.bot_storage.save_bot(bot)
-            raise ValueError(f"{action} blocked: {reasons_str}")
+            reasons = launch_analysis.get("reasons") or ["launch sizing failed"]
+            # Bypass leverage block when exchange has existing positions/orders
+            is_only_leverage_block = (
+                len(reasons) == 1
+                and "leverage" in reasons[0]
+                and "grids" in reasons[0]
+            )
+            if has_existing_exchange_state and is_only_leverage_block:
+                logger.warning(
+                    "[%s] %s: leverage affordability bypassed — "
+                    "existing exchange state requires management (%s)",
+                    bot.get("symbol"), action, reasons[0],
+                )
+                bot["last_warning"] = (
+                    "Leverage affordability bypassed: existing positions/orders need management"
+                )
+                launch_analysis["affordable"] = True
+                launch_analysis["leverage_bypass_for_existing_state"] = True
+            else:
+                reasons_str = "; ".join(reasons)
+                bot["last_error"] = f"{action} blocked: {reasons_str}"
+                bot["status"] = "stopped"
+                self.bot_storage.save_bot(bot)
+                raise ValueError(f"{action} blocked: {reasons_str}")
 
         target_leverage = self._safe_float(
             launch_analysis.get("effective_leverage"),
@@ -2154,8 +2210,28 @@ class BotManagerService:
         account_snapshot = self._get_account_snapshot()
         account_equity = account_snapshot.get("equity", 0.0)
 
+        # Check for existing exchange state (positions/orders) for leverage bypass
+        _start_symbol = (bot.get("symbol") or "").upper()
+        has_existing_exchange_state = False
+        if _start_symbol and _start_symbol != "Auto-Pilot":
+            try:
+                exchange_state = self._detect_existing_exchange_state(_start_symbol)
+                has_existing_exchange_state = exchange_state.get("has_exchange_exposure", False)
+                if has_existing_exchange_state:
+                    logger.warning(
+                        "[%s] Existing exchange state on start: positions=%d, orders=%d",
+                        _start_symbol,
+                        exchange_state.get("position_count", 0),
+                        exchange_state.get("open_order_count", 0),
+                    )
+            except Exception as exc:
+                logger.warning("[%s] Exchange state detection failed: %s", _start_symbol, exc)
+
         try:
-            launch_analysis = self._validate_and_prepare_launch(bot, "Start")
+            launch_analysis = self._validate_and_prepare_launch(
+                bot, "Start",
+                has_existing_exchange_state=has_existing_exchange_state,
+            )
             notes = launch_analysis.get("notes") or []
             if notes:
                 logger.info(
@@ -2760,8 +2836,28 @@ class BotManagerService:
             account_snapshot = self._get_account_snapshot()
             account_equity = account_snapshot.get("equity", 0.0)
 
+            # Check for existing exchange state (positions/orders) for leverage bypass
+            _resume_symbol = (bot.get("symbol") or "").upper()
+            has_existing_exchange_state = False
+            if _resume_symbol and _resume_symbol != "Auto-Pilot":
+                try:
+                    exchange_state = self._detect_existing_exchange_state(_resume_symbol)
+                    has_existing_exchange_state = exchange_state.get("has_exchange_exposure", False)
+                    if has_existing_exchange_state:
+                        logger.warning(
+                            "[%s] Existing exchange state on resume: positions=%d, orders=%d",
+                            _resume_symbol,
+                            exchange_state.get("position_count", 0),
+                            exchange_state.get("open_order_count", 0),
+                        )
+                except Exception as exc:
+                    logger.warning("[%s] Exchange state detection failed: %s", _resume_symbol, exc)
+
             try:
-                launch_analysis = self._validate_and_prepare_launch(bot, "Resume")
+                launch_analysis = self._validate_and_prepare_launch(
+                    bot, "Resume",
+                    has_existing_exchange_state=has_existing_exchange_state,
+                )
                 notes = launch_analysis.get("notes") or []
                 if notes:
                     logger.info(

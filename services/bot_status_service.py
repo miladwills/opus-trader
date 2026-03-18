@@ -115,6 +115,7 @@ class BotStatusService:
         indicator_service: Optional[Any] = None,
         scanner_cache_ttl_seconds: int = 20,
         performance_baseline_service: Optional[PerformanceBaselineService] = None,
+        motion_signal_service: Optional[Any] = None,
     ):
         """
         Initialize the bot status service.
@@ -133,6 +134,7 @@ class BotStatusService:
         self.pnl_service = pnl_service
         self.symbol_pnl_service = symbol_pnl_service or SymbolPnlService()
         self.performance_baseline_service = performance_baseline_service
+        self.motion_signal_service = motion_signal_service
         self.neutral_scanner = neutral_scanner
         self.price_action_service = (
             PriceActionSignalService(indicator_service) if indicator_service else None
@@ -635,6 +637,17 @@ class BotStatusService:
                 previous["pending_count"] = pending_count
 
         stable_flags = self._readiness_stage_flags(stable_stage)
+        # Resolve the best available score from the readiness payload
+        raw_score = self._safe_float(
+            result.get("setup_timing_score"),
+            self._safe_float(
+                result.get("setup_ready_score"),
+                self._safe_float(
+                    result.get("analysis_ready_score"),
+                    self._safe_float(result.get("entry_ready_score"), None),
+                ),
+            ),
+        )
         cache[cache_key] = {
             "stable_stage": stable_stage,
             "stable_reason": stable_reason,
@@ -649,6 +662,7 @@ class BotStatusService:
             "pending_count": int(previous.get("pending_count") or 0),
             "last_seen_ts": now_ts,
             "policy_name": policy_name,
+            "stable_score": raw_score,
         }
 
         result.update(
@@ -1922,6 +1936,27 @@ class BotStatusService:
             stopped_preview_lookup=stopped_preview_lookup,
         )
         self._maybe_emit_signal_drift_watchdog(bot, entry_readiness)
+
+        # Derive score_source from readiness_source_kind for truthful UI labeling
+        _rsk = str(entry_readiness.get("readiness_source_kind") or "").strip().lower()
+        if _rsk in ("runtime", "fresh_analysis", "fresh_fallback", ""):
+            _score_source = "live"
+        elif _rsk in ("stopped_preview", "stopped_preview_deferred"):
+            _score_source = "preview"
+        elif _rsk == "stopped_preview_stale":
+            _score_source = "stale_preview"
+        elif _rsk in ("stopped_preview_unavailable", "stopped_placeholder"):
+            _score_source = "unavailable"
+        else:
+            _score_source = "live"
+        _score_unavailable_reason = None
+        if _score_source == "unavailable":
+            _score_unavailable_reason = str(
+                entry_readiness.get("setup_ready_reason")
+                or entry_readiness.get("analysis_ready_reason")
+                or "preview_pending"
+            ).strip()
+
         capital_starved_visible = self._capital_starved_runtime_visible(
             bot,
             entry_readiness,
@@ -2202,6 +2237,8 @@ class BotStatusService:
             "readiness_source_age_sec": entry_readiness.get(
                 "readiness_source_age_sec"
             ),
+            "score_source": _score_source,
+            "score_unavailable_reason": _score_unavailable_reason,
             "readiness_fallback_used": bool(
                 entry_readiness.get("readiness_fallback_used", False)
             ),
@@ -2902,6 +2939,17 @@ class BotStatusService:
             ),
         }
 
+        # Motion signal (full path — compute fresh)
+        motion = {}
+        if getattr(self, "motion_signal_service", None) and symbol:
+            try:
+                motion = self.motion_signal_service.compute_motion(symbol) or {}
+            except Exception:
+                motion = {}
+        enriched["motion_score"] = motion.get("motion_score")
+        enriched["motion_label"] = motion.get("motion_label")
+        enriched["motion_tint"] = motion.get("motion_tint")
+
         return enriched
 
     def _enrich_bot_light(
@@ -3166,9 +3214,12 @@ class BotStatusService:
         stable_flags = self._readiness_stage_flags(stable_readiness_stage)
 
         # Read last-known readiness fields from bot dict (persisted by runner)
+        # Score: prefer stability-cache score (set during full enrichment),
+        # fall back to persisted bot value.
+        cached_score = cached_readiness.get("stable_score")
         setup_ready_status = bot.get("setup_ready_status") or cached_readiness.get("stable_stage") or "watch"
         setup_ready_reason = bot.get("setup_ready_reason") or ""
-        setup_ready_score = bot.get("setup_ready_score")
+        setup_ready_score = cached_score if cached_score is not None else bot.get("setup_ready_score")
         entry_ready_status = bot.get("entry_ready_status") or setup_ready_status
         entry_ready_reason = bot.get("entry_ready_reason") or ""
         execution_viability_status = bot.get("execution_viability_status") or "unknown"
@@ -3217,6 +3268,7 @@ class BotStatusService:
             "setup_ready_status": setup_ready_status,
             "setup_ready_reason": setup_ready_reason,
             "setup_ready_score": setup_ready_score,
+            "setup_timing_score": setup_ready_score,
             "entry_ready_status": entry_ready_status,
             "entry_ready_reason": entry_ready_reason,
             "execution_blocked": execution_blocked,
@@ -3403,6 +3455,17 @@ class BotStatusService:
             "symbol_pnl": self._get_symbol_pnl_summary(symbol, symbol_pnl_lookup),
             "bot_pnl": self._get_bot_pnl_summary(bot_id, bot_pnl_lookup),
         }
+
+        # Motion signal (light path — compute to avoid empty on startup)
+        motion = {}
+        if getattr(self, "motion_signal_service", None) and symbol:
+            try:
+                motion = self.motion_signal_service.compute_motion(symbol) or {}
+            except Exception:
+                motion = {}
+        enriched["motion_score"] = motion.get("motion_score")
+        enriched["motion_label"] = motion.get("motion_label")
+        enriched["motion_tint"] = motion.get("motion_tint")
 
         return enriched
 
@@ -3810,21 +3873,34 @@ class BotStatusService:
         readiness_service = getattr(self, "entry_readiness_service", None)
         if readiness_service is None:
             return {}
+        # Compute full analysis for deferred bots (outside bounded refresh window)
+        # so they still show score + readiness in the UI.
+        preview_enabled = getattr(self, "stopped_preview_enabled", False)
         try:
             payload = readiness_service.evaluate_bot(
                 dict(bot),
-                allow_stopped_analysis_preview=False,
+                allow_stopped_analysis_preview=preview_enabled,
             )
         except TypeError:
             payload = readiness_service.evaluate_bot(dict(bot))
         except Exception:
             payload = {}
         result = dict(payload or {})
-        detail = (
-            "Stopped-bot analysis preview is bounded and this bot is outside the current preview window."
-            if getattr(self, "stopped_preview_enabled", False)
-            else "Stopped-bot analysis preview is disabled."
-        )
+        if preview_enabled:
+            # Analysis computed — let readiness flow through, mark as deferred preview
+            result["readiness_source_kind"] = "stopped_preview_deferred"
+            result = self._annotate_preview_freshness(
+                result,
+                age_sec=0.0,
+                windows=self._stopped_preview_time_windows(result),
+            )
+            return self._annotate_readiness_payload(
+                result,
+                source_kind_override="stopped_preview_deferred",
+                source_age_sec=0.0,
+            )
+        # Preview globally disabled — show truthful unavailable state
+        detail = "Stopped-bot analysis preview is disabled."
         result.update(
             {
                 "analysis_ready_status": "watch",
@@ -3833,7 +3909,7 @@ class BotStatusService:
                 "analysis_ready_detail": detail,
                 "analysis_ready_source": "bounded_preview_disabled",
                 "analysis_ready_severity": "INFO",
-                "analysis_ready_next": "Wait for this bot to enter the bounded preview window or enable wider preview coverage.",
+                "analysis_ready_next": "Enable stopped-bot preview in configuration.",
                 "setup_ready": False,
                 "setup_ready_status": "watch",
                 "setup_ready_reason": "preview_disabled",
@@ -3841,7 +3917,7 @@ class BotStatusService:
                 "setup_ready_detail": detail,
                 "setup_ready_source": "bounded_preview_disabled",
                 "setup_ready_severity": "INFO",
-                "setup_ready_next": "Wait for this bot to enter the bounded preview window or enable wider preview coverage.",
+                "setup_ready_next": "Enable stopped-bot preview in configuration.",
                 "readiness_source_kind": "stopped_preview_unavailable",
             }
         )

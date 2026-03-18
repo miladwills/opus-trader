@@ -322,14 +322,35 @@ function setElementDisplayIfChanged(element, displayValue) {
 function _scoreDisplay(bot) {
   const setup = getSetupReadiness(bot);
   const score = setup.score;
-  if (score === null || score === undefined || !Number.isFinite(score)) return "-";
+  if (score === null || score === undefined || !Number.isFinite(score)) {
+    const reason = String(setup.reason || setup.rawReason || "").trim().toLowerCase();
+    const sourceKind = String(bot?.readiness_source_kind || "").trim().toLowerCase();
+    if (sourceKind === "stopped_preview_unavailable" || sourceKind === "stopped_placeholder") return "...";
+    if (reason === "preview_disabled") return "Off";
+    if (reason === "preview_limited") return "Lim";
+    if (reason.includes("stale")) return "Stale";
+    return "-";
+  }
   return score.toFixed(0);
 }
 
 function _bandDisplay(bot) {
   const setup = getSetupReadiness(bot);
   const score = setup.score;
-  if (score === null || score === undefined || !Number.isFinite(score)) return "";
+  const sourceKind = String(bot?.readiness_source_kind || "").trim().toLowerCase();
+  if (score === null || score === undefined || !Number.isFinite(score)) {
+    const reason = String(setup.reason || setup.rawReason || "").trim().toLowerCase();
+    if (sourceKind === "stopped_preview_unavailable" || sourceKind === "stopped_placeholder") return "Pending";
+    if (reason === "preview_disabled") return "Preview";
+    if (reason === "preview_limited") return "Limited";
+    if (reason.includes("stale")) return "Snapshot";
+    return "";
+  }
+  // Stopped-preview scores: show "Preview" / "Stale" instead of band label
+  if (sourceKind.startsWith("stopped_preview")) {
+    if (sourceKind === "stopped_preview_stale") return "Stale";
+    return "Preview";
+  }
   if (score >= 72) return "Strong";
   if (score >= 60) return "Good";
   if (score >= 50) return "Caution";
@@ -979,8 +1000,11 @@ function getReadinessFreshnessMeta(bot, override = null) {
   } else if (sourceKind === "stopped_preview_stale") {
     sourceLabel = "Stopped Preview";
     tone = "amber";
+  } else if (sourceKind === "stopped_preview_deferred") {
+    sourceLabel = "Stopped Preview";
+    tone = "slate";
   } else if (sourceKind === "stopped_preview_unavailable") {
-    sourceLabel = "Stopped Preview Off";
+    sourceLabel = "Preview Pending";
     tone = "slate";
   }
   const ageText = formatCompactAgeSeconds(ageSec);
@@ -1155,6 +1179,10 @@ function entryReadinessBadge(bot) {
       };
     }
     if (reason === "preview_disabled") {
+      const srcKind = String(bot?.readiness_source_kind || "").trim().toLowerCase();
+      if (srcKind === "stopped_preview_unavailable" || srcKind === "stopped_placeholder") {
+        return { label: "PENDING", next: "Stopped-bot preview is queued and will be computed shortly." };
+      }
       return { label: "PREVIEW OFF", next: "This is not a trading block. Use runtime state or enable live preview." };
     }
     if (reason === "entry_gate_disabled") {
@@ -1218,6 +1246,7 @@ function entryReadinessBadge(bot) {
     awaiting_symbol_pick: "👀 WAIT · Pick",
     preview_limited: "⚠️ PREVIEW",
     preview_disabled: "⚠️ PREVIEW OFF",
+    preview_pending: "⏳ PENDING",
     entry_gate_disabled: "⚪ GATE OFF",
     entry_gate_disabled_global: "⚪ GATE OFF (GLOBAL)",
     entry_gate_disabled_bot: "⚪ GATE OFF (BOT)",
@@ -1236,6 +1265,13 @@ function entryReadinessBadge(bot) {
   };
 
   let label = shortLabels[reason] || shortLabels[status] || `⚠️ ${reasonText || humanizeReason(reason || status)}`;
+  // Override preview_disabled label for pending stopped previews
+  if (reason === "preview_disabled") {
+    const _srcKind = String(bot?.readiness_source_kind || "").trim().toLowerCase();
+    if (_srcKind === "stopped_preview_unavailable" || _srcKind === "stopped_placeholder") {
+      label = shortLabels.preview_pending || "⏳ PENDING";
+    }
+  }
   if (hasAnalyticalSetupReady(bot) && execution.marginLimited) {
     label = isArmedStatus(status)
       ? "🟦 ARMED · Margin"
@@ -3282,7 +3318,7 @@ async function refreshHeatMap() {
   if (_refreshHeatMapPromise) return _refreshHeatMapPromise;
   _refreshHeatMapPromise = (async () => {
     try {
-      const data = await fetchDashboardJSON("/neutral-scan");
+      const data = await fetchJSON("/neutral-scan", { timeout: 20000 });
       _heatMapData = (data.results || []).sort((a, b) =>
         (b.volume_24h_usdt || 0) - (a.volume_24h_usdt || 0)
       );
@@ -5784,9 +5820,12 @@ let floatingScrollButtonState = {
 let readyTitleAlertState = {
   visible: false,
   readyCount: 0,
+  topReadyCoin: "",
   intervalId: null,
   timeoutId: null,
 };
+let _activeBotSymbol = "";
+let _bgTitlePollInterval = null;
 let quickEditState = {
   botId: "",
   bot: null,
@@ -6138,9 +6177,11 @@ function fetchDashboardJSON(path, options = {}) {
 
 
 function composeDashboardTitle() {
-  const readyCount = Math.max(1, Number(readyTitleAlertState.readyCount) || 1);
-  const suffix = readyTitleAlertState.visible ? `(${readyCount}) Ready!` : "Opus Trader";
-  return `${dashboardTitlePnlText} - ${suffix}`;
+  const botPrefix = _activeBotSymbol ? `${_activeBotSymbol} ` : "";
+  if (readyTitleAlertState.visible && readyTitleAlertState.topReadyCoin) {
+    return `${botPrefix}${dashboardTitlePnlText} - ${readyTitleAlertState.topReadyCoin} Ready!`;
+  }
+  return `${botPrefix}${dashboardTitlePnlText} - Opus Trader`;
 }
 
 function syncDashboardTitle() {
@@ -6158,11 +6199,13 @@ function clearReadyTitleAlert() {
   }
   readyTitleAlertState.visible = false;
   readyTitleAlertState.readyCount = 0;
+  readyTitleAlertState.topReadyCoin = "";
   syncDashboardTitle();
 }
 
-function triggerReadyTitleAlert(readyCount = 1) {
+function triggerReadyTitleAlert(readyCount = 1, topCoin = "") {
   readyTitleAlertState.readyCount = Math.max(1, Number(readyCount) || 1);
+  readyTitleAlertState.topReadyCoin = topCoin ? topCoin.replace(/USDT$/i, "") : "";
   readyTitleAlertState.visible = true;
 
   if (readyTitleAlertState.intervalId) {
@@ -6267,7 +6310,7 @@ function getSetupReadiness(bot) {
     direction: String(bot?.setup_timing_direction || bot?.setup_ready_direction || bot?.analysis_ready_direction || bot?.entry_ready_direction || "").trim().toLowerCase(),
     mode: String(bot?.setup_timing_mode || bot?.setup_ready_mode || bot?.analysis_ready_mode || bot?.entry_ready_mode || "").trim().toLowerCase(),
     updatedAt: String(bot?.stable_readiness_updated_at || bot?.setup_timing_updatedAt || bot?.setup_timing_updated_at || bot?.setup_ready_updated_at || bot?.analysis_ready_updated_at || bot?.entry_ready_updated_at || "").trim(),
-    score: Number.isFinite(Number(bot?.setup_timing_score)) ? Number(bot?.setup_timing_score) : (Number.isFinite(Number(bot?.setup_ready_score)) ? Number(bot?.setup_ready_score) : (Number.isFinite(Number(bot?.analysis_ready_score)) ? Number(bot?.analysis_ready_score) : (Number.isFinite(Number(bot?.entry_ready_score)) ? Number(bot?.entry_ready_score) : null))),
+    score: (bot?.setup_timing_score != null && Number.isFinite(Number(bot.setup_timing_score))) ? Number(bot.setup_timing_score) : ((bot?.setup_ready_score != null && Number.isFinite(Number(bot.setup_ready_score))) ? Number(bot.setup_ready_score) : ((bot?.analysis_ready_score != null && Number.isFinite(Number(bot.analysis_ready_score))) ? Number(bot.analysis_ready_score) : ((bot?.entry_ready_score != null && Number.isFinite(Number(bot.entry_ready_score))) ? Number(bot.entry_ready_score) : null))),
     severity: String(bot?.setup_ready_severity || bot?.analysis_ready_severity || "").trim().toUpperCase(),
     next: String(bot?.stable_readiness_next || bot?.setup_timing_next || bot?.setup_ready_next || bot?.analysis_ready_next || "").trim(),
     fallbackUsed: Boolean(bot?.setup_ready_fallback_used || bot?.analysis_ready_fallback_used),
@@ -7327,7 +7370,7 @@ function buildBotActionButtons(bot, mobile = false) {
     stopGuardActive
       ? `<button disabled class="${primaryClass} bot-action-btn--disabled"><span>⏳</span><span>Wait ${stopGuardSec}s</span></button>`
       : "",
-    bot.status !== "stopped"
+    bot.status !== "stopped" && activePendingAction !== "stop"
       ? `<button onclick="botAction('stop', '${bot.id}', event)" class="${primaryClass} bot-action-btn--stop"><span>⏹</span><span>Stop</span></button>`
       : "",
   ].filter(Boolean).join("");
@@ -7478,6 +7521,11 @@ function doesActiveBotMatchFilterState(status, readyCat, filterName, botId) {
     return isArmedStatus(setup.status);
   }
 
+  if (normalizedFilter === "autopilot") {
+    const bot = (window._lastBots || []).find(b => b.id === botId);
+    return !!bot?.auto_pilot;
+  }
+
   return String(readyCat || "other").trim().toLowerCase() === normalizedFilter;
 }
 
@@ -7556,6 +7604,26 @@ function _scoreTint(bot) {
   if (score >= 60) return " bot-ops-kpi--good-score";
   if (score >= 50) return " bot-ops-kpi--caution-score";
   return " bot-ops-kpi--poor-score";
+}
+
+function _motionTint(bot) {
+  const t = String(bot.motion_tint || "").trim().toLowerCase();
+  if (t === "healthy") return " bot-ops-kpi--motion-healthy";
+  if (t === "fast")    return " bot-ops-kpi--motion-fast";
+  if (t === "slow")    return " bot-ops-kpi--motion-slow";
+  if (t === "chaotic") return " bot-ops-kpi--motion-chaotic";
+  if (t === "dead")    return " bot-ops-kpi--motion-dead";
+  return "";
+}
+function _motionScoreDisplay(bot) {
+  const s = bot.motion_score;
+  if (s === null || s === undefined || !Number.isFinite(s)) return "-";
+  return String(s);
+}
+function _motionBarWidth(bot) {
+  const s = bot.motion_score;
+  if (s === null || s === undefined || !Number.isFinite(s)) return 0;
+  return Math.max(0, Math.min(100, s));
 }
 
 function getActiveBotRowViewModel(bot) {
@@ -7681,6 +7749,12 @@ function getActiveBotRowViewModel(bot) {
         <div class="bot-ops-kpi__label">Score</div>
         <div class="bot-ops-kpi__value">${_scoreDisplay(bot)}</div>
         <div class="bot-ops-kpi__hint">${_bandDisplay(bot)}</div>
+      </div>
+      <div class="bot-ops-kpi bot-ops-kpi--motion${_motionTint(bot)}" title="Motion quality: ${_motionScoreDisplay(bot)} — ${escapeHtml(bot.motion_label || '-')}">
+        <div class="bot-ops-kpi__label">Motion</div>
+        <div class="bot-ops-kpi__value">${_motionScoreDisplay(bot)}</div>
+        <div class="bot-ops-kpi__bar"><div class="bot-ops-kpi__bar-fill" style="width:${_motionBarWidth(bot)}%"></div></div>
+        <div class="bot-ops-kpi__hint">${escapeHtml(bot.motion_label || "-")}</div>
       </div>
     `,
     actionsHtml: buildBotActionButtons(bot, false),
@@ -8104,7 +8178,13 @@ function registerNewPnlEvents(logs, today) {
 
 function detectBotRuntimeEvents(bots) {
   const nextSnapshot = {};
-  const readyTradeCount = (bots || []).filter((bot) => isActionableReadyBot(bot)).length;
+  const readyTradeBots = (bots || []).filter((bot) => isActionableReadyBot(bot));
+  const readyTradeCount = readyTradeBots.length;
+  const topReadyBot = readyTradeBots.reduce((best, bot) => {
+    const score = Number(getSetupReadiness(bot).score || 0);
+    return score > (best.score || 0) ? { symbol: bot.symbol, score } : best;
+  }, { symbol: "", score: 0 });
+  const topReadyCoin = topReadyBot.symbol || "";
   bots.forEach((bot) => {
     nextSnapshot[bot.id] = JSON.parse(JSON.stringify(bot));
   });
@@ -8232,7 +8312,7 @@ function detectBotRuntimeEvents(bots) {
         dedupeWindowMs: 300000,  // 5 minutes — prevent repeated alerts for same coin
       });
       playReadyAlertSound();
-      triggerReadyTitleAlert(readyTradeCount || 1);
+      triggerReadyTitleAlert(readyTradeCount || 1, topReadyCoin);
     }
 
     if (
@@ -9235,6 +9315,8 @@ function applyBotsData(data) {
   const armedEl = $("active-bots-armed"); if (armedEl) armedEl.textContent = String(armedCount);
   const blockedEl = $("active-bots-blocked"); if (blockedEl) blockedEl.textContent = String(blockedCount);
   const limitedEl = $("active-bots-limited"); if (limitedEl) limitedEl.textContent = String(limitedCount);
+  const autopilotCount = sortedBots.filter(b => !!b.auto_pilot).length;
+  const autopilotEl = $("active-bots-autopilot"); if (autopilotEl) autopilotEl.textContent = String(autopilotCount);
   const recentStoppedCount = sortedBots.filter(b => b.status === "stopped" && _isRecentlyStopped(b.id)).length;
   const recentStoppedEl = $("active-bots-recent-stopped"); if (recentStoppedEl) recentStoppedEl.textContent = String(recentStoppedCount);
 
@@ -9273,6 +9355,12 @@ function applyBotsData(data) {
 
   // Update running bots status display
   updateRunningBotsStatus(sortedBots);
+
+  // Track active bot symbol for browser title
+  const runningBot = sortedBots.find(b => b.status === "running");
+  _activeBotSymbol = runningBot ? (runningBot.symbol || "").replace(/USDT$/i, "") : "";
+  syncDashboardTitle();
+
   const sameStructure = hasSameActiveBotStructure(sortedBots);
   if (!sameStructure || !patchActiveBotRowsInPlace(sortedBots)) {
     renderMobileBotsData(sortedBots);
@@ -12212,6 +12300,19 @@ function startLiveTimer() {
     if (el && lastUpdateTime) el.textContent = formatTimeAgo(lastUpdateTime);
     syncDashboardTitle();
   }, 1000);
+  startBackgroundTitlePoll();
+}
+
+function startBackgroundTitlePoll() {
+  if (_bgTitlePollInterval) return;
+  _bgTitlePollInterval = setInterval(async () => {
+    if (document.visibilityState !== "hidden") return;
+    try {
+      const data = await fetchJSON("/summary", { timeout: 5000 });
+      const pnl = parseFloat(data?.account?.unrealized_pnl || 0);
+      updatePageTitle(pnl);
+    } catch (_) {}
+  }, 5000);
 }
 
 // ============================================================
@@ -14264,6 +14365,8 @@ window.addEventListener("load", () => {
   setTimeout(refreshHeatMap, 5000);
   setTimeout(checkFlashCrashStatus, 6000);
   setTimeout(refreshPnlFull, 4000);  // All-time stats deferred
+  setTimeout(refreshTradingHealthBadge, 2000);
+  setTimeout(refreshPlatformHealthBadge, 2500);
 
   // --- Start ongoing polling intervals after stagger window ---
   setTimeout(() => {
@@ -14271,8 +14374,72 @@ window.addEventListener("load", () => {
     runnerStatusPollInterval = setInterval(updateRunnerStatus, 10000);
     _flashCrashPollInterval = setInterval(checkFlashCrashStatus, 10000);
     _tradeStatsPollInterval = setInterval(() => loadTradeStats(currentStatsPeriod), 30000);
+    _tradingHealthInterval = setInterval(refreshTradingHealthBadge, 30000);
+    _platformHealthInterval = setInterval(refreshPlatformHealthBadge, 30000);
   }, 7000);
 });
+
+// --- Trading Watchdog health badge ---
+let _tradingHealthInterval = null;
+
+async function refreshTradingHealthBadge() {
+  const badge = $("trading-health-badge");
+  if (!badge) return;
+  try {
+    const resp = await fetch("/api/trading-watchdog-health");
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const data = await resp.json();
+    const score = data.health_score;
+    const label = data.health_label;
+    if (score === null || score === undefined) {
+      badge.textContent = "?";
+      badge.className = "absolute -top-2 -right-2 min-w-[20px] h-5 px-1 rounded-full text-[10px] font-bold leading-5 text-center text-white bg-slate-500 shadow-lg border border-slate-900/50";
+    } else {
+      badge.textContent = Math.round(score);
+      let color = "bg-emerald-500";
+      if (label === "degraded" || label === "warning") color = "bg-amber-500";
+      else if (label === "unhealthy" || label === "poor") color = "bg-orange-500";
+      else if (label === "critical") color = "bg-red-500";
+      badge.className = "absolute -top-2 -right-2 min-w-[20px] h-5 px-1 rounded-full text-[10px] font-bold leading-5 text-center text-white " + color + " shadow-lg border border-slate-900/50";
+    }
+    badge.classList.remove("hidden");
+  } catch {
+    badge.textContent = "!";
+    badge.className = "absolute -top-2 -right-2 min-w-[20px] h-5 px-1 rounded-full text-[10px] font-bold leading-5 text-center text-white bg-slate-500 shadow-lg border border-slate-900/50";
+    badge.classList.remove("hidden");
+  }
+}
+
+// --- Platform Watchdog health badge ---
+let _platformHealthInterval = null;
+
+async function refreshPlatformHealthBadge() {
+  const badge = $("platform-health-badge");
+  if (!badge) return;
+  try {
+    const resp = await fetch("/api/platform-watchdog-health");
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const data = await resp.json();
+    const score = data.overall_score;
+    const status = data.overall_status;
+    if (score === null || score === undefined) {
+      badge.textContent = "?";
+      badge.className = "absolute -top-2 -right-2 min-w-[20px] h-5 px-1 rounded-full text-[10px] font-bold leading-5 text-center text-white bg-slate-500 shadow-lg border border-slate-900/50";
+    } else {
+      badge.textContent = Math.round(score);
+      let color = "bg-emerald-500";
+      if (status === "degraded") color = "bg-amber-500";
+      else if (status === "unhealthy") color = "bg-orange-500";
+      else if (status === "critical") color = "bg-red-500";
+      badge.className = "absolute -top-2 -right-2 min-w-[20px] h-5 px-1 rounded-full text-[10px] font-bold leading-5 text-center text-white " + color + " shadow-lg border border-slate-900/50";
+    }
+    badge.classList.remove("hidden");
+  } catch {
+    badge.textContent = "!";
+    badge.className = "absolute -top-2 -right-2 min-w-[20px] h-5 px-1 rounded-full text-[10px] font-bold leading-5 text-center text-white bg-slate-500 shadow-lg border border-slate-900/50";
+    badge.classList.remove("hidden");
+  }
+}
 
 // --- Tab visibility: fully pause/resume live machinery ---
 let _flashCrashPollInterval = null;
@@ -14288,6 +14455,8 @@ document.addEventListener("visibilitychange", () => {
     if (runnerStatusPollInterval) { clearInterval(runnerStatusPollInterval); runnerStatusPollInterval = null; }
     if (_flashCrashPollInterval) { clearInterval(_flashCrashPollInterval); _flashCrashPollInterval = null; }
     if (_tradeStatsPollInterval) { clearInterval(_tradeStatsPollInterval); _tradeStatsPollInterval = null; }
+    if (_tradingHealthInterval) { clearInterval(_tradingHealthInterval); _tradingHealthInterval = null; }
+    if (_platformHealthInterval) { clearInterval(_platformHealthInterval); _platformHealthInterval = null; }
     // Pause scheduled refresh timeouts
     if (liveQuickRefreshTimeout) { clearTimeout(liveQuickRefreshTimeout); liveQuickRefreshTimeout = null; }
     if (liveFullRefreshTimeout) { clearTimeout(liveFullRefreshTimeout); liveFullRefreshTimeout = null; }
@@ -14304,6 +14473,10 @@ document.addEventListener("visibilitychange", () => {
     runnerStatusPollInterval = setInterval(updateRunnerStatus, 10000);
     _flashCrashPollInterval = setInterval(checkFlashCrashStatus, 10000);
     _tradeStatsPollInterval = setInterval(() => loadTradeStats(currentStatsPeriod), 30000);
+    refreshTradingHealthBadge();
+    _tradingHealthInterval = setInterval(refreshTradingHealthBadge, 30000);
+    refreshPlatformHealthBadge();
+    _platformHealthInterval = setInterval(refreshPlatformHealthBadge, 30000);
   }
 });
 

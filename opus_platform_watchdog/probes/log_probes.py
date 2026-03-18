@@ -62,7 +62,13 @@ class LogScanProbe(BaseProbe):
             self._last_inode = current_inode
         if current_size == self._last_offset:
             return []
-        read_start = max(0, current_size - config.LOG_SCAN_BYTES) if self._last_offset == 0 else self._last_offset
+        # First read after start/rotation: skip to end instead of replaying
+        # old log lines, which would create ghost incidents from stale events.
+        if self._last_offset == 0:
+            self._last_offset = current_size
+            self._last_inode = current_inode
+            return []
+        read_start = self._last_offset
         try:
             with open(self.log_path, "r", errors="replace") as f:
                 f.seek(read_start)

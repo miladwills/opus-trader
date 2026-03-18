@@ -15,6 +15,7 @@ let symbolSearchQuery = '';
 let pendingFocusSymbol = null;
 let focusResetTimer = null;
 const CACHE_KEY = 'scanner_cache_v1';
+const DEFAULT_TITLE = document.title;
 
 // DOM Elements
 const tableBody = document.getElementById('tableBody');
@@ -183,6 +184,9 @@ function applyDataPayload(data, isCached) {
         window.hotCoinSeparatorIndex = 0;
     }
 
+    // Update page title: show top ready coin or revert to default
+    updatePageTitle();
+
     renderTable(lastRows);
 
     if (window.presetManager?.markHotCoinsInTable && window.presetManager?.activePreset) {
@@ -199,6 +203,19 @@ function applyDataPayload(data, isCached) {
         showSkippedSymbols(data.skipped_symbols);
     } else {
         hideSkippedSymbols();
+    }
+}
+
+/**
+ * Update page title with top ready coin or revert to default
+ */
+function updatePageTitle() {
+    const scores = window.hotCoinScores;
+    if (Array.isArray(scores) && scores.length > 0) {
+        const top = scores[0];
+        document.title = `${top.symbol} ${top.combined}% — Ready`;
+    } else {
+        document.title = DEFAULT_TITLE;
     }
 }
 
@@ -315,7 +332,9 @@ async function fetchData() {
             const data = await res.json();
 
             if (!res.ok || !data || !data.ok) {
-                console.error('Failed to fetch data:', data?.message || `HTTP ${res.status}`);
+                if (!(data && data.message && data.message.includes("already in progress"))) {
+                    console.error("Failed to fetch data:", data?.message || `HTTP ${res.status}`);
+                }
                 return null;
             }
 

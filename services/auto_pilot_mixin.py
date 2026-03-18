@@ -75,6 +75,12 @@ from config.strategy_config import (
     AUTO_PILOT_AGGRESSIVE_FULL_MAX_ATR_PCT,
     AUTO_PILOT_AGGRESSIVE_FULL_MAX_INTRADAY_MOVE_PCT,
     AUTO_PILOT_AGGRESSIVE_FULL_MAX_PRICE_VELOCITY_PER_HOUR,
+    AUTO_PILOT_PUMP_DUMP_GUARD_ENABLED,
+    AUTO_PILOT_MAX_TURNOVER_OI_RATIO,
+    AUTO_PILOT_MAX_PUMP_24H_PCT,
+    AUTO_PILOT_AGGRESSIVE_FULL_PUMP_DUMP_GUARD_ENABLED,
+    AUTO_PILOT_AGGRESSIVE_FULL_MAX_TURNOVER_OI_RATIO,
+    AUTO_PILOT_AGGRESSIVE_FULL_MAX_PUMP_24H_PCT,
     AUTO_PILOT_CANDIDATE_CACHE_ENABLED,
     AUTO_PILOT_CANDIDATE_CACHE_REFRESH_SECONDS,
     AUTO_PILOT_CANDIDATE_CACHE_MAX_ITEMS,
@@ -508,6 +514,26 @@ class AutoPilotMixin:
                     mode_defaults["max_price_velocity_per_hour"],
                 ),
             ),
+            "pump_dump_guard_enabled": bool(
+                bot.get(
+                    "auto_pilot_pump_dump_guard_enabled",
+                    mode_defaults["pump_dump_guard_enabled"],
+                )
+            ),
+            "max_turnover_oi_ratio": max(
+                0.0,
+                self._safe_float(
+                    bot.get("auto_pilot_max_turnover_oi_ratio"),
+                    mode_defaults["max_turnover_oi_ratio"],
+                ),
+            ),
+            "max_pump_24h_pct": max(
+                0.0,
+                self._safe_float(
+                    bot.get("auto_pilot_max_pump_24h_pct"),
+                    mode_defaults["max_pump_24h_pct"],
+                ),
+            ),
         }
 
     @staticmethod
@@ -541,6 +567,9 @@ class AutoPilotMixin:
                 "max_atr_pct": AUTO_PILOT_AGGRESSIVE_FULL_MAX_ATR_PCT,
                 "max_intraday_move_pct": AUTO_PILOT_AGGRESSIVE_FULL_MAX_INTRADAY_MOVE_PCT,
                 "max_price_velocity_per_hour": AUTO_PILOT_AGGRESSIVE_FULL_MAX_PRICE_VELOCITY_PER_HOUR,
+                "pump_dump_guard_enabled": AUTO_PILOT_AGGRESSIVE_FULL_PUMP_DUMP_GUARD_ENABLED,
+                "max_turnover_oi_ratio": AUTO_PILOT_AGGRESSIVE_FULL_MAX_TURNOVER_OI_RATIO,
+                "max_pump_24h_pct": AUTO_PILOT_AGGRESSIVE_FULL_MAX_PUMP_24H_PCT,
             }
         return {
             "strong_filters_enabled": AUTO_PILOT_STRONG_FILTERS_ENABLED,
@@ -558,6 +587,9 @@ class AutoPilotMixin:
             "max_atr_pct": AUTO_PILOT_MAX_ATR_PCT,
             "max_intraday_move_pct": AUTO_PILOT_MAX_INTRADAY_MOVE_PCT,
             "max_price_velocity_per_hour": AUTO_PILOT_MAX_PRICE_VELOCITY_PER_HOUR,
+            "pump_dump_guard_enabled": AUTO_PILOT_PUMP_DUMP_GUARD_ENABLED,
+            "max_turnover_oi_ratio": AUTO_PILOT_MAX_TURNOVER_OI_RATIO,
+            "max_pump_24h_pct": AUTO_PILOT_MAX_PUMP_24H_PCT,
         }
 
     def _build_auto_pilot_universe_summary(
@@ -684,6 +716,11 @@ class AutoPilotMixin:
             return "quality"
         if status == "excluded_high_volatility":
             return "volatility"
+        if status in {
+            "excluded_pump_dump_volume_spike",
+            "excluded_pump_dump_price_surge",
+        }:
+            return "pump_dump"
         return None
 
     def _record_auto_pilot_exclusion(
@@ -781,6 +818,7 @@ class AutoPilotMixin:
             return "excluded_low_quality_volume"
 
         oi_raw = ticker.get("openInterestValue")
+        open_interest_value = 0.0
         if oi_raw not in (None, ""):
             open_interest_value = max(0.0, self._safe_float(oi_raw, 0.0))
             if (
@@ -788,6 +826,26 @@ class AutoPilotMixin:
                 and open_interest_value < settings["min_open_interest_usdt"]
             ):
                 return "excluded_low_quality_open_interest"
+
+        # Pump-and-dump guards
+        if settings.get("pump_dump_guard_enabled"):
+            # Volume spike: turnover/OI ratio — speculative frenzy detector
+            turnover = max(0.0, self._safe_float(ticker.get("turnover24h"), 0.0))
+            max_ratio = settings.get("max_turnover_oi_ratio", 0)
+            if (
+                max_ratio > 0
+                and open_interest_value > 0
+                and turnover > 0
+                and (turnover / open_interest_value) > max_ratio
+            ):
+                return "excluded_pump_dump_volume_spike"
+
+            # Directional pump guard: block coins that pumped > threshold in 24h
+            max_pump_pct = settings.get("max_pump_24h_pct", 0)
+            if max_pump_pct > 0:
+                price_change_24h = self._safe_float(ticker.get("price24hPcnt"), 0.0)
+                if price_change_24h > max_pump_pct:
+                    return "excluded_pump_dump_price_surge"
 
         return None
 
@@ -992,6 +1050,7 @@ class AutoPilotMixin:
                 "new_listing": 0,
                 "quality": 0,
                 "volatility": 0,
+                "pump_dump": 0,
             },
             "samples": {},
         }
@@ -2040,6 +2099,27 @@ class AutoPilotMixin:
                 price_action_exc,
             )
 
+        # Filter out symbols in rotation cooldown (e.g., recent emergency stops)
+        cooldowns = dict(bot.get("auto_pilot_rotation_cooldown") or {})
+        now_ts = time.time()
+        if cooldowns:
+            from config.strategy_config import AUTO_PILOT_ROTATION_COOLDOWN_STALE_SECONDS
+            stale_keys = [s for s, u in cooldowns.items()
+                          if now_ts - u > AUTO_PILOT_ROTATION_COOLDOWN_STALE_SECONDS]
+            for s in stale_keys:
+                cooldowns.pop(s, None)
+            if stale_keys:
+                bot["auto_pilot_rotation_cooldown"] = cooldowns
+            active = {s for s, u in cooldowns.items() if now_ts < u}
+            if active:
+                before = len(scan_results or [])
+                scan_results = [r for r in (scan_results or [])
+                                if str(r.get("symbol") or "").upper() not in active]
+                dropped = before - len(scan_results)
+                if dropped:
+                    logger.info("[Auto-Pilot] Filtered %d symbol(s) in rotation cooldown: %s",
+                                dropped, ", ".join(sorted(active)))
+
         for raw_result in scan_results or []:
             candidate = dict(raw_result)
             score_data = self._score_auto_pilot_candidate(
@@ -2078,9 +2158,19 @@ class AutoPilotMixin:
         bot: Dict[str, Any],
         current_symbol: str,
     ) -> bool:
-        # Tier 2: Immediate rotation on flow reversal
+        # Tier 2: Immediate rotation on flow reversal (with backoff)
         if bot.get("_auto_pilot_force_rotation"):
+            backoff_until = self._safe_float(
+                bot.get("_auto_pilot_rotation_backoff_until"), 0.0
+            )
+            if backoff_until > 0 and time.time() < backoff_until:
+                return False
             bot.pop("_auto_pilot_force_rotation", None)
+            # Set backoff NOW — whether rotation succeeds or not, don't retry for 60s
+            from config.strategy_config import AUTO_PILOT_FORCED_ROTATION_BACKOFF_SECONDS
+            bot["_auto_pilot_rotation_backoff_until"] = (
+                time.time() + AUTO_PILOT_FORCED_ROTATION_BACKOFF_SECONDS
+            )
             logger.warning(
                 "[%s] Auto-Pilot forced rotation due to: %s",
                 current_symbol,
