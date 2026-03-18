@@ -82,9 +82,10 @@ class IncidentClassifier:
         return False
 
     async def auto_resolve_stale(self):
+        now = time.time()
         for pattern, _ in self._compiled:
             last_seen = self._last_fired.get(pattern.key, 0)
-            if last_seen > 0 and time.time() - last_seen > pattern.auto_resolve_sec:
+            if last_seen == 0 or now - last_seen > pattern.auto_resolve_sec:
                 await self._repo.auto_resolve_stale(pattern.key, pattern.auto_resolve_sec)
 
     async def _create_incident(self, pattern: LogPattern, match: re.Match,

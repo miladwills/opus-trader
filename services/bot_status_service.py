@@ -3916,6 +3916,9 @@ class BotStatusService:
         setup_ready_status = bot.get("setup_ready_status") or cached_readiness.get("stable_stage") or "watch"
         setup_ready_reason = bot.get("setup_ready_reason") or ""
         setup_ready_score = bot.get("setup_ready_score")
+        setup_timing_score = bot.get("setup_timing_score")
+        analysis_ready_score = bot.get("analysis_ready_score")
+        entry_ready_score = bot.get("entry_ready_score")
         entry_ready_status = bot.get("entry_ready_status") or setup_ready_status
         entry_ready_reason = bot.get("entry_ready_reason") or ""
         execution_viability_status = bot.get("execution_viability_status") or "unknown"
@@ -3983,6 +3986,9 @@ class BotStatusService:
             "setup_ready_status": setup_ready_status,
             "setup_ready_reason": setup_ready_reason,
             "setup_ready_score": setup_ready_score,
+            "setup_timing_score": setup_timing_score,
+            "analysis_ready_score": analysis_ready_score,
+            "entry_ready_score": entry_ready_score,
             "entry_ready_status": entry_ready_status,
             "entry_ready_reason": entry_ready_reason,
             "execution_blocked": execution_blocked,

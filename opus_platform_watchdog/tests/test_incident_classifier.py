@@ -115,3 +115,56 @@ async def test_synthetic_markers_do_not_suppress_non_test_bot_error_state(repo):
     incidents = await classifier.scan_lines(lines, "runner")
     assert len(incidents) == 1
     assert incidents[0].pattern_key == "bot_error_state"
+
+
+@pytest.mark.asyncio
+async def test_auto_resolve_stale_resolves_never_fired_patterns(repo):
+    """Patterns that never fired in the current session must still
+    auto-resolve old open incidents (e.g. after restart + suppression)."""
+    old_opened_at = time.time() - 600  # 10 minutes ago
+    await repo._db.execute(
+        "INSERT INTO incidents "
+        "(incident_id, opened_at, severity, category, component, pattern_key, "
+        " summary, status, hit_count, detail) "
+        "VALUES (?, ?, 'medium', 'api', 'trader', 'snapshot_timeout', "
+        " 'Dashboard snapshot timeout', 'open', 10, '{}')",
+        ("INC-TEST-STALE-001", old_opened_at),
+    )
+    await repo._db.commit()
+
+    classifier = IncidentClassifier(repo)
+    # Do NOT scan any lines — pattern never fires this session
+    assert classifier._last_fired.get("snapshot_timeout", 0) == 0
+
+    await classifier.auto_resolve_stale()
+
+    cursor = await repo._db.execute(
+        "SELECT status FROM incidents WHERE incident_id = 'INC-TEST-STALE-001'"
+    )
+    row = await cursor.fetchone()
+    assert row["status"] == "auto_resolved"
+
+
+@pytest.mark.asyncio
+async def test_auto_resolve_stale_does_not_resolve_fresh_incidents(repo):
+    """Fresh incidents (opened recently) must NOT be auto-resolved
+    even if the pattern never fired in this session."""
+    fresh_opened_at = time.time() - 30  # 30 seconds ago, within auto_resolve_sec=180
+    await repo._db.execute(
+        "INSERT INTO incidents "
+        "(incident_id, opened_at, severity, category, component, pattern_key, "
+        " summary, status, hit_count, detail) "
+        "VALUES (?, ?, 'medium', 'api', 'trader', 'snapshot_timeout', "
+        " 'Dashboard snapshot timeout', 'open', 2, '{}')",
+        ("INC-TEST-FRESH-001", fresh_opened_at),
+    )
+    await repo._db.commit()
+
+    classifier = IncidentClassifier(repo)
+    await classifier.auto_resolve_stale()
+
+    cursor = await repo._db.execute(
+        "SELECT status FROM incidents WHERE incident_id = 'INC-TEST-FRESH-001'"
+    )
+    row = await cursor.fetchone()
+    assert row["status"] == "open"

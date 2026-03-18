@@ -2098,3 +2098,81 @@ def test_enrich_bot_exposes_profit_protection_fields():
     assert enriched["profit_protection_armed"] is True
     assert enriched["profit_protection_giveback_threshold_pct"] == 0.0045
     assert enriched["profit_protection_shadow_status"] == "triggered"
+
+
+def test_light_enrichment_emits_all_readiness_score_fields():
+    """When setup_ready_score is null but other score fields exist,
+    _enrich_bot_light must still emit them so the frontend fallback chain works."""
+    service = make_service()
+    service._readiness_stability_cache = {}
+
+    bot = {
+        "id": "bot-score-fallback",
+        "symbol": "ETHUSDT",
+        "mode": "long",
+        "status": "running",
+        "investment": 100.0,
+        "grid_count": 5,
+        "leverage": 10.0,
+        # setup_ready_score is None — the gap this test covers
+        "setup_ready_score": None,
+        # Fallback scores that should be emitted
+        "setup_timing_score": 68,
+        "analysis_ready_score": 72,
+        "entry_ready_score": 65,
+        "setup_ready_status": "watch",
+        "setup_ready_reason": "waiting",
+        "entry_ready_status": "watch",
+        "entry_ready_reason": "waiting",
+        "execution_viability_status": "viable",
+    }
+
+    enriched = service._enrich_bot_light(
+        bot=bot,
+        position_lookup={},
+        positions_by_symbol={},
+        symbol_pnl_lookup={},
+        bot_pnl_lookup={},
+        running_bot_ids_by_symbol={},
+    )
+
+    # All four score fields must be present in light output
+    assert enriched["setup_ready_score"] is None
+    assert enriched["setup_timing_score"] == 68
+    assert enriched["analysis_ready_score"] == 72
+    assert enriched["entry_ready_score"] == 65
+
+
+def test_light_enrichment_does_not_coerce_missing_scores_to_zero():
+    """When no score fields exist at all, light enrichment must emit None, not 0."""
+    service = make_service()
+    service._readiness_stability_cache = {}
+
+    bot = {
+        "id": "bot-no-scores",
+        "symbol": "SOLUSDT",
+        "mode": "long",
+        "status": "stopped",
+        "investment": 50.0,
+        "grid_count": 3,
+        "leverage": 5.0,
+        "setup_ready_status": "watch",
+        "setup_ready_reason": "",
+        "entry_ready_status": "watch",
+        "entry_ready_reason": "",
+        "execution_viability_status": "unknown",
+    }
+
+    enriched = service._enrich_bot_light(
+        bot=bot,
+        position_lookup={},
+        positions_by_symbol={},
+        symbol_pnl_lookup={},
+        bot_pnl_lookup={},
+        running_bot_ids_by_symbol={},
+    )
+
+    assert enriched["setup_ready_score"] is None
+    assert enriched["setup_timing_score"] is None
+    assert enriched["analysis_ready_score"] is None
+    assert enriched["entry_ready_score"] is None
