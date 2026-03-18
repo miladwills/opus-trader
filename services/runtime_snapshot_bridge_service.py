@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -178,6 +179,8 @@ class RuntimeSnapshotBridgeService:
         self._last_publish_at: Dict[str, float] = {}
         self._last_account_snapshot: Optional[Dict[str, Any]] = None
         self._last_summary_snapshot: Optional[Dict[str, Any]] = None
+        self._summary_today_stats_cache: Dict[str, Any] = {}
+        self._summary_risk_state_cache: Dict[str, Any] = {}
         self._last_snapshot: Optional[Dict[str, Any]] = None
         self._next_writer_seq = 1
 
@@ -1677,19 +1680,33 @@ class RuntimeSnapshotBridgeService:
         account_payload: Dict[str, Any],
         positions_payload: Dict[str, Any],
     ) -> Dict[str, Any]:
-        today = {}
-        if self.pnl_service:
-            try:
-                today = self.pnl_service.get_today_stats()
-            except Exception as exc:
-                logger.debug("Runtime snapshot bridge today pnl failed: %s", exc)
+        summary_runtime_diagnostics: Dict[str, Any] = {
+            "positions_count": len((positions_payload.get("positions") or [])),
+            "today_pnl_path": None,
+            "today_pnl_ms": 0.0,
+            "today_pnl_log_mtime_ns": None,
+            "risk_state_path": None,
+            "risk_state_ms": 0.0,
+            "risk_state_mtime_ns": None,
+        }
 
-        risk_state = {}
-        if self.risk_manager and hasattr(self.risk_manager, "get_risk_state"):
-            try:
-                risk_state = self.risk_manager.get_risk_state() or {}
-            except Exception as exc:
-                logger.debug("Runtime snapshot bridge risk state failed: %s", exc)
+        today, today_diag = self._get_summary_today_stats()
+        summary_runtime_diagnostics.update(
+            {
+                "today_pnl_path": today_diag.get("path"),
+                "today_pnl_ms": today_diag.get("ms", 0.0),
+                "today_pnl_log_mtime_ns": today_diag.get("mtime_ns"),
+            }
+        )
+
+        risk_state, risk_diag = self._get_summary_risk_state()
+        summary_runtime_diagnostics.update(
+            {
+                "risk_state_path": risk_diag.get("path"),
+                "risk_state_ms": risk_diag.get("ms", 0.0),
+                "risk_state_mtime_ns": risk_diag.get("mtime_ns"),
+            }
+        )
 
         summary = {
             "account": account_payload,
@@ -1698,10 +1715,118 @@ class RuntimeSnapshotBridgeService:
             "daily_loss_pct": risk_state.get("daily_loss_pct", 0.0),
             "kill_switch_triggered": risk_state.get("kill_switch_triggered", False),
             "kill_switch_triggered_at": risk_state.get("kill_switch_triggered_at"),
+            "summary_runtime_diagnostics": summary_runtime_diagnostics,
         }
         summary.setdefault("stale_data", False)
         self._last_summary_snapshot = self._copy(summary)
         return summary
+
+    @staticmethod
+    def _get_file_mtime_ns(path_value: Any) -> Optional[int]:
+        raw = str(path_value or "").strip()
+        if not raw:
+            return None
+        try:
+            return Path(raw).stat().st_mtime_ns
+        except OSError:
+            return None
+
+    def _get_summary_today_stats(self) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        diagnostics: Dict[str, Any] = {
+            "path": None,
+            "ms": 0.0,
+            "mtime_ns": None,
+        }
+        if not self.pnl_service or not hasattr(self.pnl_service, "get_today_stats"):
+            diagnostics["path"] = "service_unavailable"
+            return {}, diagnostics
+
+        today_key = datetime.now(timezone.utc).date().isoformat()
+        log_mtime_ns = self._get_file_mtime_ns(getattr(self.pnl_service, "file_path", None))
+        diagnostics["mtime_ns"] = log_mtime_ns
+        cache = self._summary_today_stats_cache
+        if (
+            cache.get("date") == today_key
+            and cache.get("mtime_ns") is not None
+            and cache.get("mtime_ns") == log_mtime_ns
+        ):
+            diagnostics["path"] = "mtime_cache"
+            return self._copy(cache.get("value") or {}), diagnostics
+
+        started = time.monotonic()
+        try:
+            today_stats = self.pnl_service.get_today_stats() or {}
+        except Exception as exc:
+            logger.debug("Runtime snapshot bridge today pnl failed: %s", exc)
+            diagnostics["path"] = "error"
+            diagnostics["ms"] = round(
+                max(time.monotonic() - started, 0.0) * 1000.0,
+                3,
+            )
+            diagnostics["error"] = str(exc)
+            return {}, diagnostics
+
+        diagnostics["path"] = "live_read"
+        diagnostics["ms"] = round(
+            max(time.monotonic() - started, 0.0) * 1000.0,
+            3,
+        )
+        if log_mtime_ns is not None:
+            self._summary_today_stats_cache = {
+                "date": today_key,
+                "mtime_ns": log_mtime_ns,
+                "value": self._copy(today_stats),
+            }
+        else:
+            self._summary_today_stats_cache = {}
+        return today_stats, diagnostics
+
+    def _get_summary_risk_state(self) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        diagnostics: Dict[str, Any] = {
+            "path": None,
+            "ms": 0.0,
+            "mtime_ns": None,
+        }
+        if not self.risk_manager or not hasattr(self.risk_manager, "get_risk_state"):
+            diagnostics["path"] = "service_unavailable"
+            return {}, diagnostics
+
+        state_mtime_ns = self._get_file_mtime_ns(getattr(self.risk_manager, "file_path", None))
+        diagnostics["mtime_ns"] = state_mtime_ns
+        cache = self._summary_risk_state_cache
+        if (
+            cache.get("mtime_ns") is not None
+            and cache.get("mtime_ns") == state_mtime_ns
+        ):
+            diagnostics["path"] = "mtime_cache"
+            return self._copy(cache.get("value") or {}), diagnostics
+
+        started = time.monotonic()
+        try:
+            risk_state = self.risk_manager.get_risk_state() or {}
+        except Exception as exc:
+            logger.debug("Runtime snapshot bridge risk state failed: %s", exc)
+            diagnostics["path"] = "error"
+            diagnostics["ms"] = round(
+                max(time.monotonic() - started, 0.0) * 1000.0,
+                3,
+            )
+            diagnostics["error"] = str(exc)
+            return {}, diagnostics
+
+        diagnostics["path"] = "live_read"
+        diagnostics["ms"] = round(
+            max(time.monotonic() - started, 0.0) * 1000.0,
+            3,
+        )
+        if state_mtime_ns is not None:
+            self._summary_risk_state_cache = {
+                "mtime_ns": state_mtime_ns,
+                "value": self._copy(risk_state),
+            }
+        else:
+            self._summary_risk_state_cache = {}
+        return risk_state, diagnostics
 
     def _build_bots_runtime_payload(self, cache_only: bool = False) -> Dict[str, Any]:
         if not self.bot_status_service:

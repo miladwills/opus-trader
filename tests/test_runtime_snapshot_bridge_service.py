@@ -803,3 +803,58 @@ def test_positions_payload_includes_runtime_diagnostics_and_projected_bot_attrib
             "read_only_projected_cache": True,
         }
     ]
+
+
+def test_summary_payload_reuses_today_pnl_and_risk_state_when_files_unchanged(tmp_path):
+    bridge = RuntimeSnapshotBridgeService(file_path=str(tmp_path / "runtime_snapshot_bridge.json"))
+
+    trade_log = tmp_path / "trade_logs.json"
+    trade_log.write_text("[]", encoding="utf-8")
+    risk_state = tmp_path / "risk_state.json"
+    risk_state.write_text("{}", encoding="utf-8")
+
+    class FakePnlService:
+        def __init__(self, file_path):
+            self.file_path = file_path
+            self.calls = 0
+
+        def get_today_stats(self):
+            self.calls += 1
+            return {"net": 1.25, "wins": 2, "losses": 1}
+
+    class FakeRiskManager:
+        def __init__(self, file_path):
+            self.file_path = file_path
+            self.calls = 0
+
+        def get_risk_state(self):
+            self.calls += 1
+            return {
+                "daily_loss_pct": -0.12,
+                "kill_switch_triggered": False,
+                "kill_switch_triggered_at": None,
+            }
+
+    bridge.pnl_service = FakePnlService(trade_log)
+    bridge.risk_manager = FakeRiskManager(risk_state)
+
+    first = bridge._build_summary_payload(
+        account_payload={"equity": 100.0},
+        positions_payload={"positions": [{"symbol": "BTCUSDT"}], "summary": {"total_positions": 1}},
+    )
+    second = bridge._build_summary_payload(
+        account_payload={"equity": 100.0},
+        positions_payload={"positions": [{"symbol": "BTCUSDT"}], "summary": {"total_positions": 1}},
+    )
+
+    first_diag = first["summary_runtime_diagnostics"]
+    second_diag = second["summary_runtime_diagnostics"]
+    assert first["today_pnl"]["net"] == 1.25
+    assert first["daily_loss_pct"] == -0.12
+    assert first_diag["today_pnl_path"] == "live_read"
+    assert first_diag["risk_state_path"] == "live_read"
+    assert second_diag["today_pnl_path"] == "mtime_cache"
+    assert second_diag["risk_state_path"] == "mtime_cache"
+    assert second_diag["positions_count"] == 1
+    assert bridge.pnl_service.calls == 1
+    assert bridge.risk_manager.calls == 1
