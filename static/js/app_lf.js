@@ -319,11 +319,22 @@ function setElementDisplayIfChanged(element, displayValue) {
   return true;
 }
 
+function _scoreNullReason(bot) {
+  const reason = String(bot?.stable_readiness_reason || "").trim().toLowerCase();
+  const preview = String(bot?.readiness_preview_state || "").trim().toLowerCase();
+  const status = String(bot?.status || "").trim().toLowerCase();
+  if (reason === "preview_disabled" || reason === "preview_limited") return "No preview";
+  if (reason === "preview_unavailable" || reason === "stopped_preview_unavailable") return "No preview";
+  if (reason === "stale_snapshot" || preview === "stale") return "Stale";
+  if (reason === "stop_cleanup_pending" || status === "stop_cleanup_pending") return "Cleanup";
+  return "No eval";
+}
+
 function _scoreDisplay(bot) {
   const setup = getSetupReadiness(bot);
   const score = setup.score;
-  if (score === null || score === undefined || !Number.isFinite(score)) return "—";
-  return score.toFixed(0);
+  if (Number.isFinite(score)) return score.toFixed(0);
+  return _scoreNullReason(bot);
 }
 
 function _bandDisplay(bot) {

@@ -542,7 +542,7 @@ def test_setup_readiness_uses_display_readiness_score():
 
 def test_score_display_and_band_do_not_coerce_missing_readiness_to_zero_or_poor():
     result = _run_readiness_display_scenario(
-        ["pickFiniteReadinessScore", "getSetupReadiness", "_scoreDisplay", "_bandDisplay"],
+        ["pickFiniteReadinessScore", "getSetupReadiness", "_scoreNullReason", "_scoreDisplay", "_bandDisplay"],
         """
         const bot = {
           id: "bot-missing",
@@ -559,7 +559,7 @@ def test_score_display_and_band_do_not_coerce_missing_readiness_to_zero_or_poor(
     )
 
     assert result == {
-        "scoreText": "—",
+        "scoreText": "No eval",
         "bandText": "",
     }
 
@@ -586,3 +586,91 @@ def test_pending_stop_reuses_single_stop_button_markup():
         "hasStoppingLabel": True,
         "hasClickableStop": False,
     }
+
+
+# ── Score null-reason display tests ──
+
+
+def test_score_display_finite_score_renders_numeric():
+    result = _run_readiness_display_scenario(
+        ["pickFiniteReadinessScore", "getSetupReadiness", "_scoreNullReason", "_scoreDisplay"],
+        """
+        const bot = { id: "b1", display_readiness_score: 72 };
+        process.stdout.write(JSON.stringify({ text: context._scoreDisplay(bot) }));
+        """,
+    )
+    assert result == {"text": "72"}
+
+
+def test_score_display_null_preview_disabled():
+    result = _run_readiness_display_scenario(
+        ["pickFiniteReadinessScore", "getSetupReadiness", "_scoreNullReason", "_scoreDisplay"],
+        """
+        const bot = { id: "b1", display_readiness_score: null, stable_readiness_reason: "preview_disabled" };
+        process.stdout.write(JSON.stringify({ text: context._scoreDisplay(bot) }));
+        """,
+    )
+    assert result == {"text": "No preview"}
+
+
+def test_score_display_null_stale_snapshot():
+    result = _run_readiness_display_scenario(
+        ["pickFiniteReadinessScore", "getSetupReadiness", "_scoreNullReason", "_scoreDisplay"],
+        """
+        const bot = { id: "b1", display_readiness_score: null, stable_readiness_reason: "stale_snapshot" };
+        process.stdout.write(JSON.stringify({ text: context._scoreDisplay(bot) }));
+        """,
+    )
+    assert result == {"text": "Stale"}
+
+
+def test_score_display_null_stop_cleanup_pending():
+    result = _run_readiness_display_scenario(
+        ["pickFiniteReadinessScore", "getSetupReadiness", "_scoreNullReason", "_scoreDisplay"],
+        """
+        const bot = { id: "b1", display_readiness_score: null, stable_readiness_reason: "stop_cleanup_pending" };
+        process.stdout.write(JSON.stringify({ text: context._scoreDisplay(bot) }));
+        """,
+    )
+    assert result == {"text": "Cleanup"}
+
+
+def test_score_display_null_no_specific_reason_falls_back():
+    result = _run_readiness_display_scenario(
+        ["pickFiniteReadinessScore", "getSetupReadiness", "_scoreNullReason", "_scoreDisplay"],
+        """
+        const bot = { id: "b1", display_readiness_score: null, stable_readiness_reason: "" };
+        process.stdout.write(JSON.stringify({ text: context._scoreDisplay(bot) }));
+        """,
+    )
+    assert result == {"text": "No eval"}
+
+
+def test_score_display_null_does_not_show_raw_fallback_score():
+    """Even if raw scores exist, null display_readiness_score must show reason label, not a number."""
+    result = _run_readiness_display_scenario(
+        ["pickFiniteReadinessScore", "getSetupReadiness", "_scoreNullReason", "_scoreDisplay"],
+        """
+        const bot = {
+          id: "b1",
+          display_readiness_score: null,
+          setup_timing_score: 65,
+          entry_ready_score: 65,
+          stable_readiness_reason: "preview_disabled",
+        };
+        process.stdout.write(JSON.stringify({ text: context._scoreDisplay(bot) }));
+        """,
+    )
+    assert result == {"text": "No preview"}
+
+
+def test_score_display_null_stale_via_preview_state():
+    """readiness_preview_state=stale should show Stale even without stale_snapshot reason."""
+    result = _run_readiness_display_scenario(
+        ["pickFiniteReadinessScore", "getSetupReadiness", "_scoreNullReason", "_scoreDisplay"],
+        """
+        const bot = { id: "b1", display_readiness_score: null, readiness_preview_state: "stale" };
+        process.stdout.write(JSON.stringify({ text: context._scoreDisplay(bot) }));
+        """,
+    )
+    assert result == {"text": "Stale"}
