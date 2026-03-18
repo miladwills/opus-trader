@@ -2307,3 +2307,51 @@ def test_display_readiness_score_updates_on_demotion_confirmed():
     r3 = _stability_eval(service, p3)
     assert r3["stable_readiness_stage"] == "watch"
     assert r3["stable_readiness_score"] == 53
+
+
+def test_light_enrichment_reads_display_readiness_score_from_stability_cache():
+    """After a full stability eval populates the cache, _enrich_bot_light
+    must read display_readiness_score from cached stable_score."""
+    service = make_service()
+
+    # Simulate a full enrichment cycle: run _apply_readiness_stability
+    # which writes to the stability cache
+    payload = readiness_payload(stage="armed", reason="good_setup", score=72)
+    bot = {"id": "bot-light-score", "status": "stopped", "symbol": "RENDERUSDT",
+           "mode": "long", "investment": 100.0}
+    result = service._apply_readiness_stability(payload, bot=bot, scope="configured")
+    assert result["stable_readiness_score"] == 72
+
+    # Verify the stability cache has stable_score
+    cache = service._readiness_stability_cache
+    cache_key = "bot-light-score:configured"
+    assert cache[cache_key]["stable_score"] == 72
+
+    # Now call _enrich_bot_light — it should read from the cache
+    enriched = service._enrich_bot_light(
+        bot=bot,
+        position_lookup={},
+        positions_by_symbol={},
+        symbol_pnl_lookup={},
+        bot_pnl_lookup={},
+        running_bot_ids_by_symbol={},
+    )
+    assert enriched["display_readiness_score"] == 72
+
+
+def test_light_enrichment_display_readiness_score_none_without_cache():
+    """Without a prior full eval, _enrich_bot_light should emit
+    display_readiness_score=None (truthful '—')."""
+    service = make_service()
+    bot = {"id": "bot-no-cache", "status": "stopped", "symbol": "BCHUSDT",
+           "mode": "long", "investment": 100.0}
+
+    enriched = service._enrich_bot_light(
+        bot=bot,
+        position_lookup={},
+        positions_by_symbol={},
+        symbol_pnl_lookup={},
+        bot_pnl_lookup={},
+        running_bot_ids_by_symbol={},
+    )
+    assert enriched["display_readiness_score"] is None
