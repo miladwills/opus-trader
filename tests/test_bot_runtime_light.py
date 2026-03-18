@@ -463,7 +463,22 @@ class TestLightPathIsolation:
         assert diagnostics["phase_ms"]["bot_pnl_lookup_ms"] >= 0.0
         assert diagnostics["phase_ms"]["per_bot_enrich_ms"] >= 0.0
         assert diagnostics["phase_ms"]["readiness_stability_ms"] >= 0.0
+        assert diagnostics["phase_ms"]["runtime_window_ms"] >= 0.0
+        assert diagnostics["phase_ms"]["session_timer_ms"] >= 0.0
+        assert diagnostics["phase_ms"]["exchange_guard_ms"] >= 0.0
         assert diagnostics["storage"]["storage_read_call_count"] == 1
+
+    def test_light_path_reuses_readiness_cache_once_per_build(self):
+        svc = self._make_service()
+        with patch.object(svc, "_prune_readiness_stability_cache", return_value=None):
+            with patch.object(svc, "_ensure_readiness_stability_cache", return_value={}) as mock_cache:
+                with patch.object(svc, "_get_scanner_recommendation_lookup", return_value={}):
+                    with patch.object(svc, "_build_stopped_preview_lookup", return_value={}):
+                        with patch.object(svc, "_get_runtime_positions_payload", return_value={"positions": []}):
+                            with patch.object(svc, "_build_live_open_orders_by_symbol", return_value={}):
+                                svc.get_runtime_bots_light()
+
+        mock_cache.assert_called_once_with()
 
     def test_light_path_reads_pnl_payload_once_and_partitions_in_memory(self):
         svc = self._make_service()

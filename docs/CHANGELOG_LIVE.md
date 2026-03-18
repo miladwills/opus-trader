@@ -2,6 +2,9 @@
 
 Update this file for meaningful patches. Keep entries short.
 
+## 2026-03-18
+- Runtime bridge `bots_runtime_light` final local optimization: the light builder now reuses one per-build `now_dt` / readiness cache across all bots, avoids recomputing blocker/cooldown state from fresh exchange-truth copies inside each light dict build, and emits bounded `runtime_window_ms`, `session_timer_ms`, and `exchange_guard_ms` sub-diagnostics so the remaining light-runtime cost can be separated from the already-fixed storage and shared-PnL phases without changing payload semantics or trading behavior
+
 ## 2026-03-17
 - Runtime bridge `summary` optimization: the producer now records bounded `summary_runtime_diagnostics` and reuses `today_pnl` / `risk_state` results when the backing trade-log and risk-state file mtimes are unchanged, removing repeated local summary rereads without changing payload semantics or trading behavior
 - Runtime bridge `positions` optimization: the producer now records bounded `positions_runtime_diagnostics` (fetch path/time, normalize time, attribution timing, projected bot-storage timings) and uses a projected bot-storage read for symbol attribution instead of a full bot list load, reducing local positions-section work without changing payload semantics or trading behavior

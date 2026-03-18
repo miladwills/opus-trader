@@ -990,11 +990,27 @@ class BotStatusService:
 
     @staticmethod
     def _get_raw_runtime_signal_blocker(bot: Dict[str, Any]) -> Optional[str]:
-        reconcile = dict(bot.get("exchange_reconciliation") or {})
-        reconcile_status = str(reconcile.get("status") or "").strip().lower()
+        return BotStatusService._get_raw_runtime_signal_blocker_preloaded(
+            bot,
+            exchange_reconciliation=dict(bot.get("exchange_reconciliation") or {}),
+            ambiguous_execution_follow_up=dict(
+                bot.get("ambiguous_execution_follow_up") or {}
+            ),
+        )
+
+    @staticmethod
+    def _get_raw_runtime_signal_blocker_preloaded(
+        bot: Dict[str, Any],
+        *,
+        exchange_reconciliation: Dict[str, Any],
+        ambiguous_execution_follow_up: Dict[str, Any],
+    ) -> Optional[str]:
+        reconcile_status = str(
+            (exchange_reconciliation or {}).get("status") or ""
+        ).strip().lower()
         mismatches = [
             str(item or "").strip().lower()
-            for item in list(reconcile.get("mismatches") or [])
+            for item in list((exchange_reconciliation or {}).get("mismatches") or [])
             if str(item or "").strip()
         ]
         if reconcile_status in {
@@ -1004,12 +1020,13 @@ class BotStatusService:
             return "reconciliation_diverged"
         if bot.get("position_assumption_stale") or bot.get("order_assumption_stale"):
             return "exchange_truth_stale"
-        ambiguous_follow_up = dict(bot.get("ambiguous_execution_follow_up") or {})
         ambiguous_status = str(
-            ambiguous_follow_up.get("status") or ""
+            (ambiguous_execution_follow_up or {}).get("status") or ""
         ).strip().lower()
-        if bool(ambiguous_follow_up.get("pending")) or ambiguous_status == "still_unresolved" or bool(
-            ambiguous_follow_up.get("truth_check_expired")
+        if (
+            bool((ambiguous_execution_follow_up or {}).get("pending"))
+            or ambiguous_status == "still_unresolved"
+            or bool((ambiguous_execution_follow_up or {}).get("truth_check_expired"))
         ):
             return "exchange_state_untrusted"
         if bot.get("_session_timer_block_opening_orders"):
@@ -1339,6 +1356,9 @@ class BotStatusService:
         enrich_diagnostics: Dict[str, float] = {
             "readiness_stability_ms": 0.0,
             "light_dict_build_ms": 0.0,
+            "runtime_window_ms": 0.0,
+            "session_timer_ms": 0.0,
+            "exchange_guard_ms": 0.0,
         }
 
         def record_phase(name: str, phase_started: float) -> None:
@@ -1370,7 +1390,9 @@ class BotStatusService:
                     if str(bot.get("id") or "").strip()
                 }
             )
+            readiness_cache = self._ensure_readiness_stability_cache()
             running_bot_ids_by_symbol = self._build_running_bot_ids_by_symbol(bots)
+            now_dt = datetime.now(timezone.utc)
             record_phase("runtime_merge_index_ms", phase_started)
 
             phase_started = time.monotonic()
@@ -1470,6 +1492,8 @@ class BotStatusService:
                     scanner_lookup,
                     live_open_orders_by_symbol,
                     stopped_preview_lookup,
+                    now_dt=now_dt,
+                    readiness_cache=readiness_cache,
                     diagnostics=enrich_diagnostics,
                 )
                 enriched_bots.append(enriched)
@@ -1497,6 +1521,18 @@ class BotStatusService:
         )
         phase_ms["light_dict_build_ms"] = round(
             float(enrich_diagnostics.get("light_dict_build_ms") or 0.0),
+            3,
+        )
+        phase_ms["runtime_window_ms"] = round(
+            float(enrich_diagnostics.get("runtime_window_ms") or 0.0),
+            3,
+        )
+        phase_ms["session_timer_ms"] = round(
+            float(enrich_diagnostics.get("session_timer_ms") or 0.0),
+            3,
+        )
+        phase_ms["exchange_guard_ms"] = round(
+            float(enrich_diagnostics.get("exchange_guard_ms") or 0.0),
             3,
         )
         diagnostics = {
@@ -3612,6 +3648,8 @@ class BotStatusService:
         scanner_lookup: Optional[Dict[str, Dict[str, Any]]] = None,
         live_open_orders_by_symbol: Optional[Dict[str, List[Dict[str, Any]]]] = None,
         stopped_preview_lookup: Optional[Dict[str, Dict[str, Any]]] = None,
+        now_dt: Optional[datetime] = None,
+        readiness_cache: Optional[Dict[str, Dict[str, Any]]] = None,
         diagnostics: Optional[Dict[str, float]] = None,
     ) -> Dict[str, Any]:
         """Lightweight bot enrichment for the dashboard-critical fast path.
@@ -3652,6 +3690,7 @@ class BotStatusService:
         auto_pilot_universe_summary = bot.get("auto_pilot_universe_summary")
         if auto_pilot_enabled and not auto_pilot_universe_summary:
             auto_pilot_universe_summary = f"mode={auto_pilot_universe_mode}"
+        current_dt = now_dt or datetime.now(timezone.utc)
         configured_bot_mode = configured_mode(bot)
         configured_bot_range_mode = configured_range_mode(bot)
         effective_runtime_mode = normalize_bot_mode(
@@ -3770,13 +3809,13 @@ class BotStatusService:
         session_hours = 0.0
         bot_status = bot.get("status", "stopped")
         started_at = bot.get("started_at")
+        runtime_window_started = time.monotonic()
         if bot_status == "running" and started_at:
             try:
                 started_dt = datetime.fromisoformat(
                     str(started_at).replace("Z", "+00:00")
                 )
-                curr_dt = datetime.now(timezone.utc)
-                session_seconds = max((curr_dt - started_dt).total_seconds(), 0)
+                session_seconds = max((current_dt - started_dt).total_seconds(), 0)
                 session_hours = session_seconds / 3600.0
             except Exception:
                 session_hours = 0.0
@@ -3795,9 +3834,13 @@ class BotStatusService:
             session_total_pnl = session_realized_pnl + unrealized_pnl
             if session_hours >= MIN_RUNTIME_FOR_RATE_HOURS:
                 session_profit_per_hour = session_total_pnl / session_hours
+        if diagnostics is not None:
+            diagnostics["runtime_window_ms"] = float(
+                diagnostics.get("runtime_window_ms") or 0.0
+            ) + ((time.monotonic() - runtime_window_started) * 1000.0)
 
         # --- Session timer (cheap datetime math) ---
-        now_dt = datetime.now(timezone.utc)
+        session_timer_started = time.monotonic()
         session_timer_state = str(
             bot.get("session_timer_state") or "inactive"
         ).strip().lower() or "inactive"
@@ -3819,7 +3862,7 @@ class BotStatusService:
         def _remaining_seconds(target_dt: Optional[datetime]) -> Optional[int]:
             if target_dt is None:
                 return None
-            return max(int((target_dt - now_dt).total_seconds()), 0)
+            return max(int((target_dt - current_dt).total_seconds()), 0)
 
         session_timer_stops_in_sec = (
             _remaining_seconds(session_timer_stop_dt)
@@ -3831,6 +3874,10 @@ class BotStatusService:
             if session_timer_grace_expires_dt is not None
             else None
         )
+        if diagnostics is not None:
+            diagnostics["session_timer_ms"] = float(
+                diagnostics.get("session_timer_ms") or 0.0
+            ) + ((time.monotonic() - session_timer_started) * 1000.0)
 
         # --- Order counts (cheap, from pre-fetched data) ---
         live_order_counts = self._get_live_bot_order_counts(
@@ -3856,7 +3903,7 @@ class BotStatusService:
 
         # --- Readiness: use stability cache (NO fresh evaluation) ---
         readiness_started = time.monotonic()
-        cache = self._ensure_readiness_stability_cache()
+        cache = readiness_cache if isinstance(readiness_cache, dict) else self._ensure_readiness_stability_cache()
         cache_key = f"{bot_id}:configured"
         cached_readiness = cache.get(cache_key) or {}
         stable_readiness_stage = cached_readiness.get("stable_stage") or bot.get("stable_readiness_stage") or "watch"
@@ -3879,10 +3926,24 @@ class BotStatusService:
             ) + ((time.monotonic() - readiness_started) * 1000.0)
 
         # Exchange truth (cheap dict reads)
+        exchange_guard_started = time.monotonic()
         exchange_reconciliation = dict(bot.get("exchange_reconciliation") or {})
         ambiguous_execution_follow_up = dict(
             bot.get("ambiguous_execution_follow_up") or {}
         )
+        opening_blocked_reason = self._get_raw_runtime_signal_blocker_preloaded(
+            bot,
+            exchange_reconciliation=exchange_reconciliation,
+            ambiguous_execution_follow_up=ambiguous_execution_follow_up,
+        )
+        upnl_stoploss_in_cooldown = self._is_in_cooldown_at(
+            bot.get("upnl_stoploss_cooldown_until"),
+            current_dt,
+        )
+        if diagnostics is not None:
+            diagnostics["exchange_guard_ms"] = float(
+                diagnostics.get("exchange_guard_ms") or 0.0
+            ) + ((time.monotonic() - exchange_guard_started) * 1000.0)
 
         # --- Build light-only enriched dict ---
         light_dict_started = time.monotonic()
@@ -4052,7 +4113,7 @@ class BotStatusService:
             "effective_opening_order_cap": effective_opening_order_cap,
             "last_skip_reason": bot.get("last_skip_reason"),
             "last_replacement_action": bot.get("last_replacement_action"),
-            "opening_blocked_reason": self._get_raw_runtime_signal_blocker(bot),
+            "opening_blocked_reason": opening_blocked_reason,
             # Grid/scalp
             "neutral_grid_enabled": bot.get("neutral_grid_enabled", False),
             "scalp_status": bot.get("scalp_status"),
@@ -4087,7 +4148,7 @@ class BotStatusService:
             "upnl_stoploss_enabled": bot.get("upnl_stoploss_enabled", False),
             "upnl_stoploss_active": bot.get("_block_opening_orders", False),
             "upnl_stoploss_reason": bot.get("_upnl_stoploss_reason"),
-            "upnl_stoploss_in_cooldown": self._is_in_cooldown(bot),
+            "upnl_stoploss_in_cooldown": upnl_stoploss_in_cooldown,
             "upnl_stoploss_trigger_count": bot.get("upnl_stoploss_trigger_count", 0),
             # Exchange truth
             "exchange_reconciliation": exchange_reconciliation,
@@ -5262,12 +5323,23 @@ class BotStatusService:
         Returns:
             True if in cooldown, False otherwise
         """
-        cooldown_until = bot.get("upnl_stoploss_cooldown_until")
+        return self._is_in_cooldown_at(
+            bot.get("upnl_stoploss_cooldown_until"),
+            datetime.now(timezone.utc),
+        )
+
+    @staticmethod
+    def _is_in_cooldown_at(
+        cooldown_until: Any,
+        now_dt: datetime,
+    ) -> bool:
         if not cooldown_until:
             return False
         try:
-            cooldown_dt = datetime.fromisoformat(cooldown_until.replace("Z", "+00:00"))
-            return cooldown_dt > datetime.now(timezone.utc)
+            cooldown_dt = datetime.fromisoformat(
+                str(cooldown_until).replace("Z", "+00:00")
+            )
+            return cooldown_dt > now_dt
         except (ValueError, TypeError):
             return False
 
