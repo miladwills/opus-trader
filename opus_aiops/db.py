@@ -60,6 +60,88 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_target ON audit_log(target_type, target_id);
+
+-- V2: Agent registry
+CREATE TABLE IF NOT EXISTS agents (
+    agent_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'stopped',
+    enabled INTEGER NOT NULL DEFAULT 0,
+    auto_run INTEGER NOT NULL DEFAULT 0,
+    interval_sec INTEGER NOT NULL DEFAULT 300,
+    last_started_at REAL,
+    last_stopped_at REAL,
+    last_heartbeat_at REAL,
+    last_run_at REAL,
+    last_result_summary TEXT NOT NULL DEFAULT '',
+    current_task TEXT NOT NULL DEFAULT '',
+    error_summary TEXT NOT NULL DEFAULT '',
+    run_count INTEGER NOT NULL DEFAULT 0,
+    cooldown_until REAL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- V2: Agent run history
+CREATE TABLE IF NOT EXISTS agent_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id TEXT NOT NULL,
+    started_at REAL NOT NULL,
+    finished_at REAL,
+    status TEXT NOT NULL DEFAULT 'running',
+    result_summary TEXT NOT NULL DEFAULT '',
+    error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_agent ON agent_runs(agent_id, started_at DESC);
+
+-- V2: Proposals
+CREATE TABLE IF NOT EXISTS proposals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proposal_id TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    category TEXT NOT NULL,
+    source_agent TEXT NOT NULL,
+    severity TEXT NOT NULL DEFAULT 'medium',
+    rationale TEXT NOT NULL,
+    evidence_refs TEXT NOT NULL DEFAULT '[]',
+    affected_components TEXT NOT NULL DEFAULT '[]',
+    action_type TEXT NOT NULL,
+    action_params TEXT NOT NULL DEFAULT '{}',
+    risk_level TEXT NOT NULL DEFAULT 'low',
+    reversibility TEXT NOT NULL DEFAULT 'reversible',
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at REAL NOT NULL,
+    approved_by TEXT,
+    approved_at REAL,
+    rejected_by TEXT,
+    rejected_at REAL,
+    execution_result TEXT,
+    execution_started_at REAL,
+    execution_finished_at REAL,
+    gate_verdict TEXT,
+    gate_reason TEXT,
+    created_at_str TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status);
+CREATE INDEX IF NOT EXISTS idx_proposals_created ON proposals(created_at DESC);
+
+-- V2: Action executions
+CREATE TABLE IF NOT EXISTS action_executions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proposal_id TEXT NOT NULL,
+    action_type TEXT NOT NULL,
+    action_params TEXT NOT NULL DEFAULT '{}',
+    started_at REAL NOT NULL,
+    finished_at REAL,
+    status TEXT NOT NULL DEFAULT 'running',
+    result TEXT NOT NULL DEFAULT '',
+    error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_executions_proposal ON action_executions(proposal_id);
 """
 
 

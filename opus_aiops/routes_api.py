@@ -50,8 +50,11 @@ async def service_status(repo: Repository = Depends(_repo)):
     collector = _get_collector()
     stats = await repo.get_triage_stats()
     latest = await repo.get_latest_snapshot()
+    agents = await repo.get_all_agents()
+    proposal_stats = await repo.get_proposal_stats()
     return {
         "service": "aiops",
+        "version": "v2",
         "uptime_sec": round(time.time() - _get_start_time(), 1),
         "collections": collector.collection_count if collector else 0,
         "lane_ages": collector.lane_ages if collector else {},
@@ -60,6 +63,9 @@ async def service_status(repo: Repository = Depends(_repo)):
         "latest_health_score": latest["health_score"] if latest else None,
         "latest_health_status": latest["health_status"] if latest else None,
         "triage_stats": stats,
+        "agent_count": len(agents),
+        "agent_statuses": {a["agent_id"]: a["status"] for a in agents},
+        "proposal_stats": proposal_stats,
     }
 
 

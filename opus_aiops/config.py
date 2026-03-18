@@ -48,3 +48,57 @@ RETENTION_AUDIT_DAYS = int(os.getenv("RETENTION_AUDIT_DAYS", "90"))
 # --- Triage ---
 TRIAGE_AUTO_RESOLVE_SEC = float(os.getenv("TRIAGE_AUTO_RESOLVE_SEC", "600"))
 CORRELATOR_WINDOW_SIZE = int(os.getenv("CORRELATOR_WINDOW_SIZE", "10"))
+
+# --- Agent supervisor ---
+SUPERVISOR_TICK_SEC = float(os.getenv("SUPERVISOR_TICK_SEC", "5"))
+AGENT_HEARTBEAT_TIMEOUT_SEC = float(os.getenv("AGENT_HEARTBEAT_TIMEOUT_SEC", "120"))
+
+# --- Retention: agent runs ---
+RETENTION_AGENT_RUNS_DAYS = int(os.getenv("RETENTION_AGENT_RUNS_DAYS", "14"))
+
+# --- Retention: proposals ---
+RETENTION_PROPOSALS_DAYS = int(os.getenv("RETENTION_PROPOSALS_DAYS", "30"))
+
+# --- Default agent definitions ---
+DEFAULT_AGENTS = [
+    {
+        "agent_id": "monitor",
+        "name": "Monitor",
+        "role": "Collects inputs from evidence sources, detects incident candidates, feeds triage engine",
+        "interval_sec": 30,
+        "enabled": True,
+        "auto_run": True,
+    },
+    {
+        "agent_id": "scout",
+        "name": "Scout",
+        "role": "Groups symptoms, prepares evidence bundles, suggests issue clusters",
+        "interval_sec": 120,
+        "enabled": True,
+        "auto_run": True,
+    },
+    {
+        "agent_id": "evaluator",
+        "name": "Evaluator",
+        "role": "Ranks findings, decides what is worth surfacing, creates proposal candidates",
+        "interval_sec": 180,
+        "enabled": True,
+        "auto_run": True,
+    },
+    {
+        "agent_id": "fix",
+        "name": "Fix",
+        "role": "Prepares narrow operational action proposals from allowlisted actions only",
+        "interval_sec": 300,
+        "enabled": False,
+        "auto_run": False,
+    },
+    {
+        "agent_id": "promotion_gate",
+        "name": "Promotion Gate",
+        "role": "Validates proposals against allowlist and safety rules before approval queue",
+        "interval_sec": 60,
+        "enabled": True,
+        "auto_run": True,
+    },
+]

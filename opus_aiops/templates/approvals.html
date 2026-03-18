@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block title %}Approvals{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-lg font-medium text-gray-200">Approval Queue</h1>
+    <div class="flex items-center gap-3 text-xs">
+        <a href="/approvals" class="{% if not current_filter %}text-cyan-400{% else %}text-gray-400 hover:text-cyan-400{% endif %}">All</a>
+        <a href="/approvals?status=pending" class="{% if current_filter == 'pending' %}text-cyan-400{% else %}text-gray-400 hover:text-cyan-400{% endif %}">Pending{% if stats.get('pending') %} ({{ stats.pending }}){% endif %}</a>
+        <a href="/approvals?status=approved" class="{% if current_filter == 'approved' %}text-cyan-400{% else %}text-gray-400 hover:text-cyan-400{% endif %}">Approved</a>
+        <a href="/approvals?status=executed" class="{% if current_filter == 'executed' %}text-cyan-400{% else %}text-gray-400 hover:text-cyan-400{% endif %}">Executed</a>
+        <a href="/approvals?status=rejected" class="{% if current_filter == 'rejected' %}text-cyan-400{% else %}text-gray-400 hover:text-cyan-400{% endif %}">Rejected</a>
+        <a href="/approvals?status=failed" class="{% if current_filter == 'failed' %}text-cyan-400{% else %}text-gray-400 hover:text-cyan-400{% endif %}">Failed</a>
+    </div>
+</div>
+
+<!-- Proposals -->
+<div class="space-y-3 mb-8">
+{% for p in proposals %}
+<div class="bg-slate-900 rounded-lg border border-slate-800 p-4">
+    <div class="flex items-start justify-between mb-2">
+        <div class="flex items-center gap-3">
+            <span class="w-2 h-2 rounded-full bg-{{ severity_color(p.severity) }}-500"></span>
+            <div>
+                <div class="text-sm font-medium text-gray-200">{{ p.title }}</div>
+                <div class="text-xs text-gray-500">
+                    {{ p.proposal_id }} &middot; {{ p.source_agent }} &middot; {{ p.category }} &middot; {{ time_ago(p.created_at) }}
+                </div>
+            </div>
+        </div>
+        <div class="flex items-center gap-2">
+            <span class="text-xs px-2 py-0.5 rounded-full
+                {% if p.status == 'pending' %}bg-orange-900/50 text-orange-400
+                {% elif p.status == 'approved' %}bg-emerald-900/50 text-emerald-400
+                {% elif p.status == 'executed' %}bg-cyan-900/50 text-cyan-400
+                {% elif p.status == 'rejected' %}bg-red-900/50 text-red-400
+                {% elif p.status == 'failed' %}bg-red-900/50 text-red-300
+                {% else %}bg-slate-800 text-gray-500{% endif %}">
+                {{ p.status }}
+            </span>
+            {% if p.status == 'pending' %}
+            <button onclick="proposalAction('{{ p.proposal_id }}', 'approve')" class="px-2.5 py-1 text-xs bg-emerald-900/40 text-emerald-400 rounded hover:bg-emerald-900/70 border border-emerald-900">Approve</button>
+            <button onclick="proposalAction('{{ p.proposal_id }}', 'reject')" class="px-2.5 py-1 text-xs bg-red-900/40 text-red-400 rounded hover:bg-red-900/70 border border-red-900">Reject</button>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Details -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mb-2">
+        <div>
+            <span class="text-gray-500">Action:</span>
+            <span class="text-cyan-400 ml-1">{{ p.action_type }}</span>
+        </div>
+        <div>
+            <span class="text-gray-500">Risk:</span>
+            <span class="{% if p.risk_level == 'high' %}text-red-400{% elif p.risk_level == 'medium' %}text-yellow-400{% else %}text-emerald-400{% endif %} ml-1">{{ p.risk_level }}</span>
+        </div>
+        <div>
+            <span class="text-gray-500">Reversible:</span>
+            <span class="text-gray-400 ml-1">{{ p.reversibility }}</span>
+        </div>
+        <div>
+            <span class="text-gray-500">Components:</span>
+            <span class="text-gray-400 ml-1">{{ p.affected_components | join(', ') }}</span>
+        </div>
+    </div>
+
+    {% if p.rationale %}
+    <div class="text-xs text-gray-400 mb-1">{{ p.rationale[:200] }}</div>
+    {% endif %}
+
+    {% if p.gate_verdict %}
+    <div class="text-xs mt-1">
+        <span class="text-gray-500">Gate:</span>
+        <span class="{% if 'approved' in (p.gate_verdict or '') %}text-emerald-400{% elif 'rejected' in (p.gate_verdict or '') %}text-red-400{% else %}text-yellow-400{% endif %} ml-1">{{ p.gate_verdict }}</span>
+        {% if p.gate_reason %}<span class="text-gray-500 ml-1">- {{ p.gate_reason[:100] }}</span>{% endif %}
+    </div>
+    {% endif %}
+
+    {% if p.approved_by %}
+    <div class="text-xs mt-1">
+        <span class="text-gray-500">Approved by:</span>
+        <span class="text-emerald-400 ml-1">{{ p.approved_by }}</span>
+        <span class="text-gray-500 ml-1">{{ time_ago(p.approved_at) }}</span>
+    </div>
+    {% endif %}
+
+    {% if p.rejected_by %}
+    <div class="text-xs mt-1">
+        <span class="text-gray-500">Rejected by:</span>
+        <span class="text-red-400 ml-1">{{ p.rejected_by }}</span>
+        <span class="text-gray-500 ml-1">{{ time_ago(p.rejected_at) }}</span>
+    </div>
+    {% endif %}
+
+    {% if p.execution_result %}
+    <div class="text-xs mt-1">
+        <span class="text-gray-500">Result:</span>
+        <span class="text-gray-400 ml-1">{{ p.execution_result[:200] }}</span>
+    </div>
+    {% endif %}
+
+    {% if p.evidence_refs %}
+    <div class="text-xs mt-1 text-gray-500">
+        Evidence: {{ p.evidence_refs | length }} ref(s)
+    </div>
+    {% endif %}
+</div>
+{% endfor %}
+
+{% if not proposals %}
+<div class="bg-slate-900 rounded-lg border border-slate-800 p-8 text-center text-gray-500">
+    No proposals{% if current_filter %} with status '{{ current_filter }}'{% endif %}
+</div>
+{% endif %}
+</div>
+
+<!-- Recent executions -->
+{% if recent_executions %}
+<div class="bg-slate-900 rounded-lg border border-slate-800">
+    <div class="px-4 py-3 border-b border-slate-800">
+        <span class="text-sm font-medium text-gray-300">Recent Executions</span>
+    </div>
+    <div class="divide-y divide-slate-800">
+        {% for e in recent_executions %}
+        <div class="px-4 py-2 flex items-center gap-3 text-xs">
+            <span class="w-2 h-2 rounded-full {% if e.status == 'completed' %}bg-emerald-500{% else %}bg-red-500{% endif %}"></span>
+            <span class="text-gray-500 w-20 flex-shrink-0">{{ time_ago(e.started_at) }}</span>
+            <span class="text-cyan-400 w-32 flex-shrink-0">{{ e.action_type }}</span>
+            <span class="text-gray-400 truncate flex-1">{{ e.result[:80] if e.result else e.error[:80] if e.error else '' }}</span>
+            <span class="text-gray-600">{{ e.proposal_id }}</span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function proposalAction(proposalId, action) {
+    const btn = event.target;
+    const origText = btn.textContent;
+    btn.textContent = '...';
+    btn.disabled = true;
+
+    let body = {};
+    if (action === 'reject') {
+        const reason = prompt('Rejection reason (optional):');
+        if (reason === null) { btn.textContent = origText; btn.disabled = false; return; }
+        body = {reason: reason || 'Operator rejected'};
+    }
+
+    try {
+        const resp = await fetch(`/api/proposals/${proposalId}/${action}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body),
+        });
+        const data = await resp.json();
+        if (!resp.ok) { alert(data.detail || 'Error'); }
+        setTimeout(() => location.reload(), 500);
+    } catch (e) {
+        alert('Request failed');
+        btn.textContent = origText;
+        btn.disabled = false;
+    }
+}
+</script>
+{% endblock %}

@@ -81,3 +81,80 @@ class AuditEntry:
     target_type: str = ""
     target_id: str = ""
     detail: dict = field(default_factory=dict)
+
+
+# --- V2: Agent model ---
+
+@dataclass
+class AgentState:
+    """Operational agent state in the AI Ops supervisor."""
+    agent_id: str = ""
+    name: str = ""
+    role: str = ""
+    status: str = "stopped"  # running, stopped, paused, error, idle
+    enabled: bool = False
+    auto_run: bool = False
+    interval_sec: int = 300
+    last_started_at: float | None = None
+    last_stopped_at: float | None = None
+    last_heartbeat_at: float | None = None
+    last_run_at: float | None = None
+    last_result_summary: str = ""
+    current_task: str = ""
+    error_summary: str = ""
+    run_count: int = 0
+    cooldown_until: float | None = None
+
+
+@dataclass
+class AgentRun:
+    """Record of a single agent execution cycle."""
+    id: int = 0
+    agent_id: str = ""
+    started_at: float = 0.0
+    finished_at: float | None = None
+    status: str = "running"  # running, completed, error
+    result_summary: str = ""
+    error: str | None = None
+
+
+@dataclass
+class Proposal:
+    """An operational action proposal requiring approval."""
+    proposal_id: str = ""
+    title: str = ""
+    category: str = ""
+    source_agent: str = ""
+    severity: str = "medium"
+    rationale: str = ""
+    evidence_refs: list = field(default_factory=list)
+    affected_components: list = field(default_factory=list)
+    action_type: str = ""
+    action_params: dict = field(default_factory=dict)
+    risk_level: str = "low"
+    reversibility: str = "reversible"
+    status: str = "pending"  # pending, approved, rejected, executed, failed, expired
+    created_at: float = 0.0
+    approved_by: str | None = None
+    approved_at: float | None = None
+    rejected_by: str | None = None
+    rejected_at: float | None = None
+    execution_result: str | None = None
+    execution_started_at: float | None = None
+    execution_finished_at: float | None = None
+    gate_verdict: str | None = None
+    gate_reason: str | None = None
+
+
+@dataclass
+class ActionExecution:
+    """Record of an executed allowlisted action."""
+    id: int = 0
+    proposal_id: str = ""
+    action_type: str = ""
+    action_params: dict = field(default_factory=dict)
+    started_at: float = 0.0
+    finished_at: float | None = None
+    status: str = "running"  # running, completed, failed
+    result: str = ""
+    error: str | None = None

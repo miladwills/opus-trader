@@ -74,21 +74,19 @@
             <span class="text-gray-500 text-sm">--</span>
         {% endif %}
     </div>
-    <!-- Flash Crash -->
-    <div class="bg-slate-900 rounded-lg p-3 border border-slate-800">
-        <div class="text-xs text-gray-500 mb-1">Flash Crash</div>
-        {% if snap and snap.flash_crash_active %}
-            <span class="text-red-400 text-sm font-bold">ACTIVE</span>
-        {% else %}
-            <span class="text-emerald-400 text-sm">Inactive</span>
-        {% endif %}
-    </div>
     <!-- Open Triage -->
     <div class="bg-slate-900 rounded-lg p-3 border border-slate-800">
         <div class="text-xs text-gray-500 mb-1">Open Triage</div>
         {% set open_count = (stats.get('open', 0) + stats.get('acknowledged', 0)) %}
         <span class="text-sm font-medium {% if open_count > 0 %}text-yellow-400{% else %}text-emerald-400{% endif %}">{{ open_count }}</span>
         <a href="/triage" class="text-xs text-cyan-400 hover:underline ml-2">view</a>
+    </div>
+    <!-- Pending Approvals -->
+    <div class="bg-slate-900 rounded-lg p-3 border border-slate-800">
+        <div class="text-xs text-gray-500 mb-1">Pending Approvals</div>
+        {% set pending_count = pending_proposals | length %}
+        <span class="text-sm font-medium {% if pending_count > 0 %}text-orange-400{% else %}text-emerald-400{% endif %}">{{ pending_count }}</span>
+        <a href="/approvals" class="text-xs text-cyan-400 hover:underline ml-2">view</a>
     </div>
     <!-- Collector -->
     <div class="bg-slate-900 rounded-lg p-3 border border-slate-800">
@@ -103,6 +101,28 @@
         {% endif %}
     </div>
 </div>
+
+<!-- Agent summary -->
+{% if agents %}
+<div class="bg-slate-900 rounded-lg border border-slate-800 mb-6">
+    <div class="px-4 py-3 border-b border-slate-800 flex justify-between items-center">
+        <span class="text-sm font-medium text-gray-300">Agents</span>
+        <a href="/agents" class="text-xs text-cyan-400 hover:underline">Manage</a>
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-0 divide-x divide-slate-800">
+        {% for a in agents %}
+        <div class="px-4 py-3">
+            <div class="flex items-center gap-2 mb-1">
+                <span class="w-2 h-2 rounded-full bg-{{ status_color(a.status) }}-500"></span>
+                <span class="text-sm font-medium text-gray-300">{{ a.name }}</span>
+            </div>
+            <div class="text-xs text-gray-500">{{ a.status }}{% if a.last_run_at %} &middot; {{ time_ago(a.last_run_at) }}{% endif %}</div>
+            {% if a.run_count > 0 %}<div class="text-[10px] text-gray-600">#{{ a.run_count }} runs</div>{% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
 
 <!-- Source health -->
 {% if collector and collector.source_errors %}

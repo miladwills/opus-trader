@@ -6,7 +6,7 @@ import json
 import time
 import aiosqlite
 from . import config
-from .models import SystemSnapshot, TriageCase, AuditEntry
+from .models import SystemSnapshot, TriageCase, AuditEntry, AgentState, Proposal, ActionExecution
 
 
 class Repository:
@@ -213,6 +213,245 @@ class Repository:
         row = await cursor.fetchone()
         return (row["cnt"] if row else 0) + 1
 
+    # --- Agents ---
+
+    async def upsert_agent(self, agent: AgentState):
+        existing = await self._db.execute(
+            "SELECT agent_id FROM agents WHERE agent_id = ?", (agent.agent_id,)
+        )
+        row = await existing.fetchone()
+        if row:
+            await self._db.execute(
+                "UPDATE agents SET name=?, role=?, status=?, enabled=?, auto_run=?, "
+                "interval_sec=?, last_started_at=?, last_stopped_at=?, last_heartbeat_at=?, "
+                "last_run_at=?, last_result_summary=?, current_task=?, error_summary=?, "
+                "run_count=?, cooldown_until=?, updated_at=datetime('now') WHERE agent_id=?",
+                (agent.name, agent.role, agent.status, int(agent.enabled), int(agent.auto_run),
+                 agent.interval_sec, agent.last_started_at, agent.last_stopped_at,
+                 agent.last_heartbeat_at, agent.last_run_at, agent.last_result_summary,
+                 agent.current_task, agent.error_summary, agent.run_count,
+                 agent.cooldown_until, agent.agent_id),
+            )
+        else:
+            await self._db.execute(
+                "INSERT INTO agents (agent_id, name, role, status, enabled, auto_run, "
+                "interval_sec, last_started_at, last_stopped_at, last_heartbeat_at, "
+                "last_run_at, last_result_summary, current_task, error_summary, "
+                "run_count, cooldown_until) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (agent.agent_id, agent.name, agent.role, agent.status,
+                 int(agent.enabled), int(agent.auto_run), agent.interval_sec,
+                 agent.last_started_at, agent.last_stopped_at, agent.last_heartbeat_at,
+                 agent.last_run_at, agent.last_result_summary, agent.current_task,
+                 agent.error_summary, agent.run_count, agent.cooldown_until),
+            )
+        await self._db.commit()
+
+    async def get_all_agents(self) -> list[dict]:
+        cursor = await self._db.execute(
+            "SELECT * FROM agents ORDER BY agent_id"
+        )
+        return [self._row_to_agent_dict(r) for r in await cursor.fetchall()]
+
+    async def get_agent(self, agent_id: str) -> dict | None:
+        cursor = await self._db.execute(
+            "SELECT * FROM agents WHERE agent_id = ?", (agent_id,)
+        )
+        row = await cursor.fetchone()
+        return self._row_to_agent_dict(row) if row else None
+
+    async def update_agent_field(self, agent_id: str, **kwargs) -> bool:
+        if not kwargs:
+            return False
+        sets = ", ".join(f"{k}=?" for k in kwargs)
+        vals = list(kwargs.values()) + [agent_id]
+        cursor = await self._db.execute(
+            f"UPDATE agents SET {sets}, updated_at=datetime('now') WHERE agent_id=?",
+            vals,
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    def _row_to_agent_dict(self, row) -> dict:
+        return {
+            "agent_id": row["agent_id"],
+            "name": row["name"],
+            "role": row["role"],
+            "status": row["status"],
+            "enabled": bool(row["enabled"]),
+            "auto_run": bool(row["auto_run"]),
+            "interval_sec": row["interval_sec"],
+            "last_started_at": row["last_started_at"],
+            "last_stopped_at": row["last_stopped_at"],
+            "last_heartbeat_at": row["last_heartbeat_at"],
+            "last_run_at": row["last_run_at"],
+            "last_result_summary": row["last_result_summary"],
+            "current_task": row["current_task"],
+            "error_summary": row["error_summary"],
+            "run_count": row["run_count"],
+            "cooldown_until": row["cooldown_until"],
+        }
+
+    # --- Agent runs ---
+
+    async def record_agent_run_start(self, agent_id: str) -> int:
+        cursor = await self._db.execute(
+            "INSERT INTO agent_runs (agent_id, started_at, status) VALUES (?, ?, 'running')",
+            (agent_id, time.time()),
+        )
+        await self._db.commit()
+        return cursor.lastrowid
+
+    async def record_agent_run_end(self, run_id: int, status: str, result: str = "", error: str | None = None):
+        await self._db.execute(
+            "UPDATE agent_runs SET finished_at=?, status=?, result_summary=?, error=? WHERE id=?",
+            (time.time(), status, result, error, run_id),
+        )
+        await self._db.commit()
+
+    async def get_agent_runs(self, agent_id: str, limit: int = 20) -> list[dict]:
+        cursor = await self._db.execute(
+            "SELECT * FROM agent_runs WHERE agent_id = ? ORDER BY started_at DESC LIMIT ?",
+            (agent_id, limit),
+        )
+        return [
+            {"id": r["id"], "agent_id": r["agent_id"], "started_at": r["started_at"],
+             "finished_at": r["finished_at"], "status": r["status"],
+             "result_summary": r["result_summary"], "error": r["error"]}
+            for r in await cursor.fetchall()
+        ]
+
+    # --- Proposals ---
+
+    async def create_proposal(self, prop: Proposal):
+        await self._db.execute(
+            "INSERT INTO proposals (proposal_id, title, category, source_agent, severity, "
+            "rationale, evidence_refs, affected_components, action_type, action_params, "
+            "risk_level, reversibility, status, created_at, gate_verdict, gate_reason) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (prop.proposal_id, prop.title, prop.category, prop.source_agent, prop.severity,
+             prop.rationale, json.dumps(prop.evidence_refs), json.dumps(prop.affected_components),
+             prop.action_type, json.dumps(prop.action_params), prop.risk_level,
+             prop.reversibility, prop.status, prop.created_at,
+             prop.gate_verdict, prop.gate_reason),
+        )
+        await self._db.commit()
+
+    async def get_pending_proposals(self) -> list[dict]:
+        cursor = await self._db.execute(
+            "SELECT * FROM proposals WHERE status = 'pending' ORDER BY created_at DESC"
+        )
+        return [self._row_to_proposal_dict(r) for r in await cursor.fetchall()]
+
+    async def get_recent_proposals(self, limit: int = 50, status_filter: str | None = None) -> list[dict]:
+        if status_filter:
+            cursor = await self._db.execute(
+                "SELECT * FROM proposals WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+                (status_filter, limit),
+            )
+        else:
+            cursor = await self._db.execute(
+                "SELECT * FROM proposals ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            )
+        return [self._row_to_proposal_dict(r) for r in await cursor.fetchall()]
+
+    async def get_proposal(self, proposal_id: str) -> dict | None:
+        cursor = await self._db.execute(
+            "SELECT * FROM proposals WHERE proposal_id = ?", (proposal_id,)
+        )
+        row = await cursor.fetchone()
+        return self._row_to_proposal_dict(row) if row else None
+
+    async def update_proposal_status(self, proposal_id: str, **kwargs) -> bool:
+        if not kwargs:
+            return False
+        sets = ", ".join(f"{k}=?" for k in kwargs)
+        vals = list(kwargs.values()) + [proposal_id]
+        cursor = await self._db.execute(
+            f"UPDATE proposals SET {sets}, updated_at=datetime('now') WHERE proposal_id=?",
+            vals,
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def get_next_proposal_seq(self) -> int:
+        today = datetime.date.today().strftime("%Y%m%d")
+        cursor = await self._db.execute(
+            "SELECT COUNT(*) as cnt FROM proposals WHERE proposal_id LIKE ?",
+            (f"PRP-{today}-%",),
+        )
+        row = await cursor.fetchone()
+        return (row["cnt"] if row else 0) + 1
+
+    async def get_proposal_stats(self) -> dict:
+        cursor = await self._db.execute(
+            "SELECT status, COUNT(*) as cnt FROM proposals GROUP BY status"
+        )
+        return {row["status"]: row["cnt"] for row in await cursor.fetchall()}
+
+    def _row_to_proposal_dict(self, row) -> dict:
+        return {
+            "proposal_id": row["proposal_id"],
+            "title": row["title"],
+            "category": row["category"],
+            "source_agent": row["source_agent"],
+            "severity": row["severity"],
+            "rationale": row["rationale"],
+            "evidence_refs": json.loads(row["evidence_refs"]) if row["evidence_refs"] else [],
+            "affected_components": json.loads(row["affected_components"]) if row["affected_components"] else [],
+            "action_type": row["action_type"],
+            "action_params": json.loads(row["action_params"]) if row["action_params"] else {},
+            "risk_level": row["risk_level"],
+            "reversibility": row["reversibility"],
+            "status": row["status"],
+            "created_at": row["created_at"],
+            "approved_by": row["approved_by"],
+            "approved_at": row["approved_at"],
+            "rejected_by": row["rejected_by"],
+            "rejected_at": row["rejected_at"],
+            "execution_result": row["execution_result"],
+            "execution_started_at": row["execution_started_at"],
+            "execution_finished_at": row["execution_finished_at"],
+            "gate_verdict": row["gate_verdict"],
+            "gate_reason": row["gate_reason"],
+        }
+
+    # --- Action executions ---
+
+    async def record_execution(self, execution: ActionExecution) -> int:
+        cursor = await self._db.execute(
+            "INSERT INTO action_executions (proposal_id, action_type, action_params, "
+            "started_at, status) VALUES (?, ?, ?, ?, ?)",
+            (execution.proposal_id, execution.action_type,
+             json.dumps(execution.action_params), execution.started_at, execution.status),
+        )
+        await self._db.commit()
+        return cursor.lastrowid
+
+    async def update_execution(self, exec_id: int, **kwargs):
+        if not kwargs:
+            return
+        sets = ", ".join(f"{k}=?" for k in kwargs)
+        vals = list(kwargs.values()) + [exec_id]
+        await self._db.execute(
+            f"UPDATE action_executions SET {sets} WHERE id=?", vals,
+        )
+        await self._db.commit()
+
+    async def get_recent_executions(self, limit: int = 20) -> list[dict]:
+        cursor = await self._db.execute(
+            "SELECT * FROM action_executions ORDER BY started_at DESC LIMIT ?",
+            (limit,),
+        )
+        return [
+            {"id": r["id"], "proposal_id": r["proposal_id"], "action_type": r["action_type"],
+             "action_params": json.loads(r["action_params"]) if r["action_params"] else {},
+             "started_at": r["started_at"], "finished_at": r["finished_at"],
+             "status": r["status"], "result": r["result"], "error": r["error"]}
+            for r in await cursor.fetchall()
+        ]
+
     # --- Retention purge ---
 
     async def purge_old_data(self):
@@ -228,5 +467,13 @@ class Repository:
         await self._db.execute(
             "DELETE FROM audit_log WHERE timestamp < ?",
             (now - config.RETENTION_AUDIT_DAYS * 86400,),
+        )
+        await self._db.execute(
+            "DELETE FROM agent_runs WHERE started_at < ?",
+            (now - config.RETENTION_AGENT_RUNS_DAYS * 86400,),
+        )
+        await self._db.execute(
+            "DELETE FROM proposals WHERE created_at < ? AND status NOT IN ('pending', 'approved')",
+            (now - config.RETENTION_PROPOSALS_DAYS * 86400,),
         )
         await self._db.commit()

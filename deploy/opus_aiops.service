@@ -5,8 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=aiops
-Group=aiops
+User=claude
+Group=claude
 WorkingDirectory=/var/www
 EnvironmentFile=/var/www/opus_aiops/.env
 ExecStart=/var/www/aiops-venv/bin/uvicorn opus_aiops.main:app --host 127.0.0.1 --port 9100 --workers 1
@@ -18,12 +18,7 @@ StandardError=append:/var/www/logs/aiops/aiops.error.log
 # Hardening
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=strict
 ProtectHome=true
-ReadOnlyPaths=/var/www/opus_aiops /var/www/aiops-venv
-ReadWritePaths=/var/www/opus_aiops/aiops.db /var/www/opus_aiops/aiops.db-wal /var/www/opus_aiops/aiops.db-shm /var/www/logs/aiops
-# Read-only access to trader storage for file-based evidence
-ReadOnlyPaths=/var/www/storage
 
 [Install]
 WantedBy=multi-user.target
