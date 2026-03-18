@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}Evidence{% endblock %}
+{% block content %}
+<!-- Tabs -->
+<div class="flex gap-1 mb-4 border-b border-slate-800">
+    <button onclick="showTab('incidents')" id="tab-incidents" class="ev-tab px-4 py-2 text-sm text-cyan-400 border-b-2 border-cyan-400">Incidents</button>
+    <button onclick="showTab('probes')" id="tab-probes" class="ev-tab px-4 py-2 text-sm text-gray-400 border-b-2 border-transparent hover:text-cyan-400">Probes</button>
+    <button onclick="showTab('bridge')" id="tab-bridge" class="ev-tab px-4 py-2 text-sm text-gray-400 border-b-2 border-transparent hover:text-cyan-400">Bridge</button>
+    <button onclick="showTab('logs')" id="tab-logs" class="ev-tab px-4 py-2 text-sm text-gray-400 border-b-2 border-transparent hover:text-cyan-400">Logs</button>
+</div>
+
+<!-- Incidents tab -->
+<div id="panel-incidents" class="ev-panel">
+    {% if snap and snap.active_incidents %}
+    <div class="space-y-2">
+        {% for inc in snap.active_incidents %}
+        <div class="bg-slate-900 rounded border border-slate-800 px-4 py-2 flex items-center gap-3 text-sm">
+            <span class="w-2 h-2 rounded-full flex-shrink-0
+                {% if inc.severity == 'critical' %}bg-red-500{% elif inc.severity == 'high' %}bg-orange-500{% elif inc.severity == 'medium' %}bg-yellow-500{% else %}bg-blue-500{% endif %}"></span>
+            <span class="text-xs text-gray-500 w-16">{{ time_ago(inc.opened_at) if inc.opened_at else '--' }}</span>
+            <span class="text-xs text-gray-500 w-16">{{ inc.category or '--' }}</span>
+            <span class="text-xs text-gray-500 w-16">{{ inc.component or '--' }}</span>
+            <span class="text-gray-300 truncate flex-1">{{ inc.summary or '--' }}</span>
+            <span class="text-xs px-2 py-0.5 rounded-full
+                {% if inc.status == 'open' %}bg-red-900/50 text-red-400{% elif inc.status == 'acknowledged' %}bg-yellow-900/50 text-yellow-400{% else %}bg-slate-800 text-gray-500{% endif %}">
+                {{ inc.status or '--' }}{% if inc.hit_count and inc.hit_count > 1 %} (x{{ inc.hit_count }}){% endif %}
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="bg-slate-900 rounded-lg border border-slate-800 px-4 py-8 text-center text-gray-500 text-sm">No incidents available</div>
+    {% endif %}
+</div>
+
+<!-- Probes tab -->
+<div id="panel-probes" class="ev-panel hidden">
+    {% if snap and snap.probe_results %}
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+        {% for name, probe in (snap.probe_results or {}).items() %}
+        <div class="bg-slate-900 rounded-lg p-3 border border-slate-800">
+            <div class="text-xs text-gray-500 truncate mb-1">{{ name }}</div>
+            <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full
+                    {% if probe.status == 'ok' %}bg-emerald-400{% elif probe.status == 'degraded' %}bg-yellow-400{% elif probe.status == 'timeout' %}bg-orange-400{% else %}bg-red-400{% endif %}"></span>
+                <span class="text-xs
+                    {% if probe.status == 'ok' %}text-emerald-400{% elif probe.status == 'degraded' %}text-yellow-400{% else %}text-red-400{% endif %}">{{ probe.status }}</span>
+                {% if probe.latency_ms %}
+                <span class="text-[10px] text-gray-600">{{ probe.latency_ms | round(0) | int }}ms</span>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="bg-slate-900 rounded-lg border border-slate-800 px-4 py-8 text-center text-gray-500 text-sm">No probe data available</div>
+    {% endif %}
+</div>
+
+<!-- Bridge tab -->
+<div id="panel-bridge" class="ev-panel hidden">
+    {% if snap and snap.bridge_diagnostics %}
+    {% set bd = snap.bridge_diagnostics %}
+    <div class="bg-slate-900 rounded-lg border border-slate-800 p-4 mb-4">
+        <div class="grid grid-cols-3 gap-4 text-sm mb-3">
+            <div>
+                <span class="text-xs text-gray-500">Producer</span>
+                <div class="{% if bd.producer_alive %}text-emerald-400{% else %}text-red-400{% endif %}">{{ 'Alive' if bd.producer_alive else 'Dead' }}</div>
+            </div>
+            <div>
+                <span class="text-xs text-gray-500">PID</span>
+                <div class="text-gray-300">{{ bd.producer_pid or '--' }}</div>
+            </div>
+            <div>
+                <span class="text-xs text-gray-500">Last Published</span>
+                <div class="text-gray-300">{{ time_ago(bd.produced_at) if bd.produced_at else '--' }}</div>
+            </div>
+        </div>
+    </div>
+    {% set sections = bd.sections if bd.sections else {} %}
+    {% if sections %}
+    <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+        {% for name, sec in sections.items() %}
+        <div class="bg-slate-900 rounded-lg p-3 border border-slate-800">
+            <div class="text-xs text-gray-500 mb-1">{{ name }}</div>
+            <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full {% if sec.stale %}bg-orange-400{% else %}bg-emerald-400{% endif %}"></span>
+                <span class="text-xs {% if sec.stale %}text-orange-400{% else %}text-emerald-400{% endif %}">
+                    {% if sec.age_sec is not none %}{{ sec.age_sec | round(1) }}s{% else %}N/A{% endif %}
+                </span>
+                <span class="text-[10px] text-gray-600">
+                    {% if sec.shape_valid %}valid{% else %}invalid{% endif %}
+                </span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% else %}
+    <div class="bg-slate-900 rounded-lg border border-slate-800 px-4 py-8 text-center text-gray-500 text-sm">No bridge diagnostics available</div>
+    {% endif %}
+</div>
+
+<!-- Logs tab -->
+<div id="panel-logs" class="ev-panel hidden">
+    <div class="flex gap-2 mb-3">
+        <button onclick="showLogSource('runner')" id="logbtn-runner" class="logbtn text-xs px-3 py-1 bg-cyan-900/30 text-cyan-400 rounded">Runner</button>
+        <button onclick="showLogSource('app')" id="logbtn-app" class="logbtn text-xs px-3 py-1 bg-slate-800 text-gray-400 rounded hover:text-cyan-400">App</button>
+    </div>
+    <div id="log-runner" class="log-panel">
+        {% if snap and snap.runner_log_lines %}
+        <pre class="bg-slate-900 rounded-lg border border-slate-800 p-3 text-xs text-gray-400 overflow-x-auto max-h-96 overflow-y-auto font-mono">{% for line in snap.runner_log_lines[-50:] %}{{ line.rstrip() }}
+{% endfor %}</pre>
+        {% else %}
+        <div class="bg-slate-900 rounded-lg border border-slate-800 px-4 py-8 text-center text-gray-500 text-sm">No runner logs available</div>
+        {% endif %}
+    </div>
+    <div id="log-app" class="log-panel hidden">
+        {% if snap and snap.app_log_lines %}
+        <pre class="bg-slate-900 rounded-lg border border-slate-800 p-3 text-xs text-gray-400 overflow-x-auto max-h-96 overflow-y-auto font-mono">{% for line in snap.app_log_lines[-50:] %}{{ line.rstrip() }}
+{% endfor %}</pre>
+        {% else %}
+        <div class="bg-slate-900 rounded-lg border border-slate-800 px-4 py-8 text-center text-gray-500 text-sm">No app logs available</div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showTab(tab) {
+    document.querySelectorAll('.ev-panel').forEach(p => p.classList.add('hidden'));
+    document.querySelectorAll('.ev-tab').forEach(t => {
+        t.classList.remove('text-cyan-400', 'border-cyan-400');
+        t.classList.add('text-gray-400', 'border-transparent');
+    });
+    document.getElementById('panel-' + tab).classList.remove('hidden');
+    const btn = document.getElementById('tab-' + tab);
+    btn.classList.add('text-cyan-400', 'border-cyan-400');
+    btn.classList.remove('text-gray-400', 'border-transparent');
+}
+function showLogSource(src) {
+    document.querySelectorAll('.log-panel').forEach(p => p.classList.add('hidden'));
+    document.querySelectorAll('.logbtn').forEach(b => {
+        b.classList.remove('bg-cyan-900/30', 'text-cyan-400');
+        b.classList.add('bg-slate-800', 'text-gray-400');
+    });
+    document.getElementById('log-' + src).classList.remove('hidden');
+    const btn = document.getElementById('logbtn-' + src);
+    btn.classList.add('bg-cyan-900/30', 'text-cyan-400');
+    btn.classList.remove('bg-slate-800', 'text-gray-400');
+}
+</script>
+{% endblock %}

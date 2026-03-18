@@ -1,0 +1,4 @@
+/* AI Ops minimal overrides */
+body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif; }
+pre { tab-size: 4; }
+.case-detail { transition: all 0.15s ease; }

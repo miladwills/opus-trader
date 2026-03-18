@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}AI Ops{% endblock %} - Opus Platform</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/aiops.css">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slate: { 950: '#0b0f19', 900: '#0f172a', 850: '#141c2e', 800: '#1e293b' }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-slate-950 text-gray-200 min-h-screen">
+    <nav class="bg-slate-900 border-b border-slate-800 px-4 py-3">
+        <div class="max-w-7xl mx-auto flex items-center justify-between">
+            <div class="flex items-center gap-6">
+                <span class="text-cyan-400 font-bold text-lg tracking-tight">AI Ops</span>
+                <div class="hidden sm:flex items-center gap-4 text-sm">
+                    <a href="/overview" class="hover:text-cyan-400 {% if request.url.path == '/overview' or request.url.path == '/' %}text-cyan-400{% else %}text-gray-400{% endif %}">Overview</a>
+                    <a href="/agents" class="hover:text-cyan-400 {% if '/agents' in request.url.path %}text-cyan-400{% else %}text-gray-400{% endif %}">Agents</a>
+                    <a href="/triage" class="hover:text-cyan-400 {% if '/triage' in request.url.path %}text-cyan-400{% else %}text-gray-400{% endif %}">Triage</a>
+                    <a href="/evidence" class="hover:text-cyan-400 {% if '/evidence' in request.url.path %}text-cyan-400{% else %}text-gray-400{% endif %}">Evidence</a>
+                    <a href="/approvals" class="hover:text-cyan-400 {% if '/approvals' in request.url.path %}text-cyan-400{% else %}text-gray-400{% endif %}">Approvals</a>
+                    <a href="/audit" class="hover:text-cyan-400 {% if '/audit' in request.url.path %}text-cyan-400{% else %}text-gray-400{% endif %}">Audit</a>
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <span id="auto-refresh-badge" class="text-xs text-gray-500">auto-refresh: 15s</span>
+                <span id="collector-status" class="text-xs text-gray-600"></span>
+            </div>
+        </div>
+    </nav>
+    <main class="max-w-7xl mx-auto px-4 py-6">
+        {% block content %}{% endblock %}
+    </main>
+    <script src="/static/aiops.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>
