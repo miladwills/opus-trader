@@ -309,6 +309,7 @@ class AgentSupervisor:
         agent.last_heartbeat_at = now
         agent.current_task = f"Run #{agent.run_count + 1}"
         await self._repo.upsert_agent(agent)
+        await self._repo.record_activity(agent_id, "run_started", f"Run #{agent.run_count + 1} started")
 
         try:
             result = await asyncio.wait_for(runner(self._context), timeout=60)
@@ -319,17 +320,20 @@ class AgentSupervisor:
             agent.last_run_at = time.time()
             agent.current_task = ""
             await self._repo.record_agent_run_end(run_id, "completed", result or "")
+            await self._repo.record_activity(agent_id, "run_completed", result or "ok")
         except asyncio.TimeoutError:
             agent.status = "error"
             agent.error_summary = "Execution timed out (60s)"
             agent.current_task = ""
             await self._repo.record_agent_run_end(run_id, "error", error="Timeout after 60s")
+            await self._repo.record_activity(agent_id, "run_error", "Timed out (60s)")
         except Exception as exc:
             agent.status = "error"
             agent.error_summary = str(exc)[:200]
             agent.current_task = ""
             logger.error("Agent %s error: %s", agent_id, exc, exc_info=True)
             await self._repo.record_agent_run_end(run_id, "error", error=str(exc)[:500])
+            await self._repo.record_activity(agent_id, "run_error", str(exc)[:150])
 
         agent.last_heartbeat_at = time.time()
         await self._repo.upsert_agent(agent)
@@ -359,6 +363,7 @@ class AgentSupervisor:
         agent.last_started_at = time.time()
         await self._repo.upsert_agent(agent)
         await self._audit(actor, "agent_started", "agent", agent_id)
+        await self._repo.record_activity(agent_id, "started", f"Started by {actor}")
         return f"Agent '{agent_id}' started"
 
     async def stop_agent(self, agent_id: str, actor: str = "operator") -> str:
@@ -373,6 +378,7 @@ class AgentSupervisor:
         agent.last_stopped_at = time.time()
         await self._repo.upsert_agent(agent)
         await self._audit(actor, "agent_stopped", "agent", agent_id)
+        await self._repo.record_activity(agent_id, "stopped", f"Stopped by {actor}")
         return f"Agent '{agent_id}' stopped"
 
     async def pause_agent(self, agent_id: str, actor: str = "operator") -> str:
@@ -386,6 +392,7 @@ class AgentSupervisor:
         agent.current_task = ""
         await self._repo.upsert_agent(agent)
         await self._audit(actor, "agent_paused", "agent", agent_id)
+        await self._repo.record_activity(agent_id, "paused", f"Paused by {actor}")
         return f"Agent '{agent_id}' paused"
 
     async def resume_agent(self, agent_id: str, actor: str = "operator") -> str:
@@ -398,6 +405,7 @@ class AgentSupervisor:
         agent.status = "idle"
         await self._repo.upsert_agent(agent)
         await self._audit(actor, "agent_resumed", "agent", agent_id)
+        await self._repo.record_activity(agent_id, "resumed", f"Resumed by {actor}")
         return f"Agent '{agent_id}' resumed"
 
     async def run_once(self, agent_id: str, actor: str = "operator") -> str:
@@ -408,6 +416,7 @@ class AgentSupervisor:
             return f"Agent '{agent_id}' already has a run in progress"
 
         await self._audit(actor, "agent_run_once", "agent", agent_id)
+        await self._repo.record_activity(agent_id, "run_once", f"Run-once by {actor}")
         task = asyncio.create_task(self._execute_agent(agent_id))
         self._running_tasks[agent_id] = task
         return f"Agent '{agent_id}' run-once triggered"

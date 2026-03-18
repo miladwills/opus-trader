@@ -60,6 +60,21 @@ def _status_color(status: str) -> str:
     }.get(status, "gray")
 
 
+def _heartbeat_freshness(last_hb, interval_sec: int) -> dict:
+    """Calculate heartbeat freshness badge for an agent."""
+    if not last_hb:
+        return {"label": "offline", "color": "gray", "css": "bg-slate-800 text-gray-500"}
+    elapsed = time.time() - float(last_hb)
+    if elapsed <= interval_sec * 1.5:
+        return {"label": "fresh", "color": "emerald", "css": "bg-emerald-900/50 text-emerald-400"}
+    elif elapsed <= interval_sec * 3:
+        return {"label": "delayed", "color": "yellow", "css": "bg-yellow-900/50 text-yellow-400"}
+    elif elapsed <= interval_sec * 6:
+        return {"label": "stale", "color": "orange", "css": "bg-orange-900/50 text-orange-400"}
+    else:
+        return {"label": "offline", "color": "gray", "css": "bg-slate-800 text-gray-500"}
+
+
 @router.get("/", response_class=HTMLResponse)
 async def root():
     return RedirectResponse("/overview")
@@ -99,12 +114,28 @@ async def overview(request: Request, repo: Repository = Depends(_repo)):
 @router.get("/agents", response_class=HTMLResponse)
 async def agents_page(request: Request, repo: Repository = Depends(_repo)):
     agents = await repo.get_all_agents()
+    now = time.time()
+
+    # Enrich each agent with heartbeat freshness + recent activity
+    for a in agents:
+        a["heartbeat"] = _heartbeat_freshness(a.get("last_heartbeat_at"), a.get("interval_sec", 300))
+        a["activity"] = await repo.get_agent_activity(a["agent_id"], limit=5)
+        # Next expected run
+        last_run = a.get("last_run_at") or 0
+        interval = a.get("interval_sec", 300)
+        if a.get("auto_run") and a.get("status") in ("idle", "running"):
+            next_run = last_run + interval
+            a["next_run_in"] = max(0, next_run - now)
+        else:
+            a["next_run_in"] = None
+
     return request.app.state.templates.TemplateResponse("agents.html", {
         "request": request,
         "agents": agents,
         "time_ago": _time_ago,
         "status_color": _status_color,
-        "now": time.time(),
+        "heartbeat_freshness": _heartbeat_freshness,
+        "now": now,
     })
 
 

@@ -147,6 +147,17 @@ class Proposal:
 
 
 @dataclass
+class AgentActivity:
+    """A single activity entry in the per-agent feed."""
+    id: int = 0
+    agent_id: str = ""
+    timestamp: float = 0.0
+    event_type: str = ""  # started, stopped, paused, resumed, run_started, run_completed, run_error, run_once, restarted
+    summary: str = ""
+    detail: dict = field(default_factory=dict)
+
+
+@dataclass
 class ActionExecution:
     """Record of an executed allowlisted action."""
     id: int = 0

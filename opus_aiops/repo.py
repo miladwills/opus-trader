@@ -6,7 +6,7 @@ import json
 import time
 import aiosqlite
 from . import config
-from .models import SystemSnapshot, TriageCase, AuditEntry, AgentState, Proposal, ActionExecution
+from .models import SystemSnapshot, TriageCase, AuditEntry, AgentState, AgentActivity, Proposal, ActionExecution
 
 
 class Repository:
@@ -321,6 +321,40 @@ class Repository:
             for r in await cursor.fetchall()
         ]
 
+    # --- Agent activity ---
+
+    async def record_activity(self, agent_id: str, event_type: str, summary: str, detail: dict | None = None):
+        await self._db.execute(
+            "INSERT INTO agent_activity (agent_id, timestamp, event_type, summary, detail) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (agent_id, time.time(), event_type, summary, json.dumps(detail or {})),
+        )
+        await self._db.commit()
+
+    async def get_agent_activity(self, agent_id: str, limit: int = 20) -> list[dict]:
+        cursor = await self._db.execute(
+            "SELECT * FROM agent_activity WHERE agent_id = ? ORDER BY timestamp DESC LIMIT ?",
+            (agent_id, limit),
+        )
+        return [
+            {"id": r["id"], "agent_id": r["agent_id"], "timestamp": r["timestamp"],
+             "event_type": r["event_type"], "summary": r["summary"],
+             "detail": json.loads(r["detail"]) if r["detail"] else {}}
+            for r in await cursor.fetchall()
+        ]
+
+    async def get_all_recent_activity(self, limit: int = 50) -> list[dict]:
+        cursor = await self._db.execute(
+            "SELECT * FROM agent_activity ORDER BY timestamp DESC LIMIT ?",
+            (limit,),
+        )
+        return [
+            {"id": r["id"], "agent_id": r["agent_id"], "timestamp": r["timestamp"],
+             "event_type": r["event_type"], "summary": r["summary"],
+             "detail": json.loads(r["detail"]) if r["detail"] else {}}
+            for r in await cursor.fetchall()
+        ]
+
     # --- Proposals ---
 
     async def create_proposal(self, prop: Proposal):
@@ -475,5 +509,9 @@ class Repository:
         await self._db.execute(
             "DELETE FROM proposals WHERE created_at < ? AND status NOT IN ('pending', 'approved')",
             (now - config.RETENTION_PROPOSALS_DAYS * 86400,),
+        )
+        await self._db.execute(
+            "DELETE FROM agent_activity WHERE timestamp < ?",
+            (now - config.RETENTION_AGENT_ACTIVITY_DAYS * 86400,),
         )
         await self._db.commit()

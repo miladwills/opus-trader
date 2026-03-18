@@ -56,6 +56,9 @@ AGENT_HEARTBEAT_TIMEOUT_SEC = float(os.getenv("AGENT_HEARTBEAT_TIMEOUT_SEC", "12
 # --- Retention: agent runs ---
 RETENTION_AGENT_RUNS_DAYS = int(os.getenv("RETENTION_AGENT_RUNS_DAYS", "14"))
 
+# --- Retention: agent activity ---
+RETENTION_AGENT_ACTIVITY_DAYS = int(os.getenv("RETENTION_AGENT_ACTIVITY_DAYS", "7"))
+
 # --- Retention: proposals ---
 RETENTION_PROPOSALS_DAYS = int(os.getenv("RETENTION_PROPOSALS_DAYS", "30"))
 

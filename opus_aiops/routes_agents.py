@@ -39,6 +39,11 @@ async def agent_runs(agent_id: str, limit: int = 20, repo: Repository = Depends(
     return await repo.get_agent_runs(agent_id, min(limit, 100))
 
 
+@router.get("/{agent_id}/activity", dependencies=[Depends(verify_credentials)])
+async def agent_activity(agent_id: str, limit: int = 20, repo: Repository = Depends(_repo)):
+    return await repo.get_agent_activity(agent_id, min(limit, 100))
+
+
 # --- Agent controls ---
 
 @router.post("/{agent_id}/start")

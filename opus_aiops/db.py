@@ -142,6 +142,19 @@ CREATE TABLE IF NOT EXISTS action_executions (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_executions_proposal ON action_executions(proposal_id);
+
+-- V2.1: Agent activity feed
+CREATE TABLE IF NOT EXISTS agent_activity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id TEXT NOT NULL,
+    timestamp REAL NOT NULL,
+    event_type TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    detail TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_activity_agent ON agent_activity(agent_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_ts ON agent_activity(timestamp DESC);
 """
 
 
