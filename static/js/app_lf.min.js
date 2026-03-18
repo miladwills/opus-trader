@@ -6282,12 +6282,7 @@ function getSetupReadiness(bot) {
     direction: String(bot?.setup_timing_direction || bot?.setup_ready_direction || bot?.analysis_ready_direction || bot?.entry_ready_direction || "").trim().toLowerCase(),
     mode: String(bot?.setup_timing_mode || bot?.setup_ready_mode || bot?.analysis_ready_mode || bot?.entry_ready_mode || "").trim().toLowerCase(),
     updatedAt: String(bot?.stable_readiness_updated_at || bot?.setup_timing_updatedAt || bot?.setup_timing_updated_at || bot?.setup_ready_updated_at || bot?.analysis_ready_updated_at || bot?.entry_ready_updated_at || "").trim(),
-    score: pickFiniteReadinessScore(
-      bot?.setup_timing_score,
-      bot?.setup_ready_score,
-      bot?.analysis_ready_score,
-      bot?.entry_ready_score,
-    ),
+    score: pickFiniteReadinessScore(bot?.display_readiness_score),
     severity: String(bot?.setup_ready_severity || bot?.analysis_ready_severity || "").trim().toUpperCase(),
     next: String(bot?.stable_readiness_next || bot?.setup_timing_next || bot?.setup_ready_next || bot?.analysis_ready_next || "").trim(),
     fallbackUsed: Boolean(bot?.setup_ready_fallback_used || bot?.analysis_ready_fallback_used),

@@ -40,6 +40,7 @@ def readiness_payload(
     source_kind="runtime",
     preview_state=None,
     age_sec=None,
+    score=None,
 ):
     normalized_stage = str(stage or "").strip().lower()
     readiness_status = "ready" if normalized_stage == "trigger_ready" else (
@@ -68,6 +69,11 @@ def readiness_payload(
         "setup_timing_late": normalized_stage == "late",
         "readiness_source_kind": source_kind,
     }
+    if score is not None:
+        payload["setup_timing_score"] = score
+        payload["setup_ready_score"] = score
+        payload["analysis_ready_score"] = score
+        payload["entry_ready_score"] = score
     if preview_state is not None:
         payload["readiness_preview_state"] = preview_state
     if age_sec is not None:
@@ -2176,3 +2182,128 @@ def test_light_enrichment_does_not_coerce_missing_scores_to_zero():
     assert enriched["setup_timing_score"] is None
     assert enriched["analysis_ready_score"] is None
     assert enriched["entry_ready_score"] is None
+
+
+# ── Phase 2: display_readiness_score temporal alignment tests ──
+
+
+def _stability_eval(service, payload, bot_id="bot-test", scope="configured"):
+    """Run one evaluation through _apply_readiness_stability and return result."""
+    bot = {"id": bot_id, "status": "running"}
+    return service._apply_readiness_stability(payload, bot=bot, scope=scope)
+
+
+def test_display_readiness_score_aligned_when_stable():
+    """Stable state: raw == stable, score should equal raw score."""
+    service = make_service()
+    payload = readiness_payload(stage="armed", reason="good_setup", score=72)
+    result = _stability_eval(service, payload)
+    assert result["stable_readiness_stage"] == "armed"
+    assert result["stable_readiness_score"] == 72
+
+
+def test_display_readiness_score_held_during_demotion_hold():
+    """Holding demotion: score stays from when stage was last confirmed."""
+    service = make_service()
+    # Eval 1: armed with score=72 → stable
+    p1 = readiness_payload(stage="armed", reason="good_setup", score=72)
+    r1 = _stability_eval(service, p1)
+    assert r1["stable_readiness_stage"] == "armed"
+    assert r1["stable_readiness_score"] == 72
+
+    # Eval 2: raw drops to watch/55 → holding (demotion_confirmations=2)
+    p2 = readiness_payload(stage="watch", reason="watch_setup", score=55)
+    r2 = _stability_eval(service, p2)
+    assert r2["stable_readiness_stage"] == "armed"  # held
+    assert r2["readiness_stability_state"] == "holding"
+    assert r2["stable_readiness_score"] == 72  # NOT 55
+
+
+def test_display_readiness_score_held_during_promotion():
+    """Promoting: score stays from when stage was last confirmed."""
+    service = make_service()
+    # Eval 1: watch with score=55 → stable
+    p1 = readiness_payload(stage="watch", reason="watch_setup", score=55)
+    r1 = _stability_eval(service, p1)
+    assert r1["stable_readiness_stage"] == "watch"
+    assert r1["stable_readiness_score"] == 55
+
+    # Eval 2: raw jumps to armed/72 → promoting (promotion_confirmations=2)
+    p2 = readiness_payload(stage="armed", reason="good_setup", score=72)
+    r2 = _stability_eval(service, p2)
+    assert r2["stable_readiness_stage"] == "watch"  # held
+    assert r2["readiness_stability_state"] == "promoting"
+    assert r2["stable_readiness_score"] == 55  # NOT 72
+
+
+def test_display_readiness_score_updates_on_promotion_confirmed():
+    """After enough confirmations, promotion flips stage AND score."""
+    service = make_service()
+    # Eval 1: watch/55
+    p1 = readiness_payload(stage="watch", reason="watch_setup", score=55)
+    _stability_eval(service, p1)
+    # Eval 2: armed/72 → promoting (1st confirmation)
+    p2 = readiness_payload(stage="armed", reason="good_setup", score=72)
+    r2 = _stability_eval(service, p2)
+    assert r2["readiness_stability_state"] == "promoting"
+    # Eval 3: armed/74 → promotion confirmed (2nd confirmation)
+    p3 = readiness_payload(stage="armed", reason="good_setup", score=74)
+    r3 = _stability_eval(service, p3)
+    assert r3["stable_readiness_stage"] == "armed"
+    assert r3["readiness_stability_state"] == "stable"
+    assert r3["stable_readiness_score"] == 74
+
+
+def test_display_readiness_score_none_when_no_evaluation():
+    """Bot with no setup_timing_score should have stable_readiness_score=None."""
+    service = make_service()
+    payload = readiness_payload(stage="watch", reason="watch_setup")
+    # No score= argument → setup_timing_score absent from payload
+    result = _stability_eval(service, payload)
+    assert result["stable_readiness_score"] is None
+
+
+def test_display_readiness_score_cleared_for_non_evaluable_states():
+    """Hard-invalidated with a score-clear reason must force score to None."""
+    service = make_service()
+    # Eval 1: armed/72 → stable
+    p1 = readiness_payload(stage="armed", reason="good_setup", score=72)
+    r1 = _stability_eval(service, p1)
+    assert r1["stable_readiness_score"] == 72
+
+    # Eval 2: preview_disabled → hard invalidated, score must clear
+    p2 = readiness_payload(stage="watch", reason="preview_disabled", score=None)
+    r2 = _stability_eval(service, p2)
+    assert r2["readiness_hard_invalidated"] is True
+    assert r2["stable_readiness_score"] is None
+
+
+def test_display_readiness_score_not_overwritten_with_none_on_stable():
+    """If raw_score is None but stage matches, preserved cached score stays."""
+    service = make_service()
+    # Eval 1: armed/72
+    p1 = readiness_payload(stage="armed", reason="good_setup", score=72)
+    _stability_eval(service, p1)
+
+    # Eval 2: same stage armed but no score in payload
+    p2 = readiness_payload(stage="armed", reason="good_setup")
+    r2 = _stability_eval(service, p2)
+    assert r2["stable_readiness_stage"] == "armed"
+    assert r2["stable_readiness_score"] == 72  # preserved, NOT None
+
+
+def test_display_readiness_score_updates_on_demotion_confirmed():
+    """After demotion confirms, score updates to new raw score."""
+    service = make_service()
+    # Eval 1: armed/72
+    p1 = readiness_payload(stage="armed", reason="good_setup", score=72)
+    _stability_eval(service, p1)
+    # Eval 2: watch/55 → holding (1st demotion)
+    p2 = readiness_payload(stage="watch", reason="watch_setup", score=55)
+    r2 = _stability_eval(service, p2)
+    assert r2["readiness_stability_state"] == "holding"
+    # Eval 3: watch/53 → demotion confirmed (2nd)
+    p3 = readiness_payload(stage="watch", reason="watch_setup", score=53)
+    r3 = _stability_eval(service, p3)
+    assert r3["stable_readiness_stage"] == "watch"
+    assert r3["stable_readiness_score"] == 53

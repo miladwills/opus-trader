@@ -84,6 +84,13 @@ READINESS_STABILITY_HARD_REASONS = {
     "breakout_extended",
     "late_continuation",
 }
+READINESS_SCORE_CLEAR_REASONS = {
+    "preview_disabled",
+    "preview_limited",
+    "stale_snapshot",
+    "stop_cleanup_pending",
+    "stopped_preview_unavailable",
+}
 READINESS_STABILITY_LIVE_POLICY = {
     "promotion_confirmations": 2,
     "demotion_confirmations": 2,
@@ -407,6 +414,7 @@ class BotStatusService:
     ) -> Dict[str, Any]:
         result = dict(payload or {})
         raw_stage = self._normalize_readiness_stage_from_payload(result)
+        raw_score = result.get("setup_timing_score")
         raw_reason = str(
             result.get("setup_timing_reason")
             or result.get("setup_ready_reason")
@@ -492,6 +500,7 @@ class BotStatusService:
                     "stable_readiness_detail": raw_detail,
                     "stable_readiness_next": raw_next,
                     "stable_readiness_updated_at": raw_updated_at or None,
+                    "stable_readiness_score": None if raw_reason in READINESS_SCORE_CLEAR_REASONS else raw_score,
                     "stable_readiness_actionable": flags["actionable"],
                     "stable_readiness_near_trigger": flags["near_trigger"],
                     "stable_readiness_late": flags["late"],
@@ -514,6 +523,7 @@ class BotStatusService:
         stable_detail = raw_detail
         stable_next = raw_next
         stable_updated_at = raw_updated_at or None
+        stable_score = raw_score
         stable_since_ts = now_ts
         hold_until_ts = None
         stability_state = "stable"
@@ -528,6 +538,7 @@ class BotStatusService:
             stable_detail = str(previous.get("stable_detail") or "").strip()
             stable_next = str(previous.get("stable_next") or "").strip()
             stable_updated_at = str(previous.get("stable_updated_at") or "").strip() or None
+            stable_score = previous.get("stable_score")
             stable_since_ts = self._safe_float(previous.get("stable_since_ts"), now_ts) or now_ts
             hold_until_ts = self._safe_float(previous.get("hold_until_ts"), None)
 
@@ -557,6 +568,7 @@ class BotStatusService:
             stable_since_ts = now_ts
             hold_until_ts = None
             stability_state = "hard_invalidated"
+            stable_score = None if raw_reason in READINESS_SCORE_CLEAR_REASONS else (raw_score if raw_score is not None else None)
             previous["pending_stage"] = None
             previous["pending_direction"] = None
             previous["pending_count"] = 0
@@ -568,6 +580,8 @@ class BotStatusService:
             stable_updated_at = raw_updated_at or None
             hold_until_ts = None
             stability_state = "stable"
+            if raw_score is not None:
+                stable_score = raw_score
             previous["pending_stage"] = None
             previous["pending_direction"] = None
             previous["pending_count"] = 0
@@ -581,6 +595,8 @@ class BotStatusService:
             stable_since_ts = now_ts
             hold_until_ts = None
             stability_state = "stable"
+            if raw_score is not None:
+                stable_score = raw_score
             previous["pending_stage"] = None
             previous["pending_direction"] = None
             previous["pending_count"] = 0
@@ -602,6 +618,8 @@ class BotStatusService:
                 stable_since_ts = now_ts
                 hold_until_ts = None
                 stability_state = "stable"
+                if raw_score is not None:
+                    stable_score = raw_score
                 previous["pending_stage"] = None
                 previous["pending_direction"] = None
                 previous["pending_count"] = 0
@@ -635,6 +653,8 @@ class BotStatusService:
                 stable_since_ts = now_ts
                 hold_until_ts = None
                 stability_state = "stable"
+                if raw_score is not None:
+                    stable_score = raw_score
                 previous["pending_stage"] = None
                 previous["pending_direction"] = None
                 previous["pending_count"] = 0
@@ -654,6 +674,7 @@ class BotStatusService:
             "stable_next": stable_next,
             "stable_updated_at": stable_updated_at,
             "stable_since_ts": stable_since_ts,
+            "stable_score": stable_score,
             "hold_until_ts": hold_until_ts,
             "pending_stage": previous.get("pending_stage"),
             "pending_direction": previous.get("pending_direction"),
@@ -674,6 +695,7 @@ class BotStatusService:
                 "stable_readiness_detail": stable_detail,
                 "stable_readiness_next": stable_next,
                 "stable_readiness_updated_at": stable_updated_at,
+                "stable_readiness_score": stable_score,
                 "stable_readiness_actionable": stable_flags["actionable"],
                 "stable_readiness_near_trigger": stable_flags["near_trigger"],
                 "stable_readiness_late": stable_flags["late"],
@@ -2824,6 +2846,7 @@ class BotStatusService:
             ),
             "raw_readiness_detail": entry_readiness.get("raw_readiness_detail"),
             "stable_readiness_stage": entry_readiness.get("stable_readiness_stage"),
+            "display_readiness_score": entry_readiness.get("stable_readiness_score"),
             "stable_readiness_reason": entry_readiness.get("stable_readiness_reason"),
             "stable_readiness_reason_text": entry_readiness.get(
                 "stable_readiness_reason_text"
@@ -3980,6 +4003,7 @@ class BotStatusService:
             "stable_readiness_actionable": stable_flags["actionable"],
             "stable_readiness_near_trigger": stable_flags["near_trigger"],
             "stable_readiness_late": stable_flags["late"],
+            "display_readiness_score": cached_readiness.get("stable_score") if cached_readiness.get("stable_score") is not None else bot.get("display_readiness_score"),
             "readiness_hard_invalidated": bool(
                 cached_readiness.get("hard_invalidated", False)
             ),

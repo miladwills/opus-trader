@@ -520,16 +520,17 @@ def test_setup_readiness_prefers_stable_operator_facing_stage_over_raw_stage():
     }
 
 
-def test_setup_readiness_uses_entry_ready_score_when_earlier_scores_are_missing():
+def test_setup_readiness_uses_display_readiness_score():
     result = _run_readiness_display_scenario(
         ["pickFiniteReadinessScore", "getSetupReadiness"],
         """
         const bot = {
           id: "bot-score",
-          setup_timing_score: null,
-          setup_ready_score: undefined,
-          analysis_ready_score: "",
-          entry_ready_score: 61,
+          display_readiness_score: 61,
+          setup_timing_score: 99,
+          setup_ready_score: 99,
+          analysis_ready_score: 99,
+          entry_ready_score: 99,
         };
         const setup = context.getSetupReadiness(bot);
         process.stdout.write(JSON.stringify({ score: setup.score }));
