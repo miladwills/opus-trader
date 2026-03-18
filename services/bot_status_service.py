@@ -1571,6 +1571,7 @@ class BotStatusService:
             "matched_order_row_count": 0,
             "all_orders_cache_hit_count": 0,
             "all_orders_cache_age_ms": None,
+            "single_symbol_fill_ms": 0.0,
         }
         if not symbols:
             diagnostics["path"] = "empty"
@@ -1624,6 +1625,38 @@ class BotStatusService:
             )
             self._last_live_open_orders_diagnostics = diagnostics
             return summary
+
+        if len(symbols) == 1:
+            single_symbol_started = time.monotonic()
+            order_map = self._build_live_open_orders_by_symbol(
+                bot_rows,
+                diagnostics=diagnostics,
+                skip_stream=True,
+            )
+            diagnostics["single_symbol_fill_ms"] = round(
+                max(time.monotonic() - single_symbol_started, 0.0) * 1000.0,
+                3,
+            )
+            if symbols[0] in order_map:
+                shaping_started = time.monotonic()
+                summary = self._summarize_order_rows_by_symbol(
+                    symbols=symbols,
+                    order_rows_by_symbol=order_map,
+                )
+                order_rows = list(order_map.get(symbols[0]) or [])
+                diagnostics["order_row_count"] = len(order_rows)
+                diagnostics["matched_order_row_count"] = len(order_rows)
+                diagnostics["shaping_ms"] = round(
+                    max(time.monotonic() - shaping_started, 0.0) * 1000.0,
+                    3,
+                )
+                diagnostics["path"] = "single_symbol_rest_fill"
+                diagnostics["total_ms"] = round(
+                    max(time.monotonic() - started_mono, 0.0) * 1000.0,
+                    3,
+                )
+                self._last_live_open_orders_diagnostics = diagnostics
+                return summary
 
         if client is not None and hasattr(client, "get_open_orders"):
             query_started = time.monotonic()
@@ -4919,6 +4952,7 @@ class BotStatusService:
         bots: List[Dict[str, Any]],
         cache_only: bool = False,
         diagnostics: Optional[Dict[str, Any]] = None,
+        skip_stream: bool = False,
     ) -> Dict[str, List[Dict[str, Any]]]:
         client = getattr(self.position_service, "client", None)
         if client is None:
@@ -4947,7 +4981,11 @@ class BotStatusService:
                         diagnostics["cache_hit_count"] = int(diagnostics.get("cache_hit_count") or 0) + 1
                 continue
 
-            if stream_service is not None and hasattr(stream_service, "get_open_orders_fresh"):
+            if (
+                not skip_stream
+                and stream_service is not None
+                and hasattr(stream_service, "get_open_orders_fresh")
+            ):
                 stream_started = time.monotonic()
                 try:
                     response = stream_service.get_open_orders_fresh(

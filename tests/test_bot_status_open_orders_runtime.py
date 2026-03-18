@@ -229,3 +229,50 @@ def test_get_live_open_order_summary_by_symbol_reuses_fresh_all_orders_cache():
     assert second_diagnostics["all_orders_cache_age_ms"] is not None
     assert second_diagnostics["order_row_count"] == 2
     assert second_diagnostics["matched_order_row_count"] == 2
+
+
+def test_get_live_open_order_summary_by_symbol_uses_single_symbol_rest_fill_before_all_orders():
+    svc = _make_service()
+    svc.position_service.client.stream_service = MagicMock()
+    svc.position_service.client.stream_service.get_open_orders_fresh.return_value = None
+    svc.position_service.client.get_open_orders.return_value = {
+        "success": True,
+        "data": {
+            "list": [
+                {
+                    "symbol": "SOLUSDT",
+                    "reduceOnly": True,
+                },
+                {
+                    "symbol": "SOLUSDT",
+                    "reduceOnly": True,
+                },
+            ]
+        },
+    }
+    bots = [
+        {"symbol": "SOLUSDT", "status": "running"},
+    ]
+
+    summary = svc.get_live_open_order_summary_by_symbol(bots)
+    diagnostics = svc.get_last_live_open_orders_diagnostics()
+
+    svc.position_service.client.get_open_orders.assert_called_once_with(
+        symbol="SOLUSDT",
+        limit=200,
+        skip_cache=True,
+    )
+    assert summary == {
+        "SOLUSDT": {
+            "open_order_count": 2,
+            "reduce_only_count": 2,
+            "entry_order_count": 0,
+        },
+    }
+    assert diagnostics["path"] == "single_symbol_rest_fill"
+    assert diagnostics["stream_symbol_miss_count"] == 1
+    assert diagnostics["stream_handoff_reason"] == "stream_query_failed"
+    assert diagnostics["client_query_ms"] == 0.0
+    assert diagnostics["rest_call_count"] == 1
+    assert diagnostics["rest_success_count"] == 1
+    assert diagnostics["single_symbol_fill_ms"] >= 0.0
