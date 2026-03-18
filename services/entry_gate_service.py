@@ -26,8 +26,17 @@ class EntryGateService:
     Shorts are blocked by oversold/extended conditions or nearby support.
     """
 
-    def __init__(self, indicator_service):
+    def __init__(
+        self,
+        indicator_service,
+        motion_signal_service=None,
+        market_sentiment_service=None,
+        volume_profile_service=None,
+    ):
         self.indicator_service = indicator_service
+        self.motion_signal_service = motion_signal_service
+        self.market_sentiment_service = market_sentiment_service
+        self.volume_profile_service = volume_profile_service
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._cache_ttl = 30
         self._sr_detector = SupportResistanceDetector(
@@ -1851,6 +1860,81 @@ class EntryGateService:
                     and price_vs_ema_pct < -thresholds["ema_max"]
                 ):
                     logger.debug(f"[{symbol}] Price {abs(price_vs_ema_pct) * 100:.1f}% below EMA21 (extended, scoring penalty instead of hard block)")
+
+        # --- Feature 4A: Motion-Score-Gated Entry ---
+        if getattr(cfg, "MOTION_ENTRY_GATE_ENABLED", False):
+            motion_svc = getattr(self, "motion_signal_service", None)
+            if motion_svc is not None:
+                try:
+                    motion = motion_svc.get_motion(symbol)
+                    motion_label = motion.get("motion_label")
+                    block_labels = tuple(getattr(cfg, "MOTION_ENTRY_BLOCK_LABELS", ("Dead", "Slow")))
+                    if motion_label in block_labels:
+                        blocked_by.append("MOTION_TOO_LOW")
+                        reasons.append(
+                            f"Market motion too low for entry (motion={motion_label})"
+                        )
+                        logger.info(
+                            "[%s] MOTION_ENTRY_GATE blocked: motion_label=%s",
+                            symbol,
+                            motion_label,
+                        )
+                except Exception as exc:
+                    logger.debug("[%s] Motion gate check failed: %s", symbol, exc)
+
+        # --- Feature 1E: Sentiment Conviction Filter ---
+        if getattr(cfg, "SENTIMENT_CONVICTION_FILTER_ENABLED", False):
+            sentiment_svc = getattr(self, "market_sentiment_service", None)
+            if sentiment_svc is not None:
+                try:
+                    sentiment = sentiment_svc.get_sentiment(symbol)
+                    oi_conviction = sentiment.get("oi_conviction", "unknown")
+                    oi_change_pct = abs(float(sentiment.get("oi_change_pct") or 0.0))
+                    block_types = tuple(
+                        getattr(
+                            cfg,
+                            "SENTIMENT_CONVICTION_BLOCK_TYPES",
+                            ("capitulation", "short_squeeze"),
+                        )
+                    )
+                    min_oi_change = float(
+                        getattr(cfg, "SENTIMENT_CONVICTION_MIN_OI_CHANGE_PCT", 2.0)
+                    )
+                    if oi_conviction in block_types and oi_change_pct > min_oi_change:
+                        blocked_by.append("WEAK_OI_CONVICTION")
+                        reasons.append(
+                            f"OI conviction weak for entry "
+                            f"(conviction={oi_conviction}, oi_change={oi_change_pct:.2f}%)"
+                        )
+                        logger.info(
+                            "[%s] SENTIMENT_CONVICTION_FILTER blocked: conviction=%s oi_change=%.2f%%",
+                            symbol,
+                            oi_conviction,
+                            oi_change_pct,
+                        )
+                except Exception as exc:
+                    logger.debug("[%s] Sentiment conviction check failed: %s", symbol, exc)
+
+        # --- Feature 1C: Volume Profile Entry Awareness ---
+        if getattr(cfg, "VP_ENTRY_AWARENESS_ENABLED", False):
+            vp_svc = getattr(self, "volume_profile_service", None)
+            if vp_svc is not None and close and close > 0:
+                try:
+                    vp_signal = vp_svc.get_volume_signal(symbol, close)
+                    if vp_signal.get("score") is not None:
+                        vp_reason = vp_signal.get("reason", "")
+                        if "LVN zone" in vp_reason:
+                            blocked_by.append("POOR_STRUCTURE_ZONE")
+                            reasons.append(
+                                f"Price in low-volume node zone (VP: {vp_reason})"
+                            )
+                            logger.info(
+                                "[%s] VP_ENTRY_AWARENESS blocked: price in LVN zone (%s)",
+                                symbol,
+                                vp_reason,
+                            )
+                except Exception as exc:
+                    logger.debug("[%s] Volume profile zone check failed: %s", symbol, exc)
 
         structure_result = self.check_side_open(
             symbol=symbol,

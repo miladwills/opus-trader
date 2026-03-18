@@ -231,6 +231,8 @@ from config.strategy_config import (
     SCALP_RECENTER_MIN_DEVIATION_PCT,
     SCALP_RECENTER_GRID_MULTIPLIER,
     SCALP_RECENTER_COOLDOWN_SEC,
+    FLOW_OVERRIDE_QUALITY_GATE_ENABLED,
+    FLOW_OVERRIDE_MIN_SETUP_QUALITY,
 )
 
 # =============================================================================
@@ -445,6 +447,8 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
         self.pnl_service = pnl_service
         self.risk_manager = risk_manager
         self.grid_engine = grid_engine
+        # Inject training/VP services into grid engine after volume_profile_service is wired
+        # (done lazily below once volume_profile_service is available)
         self.indicator_service = indicator_service
         self.entry_filter = entry_filter  # Entry filter for regime checks
         self.stop_loss_service = stop_loss_service  # Stop-loss service
@@ -527,6 +531,11 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
             logger.warning(f"Failed to init Volume Profile service: {e}")
             self.volume_profile_service = None
 
+        # Inject symbol_training_service and volume_profile_service into grid engine
+        # so Features 4E and 4B can operate inside build_levels / build_levels_with_distribution
+        self.grid_engine.symbol_training_service = self.symbol_training_service
+        self.grid_engine.volume_profile_service = self.volume_profile_service
+
         # Initialize Open Interest service for Smart Feature #19
         try:
             from services.open_interest_service import OpenInterestService
@@ -607,6 +616,28 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
         except Exception as e:
             logger.warning(f"Failed to init Micro Bias service: {e}")
             self.micro_bias_service = None
+
+        # Initialize Motion Signal service (used by entry gate Feature 4A)
+        try:
+            from services.motion_signal_service import MotionSignalService
+
+            self.motion_signal_service = MotionSignalService(
+                indicator_service=self.indicator_service,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to init Motion Signal service: {e}")
+            self.motion_signal_service = None
+
+        # Initialize Market Sentiment service (used by entry gate Feature 1E)
+        try:
+            from services.market_sentiment_service import MarketSentimentService
+
+            self.market_sentiment_service = MarketSentimentService(
+                client=self.client,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to init Market Sentiment service: {e}")
+            self.market_sentiment_service = None
 
         self._instrument_cache: Dict[str, Dict[str, Any]] = {}
         self._auto_pilot_instrument_meta_cache: Dict[str, Any] = {}
@@ -4837,7 +4868,12 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
         if self._entry_gate_service is None:
             from services.entry_gate_service import EntryGateService
 
-            self._entry_gate_service = EntryGateService(self.indicator_service)
+            self._entry_gate_service = EntryGateService(
+                self.indicator_service,
+                motion_signal_service=getattr(self, "motion_signal_service", None),
+                market_sentiment_service=getattr(self, "market_sentiment_service", None),
+                volume_profile_service=getattr(self, "volume_profile_service", None),
+            )
         return self._entry_gate_service
 
     def _build_neutral_suitability_service(self):
@@ -5257,6 +5293,22 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
                 flow_confirms = True
             elif mode == "short" and flow_score <= -30 and flow_confidence >= 0.4:
                 flow_confirms = True
+
+            # Feature 1B: Flow Override Quality Gate — skip flow override when
+            # setup quality is too poor to justify overriding the entry gate.
+            if flow_confirms and FLOW_OVERRIDE_QUALITY_GATE_ENABLED:
+                setup_quality_score = float(
+                    (setup_quality or {}).get("score") or 0.0
+                )
+                if setup_quality_score < FLOW_OVERRIDE_MIN_SETUP_QUALITY:
+                    logger.info(
+                        "[%s] FLOW OVERRIDE blocked by quality gate: "
+                        "setup_quality=%.1f < min=%.1f",
+                        symbol,
+                        setup_quality_score,
+                        FLOW_OVERRIDE_MIN_SETUP_QUALITY,
+                    )
+                    flow_confirms = False
 
             # Only override quality/S/R blocks, NOT structural blocks
             structural_blocks = blocked_codes & {
@@ -15132,6 +15184,7 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
             grid_step_pct=effective_step_pct,
             buy_sell_ratio=GRID_BUY_SELL_RATIO,
             cluster_concentration=smart_concentration,
+            symbol=symbol,
         )
 
         levels = grid_result.get("levels", [])
@@ -20254,6 +20307,22 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
         pp_indicators["flow_score"] = bot.get("flow_score") or 0
         pp_indicators["flow_confidence"] = bot.get("flow_confidence") or 0
         pp_indicators["flow_signal"] = bot.get("flow_signal") or "neutral"
+        # Inject momentum exhaustion / fading signals from bot flow state
+        pp_indicators["momentum_exhausted"] = bool(bot.get("flow_momentum_exhausted"))
+        pp_indicators["momentum_fading"] = bool(bot.get("flow_momentum_fading"))
+        pp_indicators["fade_amount"] = float(bot.get("flow_fade_amount") or 0)
+        # Inject funding info for Feature 5A (funding-aware exit timing)
+        try:
+            if hasattr(self, "funding_rate_service") and self.funding_rate_service:
+                pp_indicators["minutes_to_funding"] = (
+                    self.funding_rate_service.get_minutes_to_funding()
+                )
+                _fr_result = self.funding_rate_service.get_funding_rate(symbol)
+                pp_indicators["funding_rate"] = float(
+                    _fr_result.get("funding_rate", 0) or 0
+                )
+        except Exception:
+            pass  # Funding info is advisory; never block profit protection
         profit_protection_result = self._run_adaptive_profit_protection_layer(
             bot=bot,
             symbol=symbol,

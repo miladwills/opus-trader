@@ -2108,3 +2108,103 @@ SYMBOL_TRAINING_OPEN_CAP_MAX_MULT = 1.10
 SYMBOL_TRAINING_OUTLIER_STDDEV = 3.0
 SYMBOL_TRAINING_MAX_PROCESSED_IDS = 5000
 SYMBOL_TRAINING_MAX_RECENT_OUTCOMES = 2000
+
+# =============================================================================
+# Motion Signal (Market Activity Quality)
+# =============================================================================
+MOTION_EMA_ALPHA = 0.3             # Smoothing factor (0=frozen, 1=instant)
+MOTION_CACHE_TTL = 30              # Seconds between full recomputation
+
+# =============================================================================
+# Smart Trading Roadmap — Feature Flags (20 improvements)
+# =============================================================================
+
+# --- 2C: TP% Profitability Gate ---
+TP_PROFITABILITY_GATE_ENABLED = True
+
+# --- 1B: Flow Override Quality Gate ---
+FLOW_OVERRIDE_QUALITY_GATE_ENABLED = True
+FLOW_OVERRIDE_MIN_SETUP_QUALITY = 35.0
+
+# --- 2D: Funding Fee in Loss Budget ---
+FUNDING_FEE_IN_LOSS_BUDGET_ENABLED = True
+
+# --- 4A: Motion-Score-Gated Entry ---
+MOTION_ENTRY_GATE_ENABLED = True
+MOTION_ENTRY_BLOCK_LABELS = ("Dead", "Slow")
+MOTION_CHAOTIC_PENALTY_POINTS = 10.0
+MOTION_HEALTHY_BONUS_POINTS = 5.0
+
+# --- 2B: Flow-Accelerated Profit Lock ---
+FLOW_ACCELERATED_PROFIT_LOCK_ENABLED = True
+FLOW_EXHAUSTION_GIVEBACK_MULT = 0.50
+
+# --- 1A: Prediction Accuracy Ledger ---
+PREDICTION_ACCURACY_LEDGER_ENABLED = True
+PREDICTION_ACCURACY_LEDGER_FILE = "storage/prediction_accuracy.jsonl"
+
+# --- 1E: Sentiment Conviction Filter ---
+SENTIMENT_CONVICTION_FILTER_ENABLED = True
+SENTIMENT_CONVICTION_BLOCK_TYPES = ("capitulation", "short_squeeze")
+SENTIMENT_CONVICTION_MIN_OI_CHANGE_PCT = 2.0
+
+# --- 1C: Volume Profile Entry Awareness ---
+VP_ENTRY_AWARENESS_ENABLED = True
+
+# --- 5A: Funding-Aware Exit Timing ---
+FUNDING_AWARE_EXIT_ENABLED = True
+FUNDING_AWARE_EXIT_MINUTES_THRESHOLD = 30
+FUNDING_AWARE_EXIT_COST_RATIO_THRESHOLD = 0.20
+
+# --- 2A: Adaptive Trailing Stop ---
+ADAPTIVE_TRAILING_STOP_ENABLED = True
+ADAPTIVE_TRAIL_TREND_ATR_MULT = 1.5
+ADAPTIVE_TRAIL_CHOP_ATR_MULT = 0.7
+ADAPTIVE_TRAIL_EXHAUSTION_ATR_MULT = 0.4
+ADAPTIVE_TRAIL_TREND_ADX_MIN = 30.0
+
+# --- 3D: S/R Strength Decay ---
+SR_STRENGTH_DECAY_ENABLED = True
+SR_RECENCY_HALF_LIFE_CANDLES = 50
+SR_BREAK_PENALTY_FACTOR = 0.30
+
+# --- 1D: Time-of-Day Performance Weighting ---
+TIME_OF_DAY_WEIGHTING_ENABLED = True
+TIME_OF_DAY_BUCKET_HOURS = 2
+TIME_OF_DAY_MAX_PENALTY = 15.0
+TIME_OF_DAY_MAX_BONUS = 10.0
+TIME_OF_DAY_MIN_TRADES = 20
+
+# --- 3B: Divergence Duration Tracking ---
+DIVERGENCE_DURATION_TRACKING_ENABLED = True
+DIVERGENCE_FRESH_MAX_CANDLES = 5
+DIVERGENCE_AGED_CANDLES = 15
+DIVERGENCE_AGED_WEIGHT_MULT = 0.40
+
+# --- 3C: MTF Confluence Scoring ---
+MTF_CONFLUENCE_SCORING_ENABLED = True
+MTF_CONFLUENCE_MAX_SCORE = 40.0
+
+# --- 4C: Regime-Adaptive Rotation Speed ---
+REGIME_ADAPTIVE_ROTATION_ENABLED = True
+REGIME_DETERIORATION_FAST_CHECK_SEC = 60
+
+# --- 3A: Pattern Context Weighting ---
+PATTERN_CONTEXT_WEIGHTING_ENABLED = True
+PATTERN_CHOP_CONFIDENCE_MULT = 0.50
+PATTERN_HVN_CONFIDENCE_BOOST = 1.25
+
+# --- 4D: Cross-Symbol Correlation Filter ---
+CROSS_SYMBOL_CORRELATION_FILTER_ENABLED = True
+CROSS_SYMBOL_MAX_CORRELATION = 0.75
+CROSS_SYMBOL_PENALTY_POINTS = 20.0
+
+# --- 4E: Symbol Training Feedback to Grid ---
+SYMBOL_TRAINING_GRID_FEEDBACK_ENABLED = True
+SYMBOL_TRAINING_GRID_STEP_MIN_MULT = 0.70
+SYMBOL_TRAINING_GRID_STEP_MAX_MULT = 1.30
+
+# --- 4B: VP-Based Grid Spacing ---
+VP_GRID_SPACING_ENABLED = True
+VP_GRID_HVN_SPACING_MULT = 0.75
+VP_GRID_LVN_SPACING_MULT = 1.40

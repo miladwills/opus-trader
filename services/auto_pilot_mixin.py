@@ -92,6 +92,17 @@ from config.strategy_config import (
     DEFAULT_INVESTMENT_USDT,
     DEFAULT_LEVERAGE,
     normalize_auto_pilot_universe_mode,
+    FUNDING_FEE_IN_LOSS_BUDGET_ENABLED,
+    TIME_OF_DAY_WEIGHTING_ENABLED,
+    TIME_OF_DAY_BUCKET_HOURS,
+    TIME_OF_DAY_MAX_BONUS,
+    TIME_OF_DAY_MAX_PENALTY,
+    TIME_OF_DAY_MIN_TRADES,
+    REGIME_ADAPTIVE_ROTATION_ENABLED,
+    REGIME_DETERIORATION_FAST_CHECK_SEC,
+    CROSS_SYMBOL_CORRELATION_FILTER_ENABLED,
+    CROSS_SYMBOL_MAX_CORRELATION,
+    CROSS_SYMBOL_PENALTY_POINTS,
 )
 
 logger = logging.getLogger(__name__)
@@ -180,12 +191,36 @@ class AutoPilotMixin:
         realized_total = self._safe_float(safe_bot.get("realized_pnl"), 0.0)
         baseline_raw = safe_bot.get("auto_pilot_loss_budget_realized_baseline")
         if baseline_raw is None:
-            return realized_total
-        try:
-            baseline = float(baseline_raw)
-        except (TypeError, ValueError):
-            return realized_total
-        return realized_total - baseline
+            pnl_since_reset = realized_total
+        else:
+            try:
+                baseline = float(baseline_raw)
+            except (TypeError, ValueError):
+                return realized_total
+            pnl_since_reset = realized_total - baseline
+
+        if FUNDING_FEE_IN_LOSS_BUDGET_ENABLED:
+            try:
+                bot_id = safe_bot.get("id") or safe_bot.get("bot_id")
+                pnl_service = getattr(self, "pnl_service", None)
+                if pnl_service is not None and bot_id:
+                    trade_logs = pnl_service.get_log(bot_id=bot_id)
+                    funding_total = sum(
+                        self._safe_float(entry.get("funding_fee"), 0.0)
+                        for entry in trade_logs
+                        if entry.get("funding_fee") is not None
+                    )
+                    if funding_total != 0.0:
+                        logger.debug(
+                            "[Auto-Pilot:%s] Funding fee adjustment to loss budget: %.6f USDT",
+                            bot_id,
+                            funding_total,
+                        )
+                        pnl_since_reset += funding_total
+            except Exception:
+                pass  # pnl_service unavailable — skip adjustment
+
+        return pnl_since_reset
 
     def _compute_auto_pilot_loss_budget_state(
         self,
@@ -1391,6 +1426,21 @@ class AutoPilotMixin:
                 min(settings["max_seconds"], round(effective_seconds)),
             )
         )
+
+        # Feature 4C: Regime-adaptive rotation speed — floor on deterioration
+        if REGIME_ADAPTIVE_ROTATION_ENABLED and not urgent_rotation:
+            current_symbol = str(
+                (current_candidate or {}).get("symbol")
+                or bot.get("symbol")
+                or ""
+            ).strip().upper()
+            if current_symbol and current_symbol != "AUTO-PILOT":
+                deterioration_floor = self._check_regime_deterioration(bot, current_symbol)
+                if deterioration_floor is not None:
+                    if effective_seconds > deterioration_floor:
+                        effective_seconds = deterioration_floor
+                        reasons.append("regime_deterioration_fast_check")
+
         if not reasons:
             reasons = ["base_interval"]
 
@@ -1400,6 +1450,247 @@ class AutoPilotMixin:
             "reasons": reasons,
             "score_threshold": settings["score_threshold"],
         }
+
+    def _get_time_of_day_adjustment(self, symbol: str, category: str) -> float:
+        """
+        Feature 1D: Time-of-Day Performance Weighting.
+
+        Computes a score adjustment based on historical win rate in the current
+        2-hour UTC bucket. Returns a bonus (up to TIME_OF_DAY_MAX_BONUS) for
+        high win-rate periods and a penalty (up to TIME_OF_DAY_MAX_PENALTY) for
+        poor win-rate periods. Returns 0.0 if disabled or insufficient data.
+        """
+        try:
+            if not TIME_OF_DAY_WEIGHTING_ENABLED:
+                return 0.0
+
+            now_utc = datetime.now(timezone.utc)
+            hour = now_utc.hour
+            bucket = (hour // TIME_OF_DAY_BUCKET_HOURS) * TIME_OF_DAY_BUCKET_HOURS
+
+            pnl_service = getattr(self, "pnl_service", None)
+            if pnl_service is None:
+                return 0.0
+
+            try:
+                trade_logs = pnl_service.get_log()
+            except Exception:
+                return 0.0
+
+            if not trade_logs:
+                return 0.0
+
+            bucket_wins = 0
+            bucket_total = 0
+            for entry in trade_logs:
+                # Filter by category/mode when available
+                entry_mode = str(entry.get("mode") or "").strip().lower()
+                entry_category = str(category or "").strip().lower()
+                if entry_category and entry_mode and entry_mode != entry_category:
+                    continue
+
+                time_str = str(entry.get("time") or "").strip()
+                if not time_str:
+                    continue
+                try:
+                    if time_str.endswith("Z"):
+                        time_str = time_str[:-1] + "+00:00"
+                    trade_dt = datetime.fromisoformat(time_str)
+                    if trade_dt.tzinfo is None:
+                        trade_dt = trade_dt.replace(tzinfo=timezone.utc)
+                    trade_hour = trade_dt.astimezone(timezone.utc).hour
+                    trade_bucket = (trade_hour // TIME_OF_DAY_BUCKET_HOURS) * TIME_OF_DAY_BUCKET_HOURS
+                    if trade_bucket != bucket:
+                        continue
+                except Exception:
+                    continue
+
+                try:
+                    pnl_val = float(entry.get("pnl") or 0.0)
+                except (TypeError, ValueError):
+                    continue
+
+                bucket_total += 1
+                if pnl_val > 0:
+                    bucket_wins += 1
+
+            if bucket_total < TIME_OF_DAY_MIN_TRADES:
+                return 0.0
+
+            win_rate = bucket_wins / bucket_total
+
+            if win_rate > 0.60:
+                # Linear bonus: 0 at 60%, max at 100%
+                factor = (win_rate - 0.60) / 0.40
+                return round(min(TIME_OF_DAY_MAX_BONUS, factor * TIME_OF_DAY_MAX_BONUS), 2)
+            elif win_rate < 0.40:
+                # Linear penalty: 0 at 40%, max at 0%
+                factor = (0.40 - win_rate) / 0.40
+                return round(-min(TIME_OF_DAY_MAX_PENALTY, factor * TIME_OF_DAY_MAX_PENALTY), 2)
+
+            return 0.0
+
+        except Exception:
+            return 0.0
+
+    def _check_regime_deterioration(
+        self, bot: Dict[str, Any], symbol: str
+    ) -> Optional[int]:
+        """
+        Feature 4C: Regime-Adaptive Rotation Speed.
+
+        Detects if the regime has deteriorated (e.g., trending→choppy,
+        trending→illiquid) since the last known state for this symbol.
+        Returns REGIME_DETERIORATION_FAST_CHECK_SEC if a recent deterioration
+        is detected and hasn't already triggered a fast check within 120s.
+        Returns None if no deterioration or feature is disabled.
+        """
+        if not REGIME_ADAPTIVE_ROTATION_ENABLED:
+            return None
+
+        try:
+            entry_filter = getattr(self, "entry_filter", None)
+            if entry_filter is None:
+                entry_filter = getattr(self, "entry_filter_service", None)
+            if entry_filter is None:
+                return None
+
+            try:
+                regime_result = entry_filter.classify_regime(symbol)
+            except Exception:
+                return None
+
+            current_regime = str(regime_result.get("regime") or "").lower()
+
+            last_regimes = bot.get("_last_regime_per_symbol") or {}
+            last_regime = str(last_regimes.get(symbol) or "").lower()
+
+            # Update stored regime
+            if not isinstance(bot.get("_last_regime_per_symbol"), dict):
+                bot["_last_regime_per_symbol"] = {}
+            bot["_last_regime_per_symbol"][symbol] = current_regime
+
+            if not last_regime or last_regime == current_regime:
+                return None
+
+            # Deterioration: was trending/good, now choppy/illiquid/blocked
+            deteriorated_from = {"trending"}
+            deteriorated_to = {"choppy", "illiquid", "blocked", "too_strong"}
+            if last_regime in deteriorated_from and current_regime in deteriorated_to:
+                # Guard against triggering more frequently than every 120s
+                last_fast_check_ts = self._safe_float(
+                    bot.get("_regime_deterioration_last_fast_check_ts"), 0.0
+                )
+                now_ts = time.time()
+                if now_ts - last_fast_check_ts < 120:
+                    return None
+                bot["_regime_deterioration_last_fast_check_ts"] = now_ts
+                return REGIME_DETERIORATION_FAST_CHECK_SEC
+
+        except Exception:
+            pass
+
+        return None
+
+    def _get_cross_symbol_correlation_adjustment(
+        self, bot: Dict[str, Any], symbol: str
+    ) -> float:
+        """
+        Feature 4D: Cross-Symbol Correlation Filter.
+
+        Checks the correlation of `symbol` against all symbols held by other
+        running bots. If the maximum Pearson correlation exceeds
+        CROSS_SYMBOL_MAX_CORRELATION, returns a penalty of
+        -CROSS_SYMBOL_PENALTY_POINTS. Uses a 300s TTL cache per symbol-pair
+        to avoid repeated OHLCV fetches. Returns 0.0 if disabled or no
+        correlation concern.
+        """
+        if not CROSS_SYMBOL_CORRELATION_FILTER_ENABLED:
+            return 0.0
+
+        try:
+            # Collect symbols held by other running bots
+            bot_id = str(bot.get("id") or "").strip()
+            held_symbols: List[str] = []
+            try:
+                for b in self.bot_storage.list_bots():
+                    b_id = str(b.get("id") or "").strip()
+                    if b_id == bot_id:
+                        continue
+                    b_status = str(b.get("status") or "").strip().lower()
+                    if b_status not in ("running", "recovering", "paused"):
+                        continue
+                    b_sym = str(b.get("symbol") or "").strip().upper()
+                    if b_sym and b_sym != "AUTO-PILOT" and b_sym != symbol:
+                        held_symbols.append(b_sym)
+            except Exception:
+                return 0.0
+
+            if not held_symbols:
+                return 0.0
+
+            indicator_service = getattr(self, "indicator_service", None)
+            if indicator_service is None:
+                return 0.0
+
+            # Correlation cache: {(sym_a, sym_b): {"ts": float, "corr": float}}
+            if not hasattr(self, "_cross_symbol_corr_cache"):
+                self._cross_symbol_corr_cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
+
+            now_ts = time.time()
+            cache_ttl = 300.0
+
+            max_corr = 0.0
+            for held_sym in held_symbols:
+                cache_key = (
+                    (symbol, held_sym) if symbol < held_sym else (held_sym, symbol)
+                )
+                cached = self._cross_symbol_corr_cache.get(cache_key)
+                if cached and (now_ts - cached.get("ts", 0.0)) < cache_ttl:
+                    corr = cached["corr"]
+                else:
+                    try:
+                        candles_a = indicator_service.get_ohlcv(symbol, interval="15", limit=50)
+                        candles_b = indicator_service.get_ohlcv(held_sym, interval="15", limit=50)
+                        closes_a = [float(c["close"]) for c in (candles_a or []) if c.get("close") is not None]
+                        closes_b = [float(c["close"]) for c in (candles_b or []) if c.get("close") is not None]
+                        min_len = min(len(closes_a), len(closes_b))
+                        if min_len < 10:
+                            corr = 0.0
+                        else:
+                            closes_a = closes_a[-min_len:]
+                            closes_b = closes_b[-min_len:]
+                            corr = self._compute_pearson_correlation(closes_a, closes_b)
+                    except Exception:
+                        corr = 0.0
+                    self._cross_symbol_corr_cache[cache_key] = {"ts": now_ts, "corr": corr}
+
+                if abs(corr) > max_corr:
+                    max_corr = abs(corr)
+
+            if max_corr > CROSS_SYMBOL_MAX_CORRELATION:
+                return -CROSS_SYMBOL_PENALTY_POINTS
+
+        except Exception:
+            pass
+
+        return 0.0
+
+    def _compute_pearson_correlation(
+        self, x: List[float], y: List[float]
+    ) -> float:
+        """Compute Pearson correlation coefficient between two equal-length series."""
+        n = len(x)
+        if n < 2 or len(y) != n:
+            return 0.0
+        mean_x = sum(x) / n
+        mean_y = sum(y) / n
+        cov = sum((x[i] - mean_x) * (y[i] - mean_y) for i in range(n))
+        std_x = math.sqrt(sum((v - mean_x) ** 2 for v in x))
+        std_y = math.sqrt(sum((v - mean_y) ** 2 for v in y))
+        if std_x == 0.0 or std_y == 0.0:
+            return 0.0
+        return cov / (std_x * std_y)
 
     def _score_auto_pilot_candidate(
         self,
@@ -1695,6 +1986,20 @@ class AutoPilotMixin:
                         reasons.append("volatile_low_liq")
             except Exception:
                 pass
+
+        # Feature 1D: Time-of-day performance weighting
+        if TIME_OF_DAY_WEIGHTING_ENABLED and symbol:
+            tod_adjustment = self._get_time_of_day_adjustment(symbol, mode)
+            if tod_adjustment != 0.0:
+                score += tod_adjustment
+                reasons.append(f"tod{tod_adjustment:+.1f}")
+
+        # Feature 4D: Cross-symbol correlation filter
+        if CROSS_SYMBOL_CORRELATION_FILTER_ENABLED and symbol:
+            corr_adjustment = self._get_cross_symbol_correlation_adjustment(bot, symbol)
+            if corr_adjustment != 0.0:
+                score += corr_adjustment
+                reasons.append(f"corr_penalty{corr_adjustment:+.1f}")
 
         return {
             "score": round(score, 2),

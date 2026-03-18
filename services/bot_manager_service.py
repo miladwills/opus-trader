@@ -62,6 +62,7 @@ from config.strategy_config import (
     ENTRY_GATE_RECHECK_SECONDS,
     AUTO_PILOT_UNIVERSE_MODE,
     normalize_auto_pilot_universe_mode,
+    TP_PROFITABILITY_GATE_ENABLED,
 )
 from services.bot_storage_service import BotStorageService
 from services.bybit_client import BybitClient
@@ -2070,6 +2071,17 @@ class BotManagerService:
         # Keep Global TP empty/disabled unless the user explicitly sets it.
         if tp_pct is not None and tp_pct <= 0:
             tp_pct = None
+
+        # TP profitability gate: block creation if TP% cannot cover round-trip fees
+        if TP_PROFITABILITY_GATE_ENABLED and tp_pct is not None:
+            min_profitable_tp = 2 * FAST_EXEC_TAKER_FEE_RATE + FAST_EXEC_SLIPPAGE_BUFFER_PCT
+            if tp_pct < min_profitable_tp:
+                raise ValueError(
+                    f"tp_pct={tp_pct:.4%} is below the minimum profitable threshold "
+                    f"({min_profitable_tp:.4%} = 2x taker fee {FAST_EXEC_TAKER_FEE_RATE:.4%} "
+                    f"+ slippage buffer {FAST_EXEC_SLIPPAGE_BUFFER_PCT:.4%}). "
+                    "This TP would guarantee a loss after fees. Increase tp_pct or disable the gate."
+                )
 
         bot_data["tp_pct"] = tp_pct
 

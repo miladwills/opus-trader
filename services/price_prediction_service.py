@@ -62,6 +62,22 @@ from config.strategy_config import (
     STRONG_CONFIRMATION_TIMEFRAMES,
     STRONG_CONFIRMATION_REQUIRED_COUNT,
     MIN_STRONG_VOLUME_USDT,
+    # Feature 3D: S/R Strength Decay
+    SR_STRENGTH_DECAY_ENABLED,
+    SR_RECENCY_HALF_LIFE_CANDLES,
+    SR_BREAK_PENALTY_FACTOR,
+    # Feature 3B: Divergence Duration Tracking
+    DIVERGENCE_DURATION_TRACKING_ENABLED,
+    DIVERGENCE_FRESH_MAX_CANDLES,
+    DIVERGENCE_AGED_CANDLES,
+    DIVERGENCE_AGED_WEIGHT_MULT,
+    # Feature 3C: MTF Confluence Scoring
+    MTF_CONFLUENCE_SCORING_ENABLED,
+    MTF_CONFLUENCE_MAX_SCORE,
+    # Feature 3A: Pattern Context Weighting
+    PATTERN_CONTEXT_WEIGHTING_ENABLED,
+    PATTERN_CHOP_CONFIDENCE_MULT,
+    PATTERN_HVN_CONFIDENCE_BOOST,
 )
 
 logger = logging.getLogger(__name__)
@@ -631,6 +647,9 @@ class SupportResistanceDetector:
         scored_levels = []
 
         for level in levels:
+            # Feature 3D: count price breaks through this level when decay is enabled
+            if SR_STRENGTH_DECAY_ENABLED:
+                level["break_count"] = self._count_level_breaks(level["price"], recent)
             strength = self._calculate_level_strength(level, len(recent))
             distance_pct = abs(level["price"] - current_price) / current_price
 
@@ -719,23 +738,64 @@ class SupportResistanceDetector:
         return {
             "price": sum(prices) / len(prices),
             "touches": len(cluster),
+            "touch_indices": indices,  # individual touch positions for recency weighting
             "first_touch_idx": min(indices),
             "last_touch_idx": max(indices),
         }
 
-    def _calculate_level_strength(self, level: Dict[str, Any], total_candles: int) -> int:
-        """Calculate level strength (1-10)."""
-        base_score = min(5, level["touches"])
+    def _count_level_breaks(
+        self,
+        level_price: float,
+        candles: List[Dict[str, Any]],
+    ) -> int:
+        """Count times price crossed through the level (break count)."""
+        break_count = 0
+        threshold = level_price * self.touch_threshold_pct
+        above = candles[0]["close"] > level_price
+        for candle in candles[1:]:
+            close = candle["close"]
+            if above and close < level_price - threshold:
+                break_count += 1
+                above = False
+            elif not above and close > level_price + threshold:
+                break_count += 1
+                above = True
+        return break_count
 
-        # Recency bonus
-        recency_pct = level["last_touch_idx"] / total_candles if total_candles > 0 else 0
-        recency_bonus = min(3, int(recency_pct * 4))
+    def _calculate_level_strength(self, level: Dict[str, Any], total_candles: int) -> float:
+        """Calculate level strength (1-10), with optional recency/break-penalty decay."""
+        if SR_STRENGTH_DECAY_ENABLED:
+            # Recency-weighted touch count: weight = 0.5 ^ (candles_since_touch / half_life)
+            touch_indices = level.get("touch_indices", [])
+            if touch_indices:
+                weighted_touches = 0.0
+                for idx in touch_indices:
+                    candles_since = total_candles - 1 - idx
+                    weight = 0.5 ** (candles_since / max(1, SR_RECENCY_HALF_LIFE_CANDLES))
+                    weighted_touches += weight
+            else:
+                weighted_touches = float(level["touches"])
 
-        # Duration bonus
-        duration = level["last_touch_idx"] - level["first_touch_idx"]
-        duration_bonus = min(2, int(duration / 20))
+            # Map weighted touches to base score (0–5 range)
+            base_score = min(5.0, weighted_touches)
 
-        return min(10, base_score + recency_bonus + duration_bonus)
+            # Break penalty: stored during detect_levels; default 0 if not set
+            break_count = level.get("break_count", 0)
+            strength = base_score * ((1.0 - SR_BREAK_PENALTY_FACTOR) ** break_count)
+
+            # Duration bonus still applies (max +2)
+            duration = level["last_touch_idx"] - level["first_touch_idx"]
+            duration_bonus = min(2.0, duration / 20.0)
+
+            return min(10.0, strength + duration_bonus)
+        else:
+            # Legacy path
+            base_score = min(5, level["touches"])
+            recency_pct = level["last_touch_idx"] / total_candles if total_candles > 0 else 0
+            recency_bonus = min(3, int(recency_pct * 4))
+            duration = level["last_touch_idx"] - level["first_touch_idx"]
+            duration_bonus = min(2, int(duration / 20))
+            return min(10, base_score + recency_bonus + duration_bonus)
 
     def is_near_level(
         self,
@@ -1537,11 +1597,50 @@ class TimeframeAligner:
                 logger.warning(f"Failed to get indicators for {symbol} {tf}: {e}")
                 tf_scores[tf] = {"score": 0, "error": str(e)}
 
-        # Calculate final alignment
-        if total_weight > 0:
-            final_score = weighted_score / total_weight
+        # Feature 3C: MTF Confluence Scoring — magnitude-aware weighted sum
+        if MTF_CONFLUENCE_SCORING_ENABLED:
+            mtf_raw_score = 0.0
+            raw_tf_contributions = []
+            for tf in self.timeframes:
+                if tf in tf_scores and "error" not in tf_scores[tf]:
+                    try:
+                        indicators = self.indicator_service.compute_indicators(
+                            symbol=symbol, interval=tf, limit=200
+                        )
+                        ema9 = indicators.get("ema_9")
+                        ema21 = indicators.get("ema_21")
+                        price = indicators.get("close")
+                        weight = self.weights.get(tf, 0.20)
+                        if ema9 and ema21 and price and price > 0:
+                            magnitude = abs(ema9 - ema21) / price * 100
+                            direction = 1 if ema9 > ema21 else -1
+                            tf_contribution = direction * magnitude * weight
+                            raw_tf_contributions.append((direction, tf_contribution))
+                            mtf_raw_score += tf_contribution
+                    except Exception:
+                        pass
+
+            # Confluence bonus: all TFs agree in direction
+            if raw_tf_contributions:
+                directions = [d for d, _ in raw_tf_contributions]
+                if all(d == 1 for d in directions) or all(d == -1 for d in directions):
+                    mtf_raw_score *= 1.3
+
+            # Cap at ±MTF_CONFLUENCE_MAX_SCORE
+            mtf_confluence_score = max(-MTF_CONFLUENCE_MAX_SCORE, min(MTF_CONFLUENCE_MAX_SCORE, mtf_raw_score))
+            # Blend confluence score into final_score (replace weighted_score path)
+            if total_weight > 0:
+                legacy_score = weighted_score / total_weight
+            else:
+                legacy_score = 0
+            # Use confluence score as the primary weighted_score for alignment
+            final_score = mtf_confluence_score
         else:
-            final_score = 0
+            # Legacy path
+            if total_weight > 0:
+                final_score = weighted_score / total_weight
+            else:
+                final_score = 0
 
         # Determine alignment quality
         all_scores = [s["score"] for s in tf_scores.values() if "error" not in s]
@@ -1680,10 +1779,17 @@ class PricePredictionService:
         # Hysteresis: track previous labels to prevent rapid flipping
         # Key: (symbol, timeframe) -> previous direction label
         self._previous_labels: Dict[Tuple[str, str], str] = {}
-        
+
         # Timeframe confirmation: track consecutive STRONG signals
         # Key: (symbol, timeframe, direction) -> consecutive count
         self._strong_confirmation_state: Dict[Tuple[str, str, str], int] = {}
+
+        # Feature 3B: Divergence duration tracking
+        # Key: (symbol, div_type) -> {"first_candle_idx": int}
+        self._divergence_state: Dict[Tuple[str, str], Dict[str, Any]] = {}
+
+        # Feature 3A: VolumeProfileService (lazy-initialized)
+        self._volume_profile_service: Optional[Any] = None
 
 
     def predict(
@@ -1725,12 +1831,69 @@ class PricePredictionService:
 
         current_price = candles[-1]["close"]
 
+        # Feature 3A: pre-fetch primary timeframe indicators for pattern context weighting
+        _primary_indicators: Dict[str, Any] = {}
+        _vp_data: Dict[str, Any] = {}
+        if PATTERN_CONTEXT_WEIGHTING_ENABLED:
+            try:
+                _primary_indicators = self.indicator_service.compute_indicators(
+                    symbol=symbol, interval=timeframe, limit=200
+                )
+            except Exception:
+                pass
+            try:
+                if self._volume_profile_service is None:
+                    from services.volume_profile_service import VolumeProfileService
+                    self._volume_profile_service = VolumeProfileService(
+                        bybit_client=self.client,
+                        indicator_service=self.indicator_service,
+                    )
+                _vp_data = self._volume_profile_service.calculate_volume_profile(
+                    symbol=symbol, timeframe=timeframe, lookback=100
+                )
+            except Exception:
+                pass
+
         # 1. Pattern Detection (max +/- 30 points)
         pattern_signals = self.pattern_detector.detect_all_patterns(candles)
         pattern_score = 0
         for pattern_name, pattern_data in pattern_signals.items():
             signal_dir = pattern_data.get("signal", "neutral")
             confidence = pattern_data.get("confidence", 0.5)
+
+            # Feature 3A: Pattern Context Weighting
+            if PATTERN_CONTEXT_WEIGHTING_ENABLED:
+                adx = _primary_indicators.get("adx")
+                hvn_levels = _vp_data.get("hvn_levels", [])
+                lvn_levels = _vp_data.get("lvn_levels", [])
+                poc = _vp_data.get("poc")
+                price_range = _vp_data.get("price_high", 0) - _vp_data.get("price_low", 0)
+                proximity_thr = price_range * 0.02 if price_range > 0 else 0
+
+                # Chop market: ADX < 15 → reduce confidence
+                if adx is not None and adx < 15:
+                    confidence *= PATTERN_CHOP_CONFIDENCE_MULT
+
+                # Near HVN or POC → boost confidence
+                near_hvn = any(
+                    abs(current_price - h) < proximity_thr
+                    for h in hvn_levels
+                ) if hvn_levels and proximity_thr > 0 else False
+                near_poc = (
+                    poc is not None and proximity_thr > 0
+                    and abs(current_price - poc) < proximity_thr
+                )
+                if near_hvn or near_poc:
+                    confidence *= PATTERN_HVN_CONFIDENCE_BOOST
+
+                # In LVN and ADX < 20 → penalize confidence
+                in_lvn = any(
+                    abs(current_price - lv) < proximity_thr
+                    for lv in lvn_levels
+                ) if lvn_levels and proximity_thr > 0 else False
+                if in_lvn and adx is not None and adx < 20:
+                    confidence *= 0.60
+
             points = int(confidence * 30)
 
             if signal_dir == "bullish":
@@ -1790,6 +1953,7 @@ class PricePredictionService:
         rsi_values = self._compute_rsi_series(candles)
         rsi_divergence = self.divergence_detector.detect_rsi_divergence(candles, rsi_values)
         divergence_score = 0
+        current_candle_idx = len(candles) - 1
 
         if rsi_divergence:
             div_type = rsi_divergence.get("type", "")
@@ -1800,6 +1964,22 @@ class PricePredictionService:
                 points = 25
             else:  # hidden
                 points = 15
+
+            # Feature 3B: Divergence Duration Tracking — age-based weight decay
+            if DIVERGENCE_DURATION_TRACKING_ENABLED and div_type:
+                state_key = (symbol, div_type)
+                if state_key not in self._divergence_state:
+                    self._divergence_state[state_key] = {"first_candle_idx": current_candle_idx}
+                age = current_candle_idx - self._divergence_state[state_key]["first_candle_idx"]
+                if age <= DIVERGENCE_FRESH_MAX_CANDLES:
+                    div_weight = 1.0
+                elif age >= DIVERGENCE_AGED_CANDLES:
+                    div_weight = DIVERGENCE_AGED_WEIGHT_MULT
+                else:
+                    span = DIVERGENCE_AGED_CANDLES - DIVERGENCE_FRESH_MAX_CANDLES
+                    progress = (age - DIVERGENCE_FRESH_MAX_CANDLES) / span
+                    div_weight = 1.0 - progress * (1.0 - DIVERGENCE_AGED_WEIGHT_MULT)
+                points = int(points * div_weight)
 
             if div_signal == "bullish":
                 divergence_score = points
@@ -1821,6 +2001,12 @@ class PricePredictionService:
                     timeframe=timeframe,
                     description=rsi_divergence.get("description", "RSI divergence"),
                 ))
+        else:
+            # Feature 3B: Clear stale divergence state when divergence disappears
+            if DIVERGENCE_DURATION_TRACKING_ENABLED:
+                keys_to_clear = [k for k in self._divergence_state if k[0] == symbol]
+                for k in keys_to_clear:
+                    del self._divergence_state[k]
 
         component_scores["divergence"] = divergence_score
 

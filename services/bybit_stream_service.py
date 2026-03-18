@@ -1179,17 +1179,17 @@ class BybitStreamService:
         if not topic:
             return
         if topic.startswith("tickers."):
-            self._note_topic_message("ticker")
             self._handle_ticker_message(payload)
+            self._note_topic_message("ticker")
         elif topic.startswith("orderbook."):
-            self._note_topic_message("orderbook")
             self._handle_orderbook_message(payload)
+            self._note_topic_message("orderbook")
         elif topic.startswith("kline."):
-            self._note_topic_message("kline")
             self._handle_kline_message(payload)
+            self._note_topic_message("kline")
         elif topic.startswith("publicTrade."):
-            self._note_topic_message("public_trade")
             self._handle_public_trade_message(payload)
+            self._note_topic_message("public_trade")
 
     def _on_private_message(self, ws_app, message: str) -> None:
         payload = self._decode_message(message)
@@ -1221,14 +1221,14 @@ class BybitStreamService:
         if not topic:
             return
         if topic == "execution":
-            self._note_topic_message("execution")
             self._handle_execution_message(payload)
+            self._note_topic_message("execution")
         elif topic == "order":
-            self._note_topic_message("order")
             self._handle_order_message(payload)
+            self._note_topic_message("order")
         elif topic == "position":
-            self._note_topic_message("position")
             self._handle_position_message(payload)
+            self._note_topic_message("position")
 
     def _on_public_error(self, _ws_app, error: Any) -> None:
         if self._stop_event.is_set():

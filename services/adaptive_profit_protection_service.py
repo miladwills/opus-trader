@@ -312,6 +312,28 @@ class AdaptiveProfitProtectionService:
                     trend_score -= 2
 
         trend_score = max(min(trend_score, 5), -5)
+
+        # --- Feature 2B: Flow-Accelerated Profit Lock ---
+        # If momentum is exhausted (from flow analysis) and position is
+        # armed/profitable, compress the giveback threshold aggressively so
+        # profits are locked faster before the reversal deepens.
+        _flow_exhaustion_giveback_mult = getattr(
+            strategy_cfg, "FLOW_EXHAUSTION_GIVEBACK_MULT", 0.50
+        )
+        _flow_accelerated_enabled = getattr(
+            strategy_cfg, "FLOW_ACCELERATED_PROFIT_LOCK_ENABLED", True
+        )
+        _momentum_exhausted_indicator = bool(indicators.get("momentum_exhausted"))
+        _flow_exhaustion_active = False
+        if (
+            _flow_accelerated_enabled
+            and _momentum_exhausted_indicator
+            and profit_pct >= max(
+                cls._safe_float(settings.get("min_arm_profit_pct"), 0.004) or 0.004,
+                0.0,
+            )
+        ):
+            _flow_exhaustion_active = True
         trend_bucket = (
             "strong"
             if trend_score >= 3
@@ -364,6 +386,44 @@ class AdaptiveProfitProtectionService:
                 flow_opposing = True
         if flow_opposing and armed:
             giveback_threshold *= 0.70
+
+        # --- Feature 2A: Adaptive Trailing Stop ---
+        # Adjust the giveback threshold based on regime and exhaustion context.
+        # Tightest in exhaustion, widest in trending, tight in chop.
+        if getattr(strategy_cfg, "ADAPTIVE_TRAILING_STOP_ENABLED", True):
+            _trail_exhaustion_mult = getattr(
+                strategy_cfg, "ADAPTIVE_TRAIL_EXHAUSTION_ATR_MULT", 0.4
+            )
+            _trail_trend_mult = getattr(
+                strategy_cfg, "ADAPTIVE_TRAIL_TREND_ATR_MULT", 1.5
+            )
+            _trail_chop_mult = getattr(
+                strategy_cfg, "ADAPTIVE_TRAIL_CHOP_ATR_MULT", 0.7
+            )
+            _trail_trend_adx_min = getattr(
+                strategy_cfg, "ADAPTIVE_TRAIL_TREND_ADX_MIN", 30.0
+            )
+            _baseline_trail_mult = 1.0  # Neutral: no change vs. existing
+            _favorable_ema_slope = (is_long and ema_slope > 0) or (
+                not is_long and ema_slope < 0
+            )
+            if _momentum_exhausted_indicator or exhaustion_risk:
+                _trail_regime_mult = _trail_exhaustion_mult
+            elif adx >= _trail_trend_adx_min and _favorable_ema_slope:
+                _trail_regime_mult = _trail_trend_mult
+            elif adx < 20:
+                _trail_regime_mult = _trail_chop_mult
+            else:
+                _trail_regime_mult = _baseline_trail_mult
+            if _trail_regime_mult != _baseline_trail_mult:
+                giveback_threshold *= _trail_regime_mult / _baseline_trail_mult
+
+        # --- Feature 2B: Flow-Accelerated Profit Lock (apply multiplier) ---
+        # When momentum is confirmed exhausted by tick-flow analysis, compress
+        # the giveback threshold so profitable positions exit sooner.
+        if _flow_exhaustion_active and armed:
+            giveback_threshold *= _flow_exhaustion_giveback_mult
+            exhaustion_risk = True  # Ensure downstream logic treats this as high-urgency
 
         giveback_threshold = max(giveback_threshold, settings["min_giveback_pct"])
         near_trigger = giveback_pct >= giveback_threshold * 0.70 if giveback_threshold > 0 else False
@@ -431,6 +491,55 @@ class AdaptiveProfitProtectionService:
                 else "trend_intact"
             )
 
+        # --- Feature 5A: Funding-Aware Exit Timing ---
+        # If a funding settlement is approaching and the estimated funding cost
+        # would consume a meaningful fraction of current profit, escalate the
+        # decision to capture profits before the funding charge hits.
+        _funding_escalated = False
+        if getattr(strategy_cfg, "FUNDING_AWARE_EXIT_ENABLED", True) and armed and profit_usdt > 0:
+            _minutes_to_funding = cls._safe_float(
+                indicators.get("minutes_to_funding"), None
+            )
+            _funding_rate = cls._safe_float(indicators.get("funding_rate"), 0.0) or 0.0
+            _funding_minutes_threshold = getattr(
+                strategy_cfg, "FUNDING_AWARE_EXIT_MINUTES_THRESHOLD", 30
+            )
+            _funding_cost_ratio_threshold = getattr(
+                strategy_cfg, "FUNDING_AWARE_EXIT_COST_RATIO_THRESHOLD", 0.20
+            )
+            if (
+                _minutes_to_funding is not None
+                and _minutes_to_funding < _funding_minutes_threshold
+            ):
+                # Estimate funding cost as abs(funding_rate) of current notional
+                # expressed as a fraction of current profit_usdt.
+                # funding_rate is already a signed decimal (e.g. 0.0001 = 0.01%).
+                # We use abs() because adverse direction depends on position side.
+                _funding_cost_pct_of_profit = 0.0
+                if profit_usdt > 0 and abs(_funding_rate) > 0:
+                    # A rough cost signal: rate magnitude relative to profit ratio.
+                    # If funding_rate > 0 and long → we pay; if short we receive.
+                    # If funding_rate < 0 and short → we pay; if long we receive.
+                    _adverse_funding = (is_long and _funding_rate > 0) or (
+                        not is_long and _funding_rate < 0
+                    )
+                    if _adverse_funding:
+                        # Estimate cost fraction: treat rate as % of margin, proxy
+                        # by comparing rate to profit_pct to get relative impact.
+                        if profit_pct > 0:
+                            _funding_cost_pct_of_profit = abs(_funding_rate) / profit_pct
+                        else:
+                            _funding_cost_pct_of_profit = 1.0  # Unknown but adverse
+                if _funding_cost_pct_of_profit > _funding_cost_ratio_threshold:
+                    _funding_escalated = True
+                    _decision_ladder = ["wait", "watch_closely", "take_partial", "exit_now"]
+                    if decision in _decision_ladder:
+                        _idx = _decision_ladder.index(decision)
+                        if _idx < len(_decision_ladder) - 1:
+                            decision = _decision_ladder[_idx + 1]
+                    reason_family = "funding_cost_risk"
+                    wait_justified = False
+
         volatility_state = (
             "elevated"
             if atr_pct >= 0.03
@@ -487,4 +596,9 @@ class AdaptiveProfitProtectionService:
             "shadow_premature_pct": round(
                 settings["shadow_premature_pct"], 6
             ),
+            "flow_exhaustion_active": bool(_flow_exhaustion_active),
+            "adaptive_trail_applied": bool(
+                getattr(strategy_cfg, "ADAPTIVE_TRAILING_STOP_ENABLED", True)
+            ),
+            "funding_escalated": bool(_funding_escalated),
         }
