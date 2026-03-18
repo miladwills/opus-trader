@@ -743,3 +743,213 @@ def test_quick_profit_recenter_non_matching_bot_keeps_default_width():
     assert bot["quick_profit_recenter_width_mult_applied"] == 1.0
     assert bot["quick_profit_recenter_width_source"] == "default"
     assert bot["quick_profit_recenter_width_pct_applied"] == pytest.approx(0.045)
+
+
+# ---------------------------------------------------------------------------
+# Trailing TP first-close tests
+# ---------------------------------------------------------------------------
+
+def _make_trailing_tp_service(close_success=True):
+    """Build service mock suitable for _check_quick_profit trailing TP path."""
+    service = GridBotService.__new__(GridBotService)
+    service.client = Mock()
+    service.client._get_now_ts.return_value = 1000.0
+    service._safe_float = GridBotService._safe_float.__get__(service, GridBotService)
+    service._get_cycle_now_ts = GridBotService._get_cycle_now_ts.__get__(
+        service, GridBotService
+    )
+    service._track_position_timing = GridBotService._track_position_timing.__get__(
+        service, GridBotService
+    )
+    service._get_quick_profit_speed_adjustment = (
+        GridBotService._get_quick_profit_speed_adjustment.__get__(
+            service, GridBotService
+        )
+    )
+    service._get_scaled_quick_profit_targets = (
+        GridBotService._get_scaled_quick_profit_targets.__get__(
+            service, GridBotService
+        )
+    )
+    service._get_effective_min_profit_pct = (
+        GridBotService._get_effective_min_profit_pct.__get__(
+            service, GridBotService
+        )
+    )
+    service.scalp_pnl_service = None
+    service._build_order_link_id = Mock(return_value="qp-trail-first")
+    service._cancel_bot_reduce_only_orders = Mock(return_value=0)
+    service._hard_fail_close = Mock()
+    service._record_exit_reason = Mock()
+    service._is_position_empty_close_result = staticmethod(GridBotService._is_position_empty_close_result)
+    service._is_ambiguous_order_result = Mock(return_value=False)
+    if close_success:
+        service._create_order_checked = Mock(
+            return_value={"success": True, "normalized_qty": 2.0}
+        )
+    else:
+        service._create_order_checked = Mock(
+            return_value={"success": False, "error": "insufficient_margin"}
+        )
+    return service
+
+
+def _make_trailing_tp_bot(**overrides):
+    """Bot dict with flow confirmation strong enough for trailing TP."""
+    bot = {
+        "id": "bot-trail-001",
+        "mode": "long",
+        "range_mode": "dynamic",
+        "quick_profit_enabled": True,
+        "quick_profit_target": 0.15,
+        "quick_profit_close_pct": 0.5,
+        "flow_score": 20,  # Above TRAILING_TP_FLOW_THRESHOLD (15)
+        "flow_confidence": 0.50,  # Above TRAILING_TP_FLOW_CONFIDENCE (0.35)
+        "_position_timing_state": {
+            "BTCUSDT:Buy:0": {
+                "opened_at_ts": 500.0,
+                "last_seen_ts": 995.0,
+            }
+        },
+    }
+    bot.update(overrides)
+    return bot
+
+
+def test_trailing_tp_first_close_executes_partial_before_trailing():
+    """When flow confirms direction at target, first close happens then trailing activates."""
+    import config.strategy_config as cfg
+    original = cfg.TRAILING_TP_FIRST_CLOSE_ENABLED
+    try:
+        cfg.TRAILING_TP_FIRST_CLOSE_ENABLED = True
+        service = _make_trailing_tp_service(close_success=True)
+        bot = _make_trailing_tp_bot()
+        position = {
+            "symbol": "BTCUSDT",
+            "side": "Buy",
+            "size": "4",
+            "avgPrice": "10",
+            "unrealisedPnl": "0.20",
+        }
+
+        result = service._check_quick_profit(
+            bot=bot,
+            symbol="BTCUSDT",
+            last_price=10.0,
+            fast_indicators={"atr_pct": 0.04},
+            position=position,
+        )
+
+        assert result is not None
+        assert result["success"] is True
+        assert result["action"] == "trailing_tp_first_close"
+        assert result["recenter_needed"] is True
+        # First close executed
+        service._create_order_checked.assert_called_once()
+        assert service._create_order_checked.call_args.kwargs["reduce_only"] is True
+        # Trailing activated on remainder
+        assert bot["_trailing_tp_active"] is True
+        assert bot.get("_trailing_tp_peak_pnl") is not None
+        # Exit reason recorded
+        service._record_exit_reason.assert_called_once()
+        assert service._record_exit_reason.call_args.kwargs["reason"] == "trailing_tp_first_close"
+    finally:
+        cfg.TRAILING_TP_FIRST_CLOSE_ENABLED = original
+
+
+def test_trailing_tp_first_close_disabled_skips_close():
+    """With TRAILING_TP_FIRST_CLOSE_ENABLED=False, original behavior (no close, trailing only)."""
+    import config.strategy_config as cfg
+    original = cfg.TRAILING_TP_FIRST_CLOSE_ENABLED
+    try:
+        cfg.TRAILING_TP_FIRST_CLOSE_ENABLED = False
+        service = _make_trailing_tp_service(close_success=True)
+        bot = _make_trailing_tp_bot()
+        position = {
+            "symbol": "BTCUSDT",
+            "side": "Buy",
+            "size": "4",
+            "avgPrice": "10",
+            "unrealisedPnl": "0.20",
+        }
+
+        result = service._check_quick_profit(
+            bot=bot,
+            symbol="BTCUSDT",
+            last_price=10.0,
+            fast_indicators={"atr_pct": 0.04},
+            position=position,
+        )
+
+        # Original behavior: return None, trailing activated with no close
+        assert result is None
+        assert bot["_trailing_tp_active"] is True
+        service._create_order_checked.assert_not_called()
+    finally:
+        cfg.TRAILING_TP_FIRST_CLOSE_ENABLED = original
+
+
+def test_trailing_tp_first_close_uses_configured_pct():
+    """TRAILING_TP_FIRST_CLOSE_PCT controls the close fraction, not LONG_QUICK_PROFIT_CLOSE_PCT."""
+    import config.strategy_config as cfg
+    orig_enabled = cfg.TRAILING_TP_FIRST_CLOSE_ENABLED
+    orig_pct = cfg.TRAILING_TP_FIRST_CLOSE_PCT
+    try:
+        cfg.TRAILING_TP_FIRST_CLOSE_ENABLED = True
+        cfg.TRAILING_TP_FIRST_CLOSE_PCT = 0.30  # 30% instead of default 50%
+        service = _make_trailing_tp_service(close_success=True)
+        bot = _make_trailing_tp_bot(quick_profit_close_pct=0.5)
+        position = {
+            "symbol": "BTCUSDT",
+            "side": "Buy",
+            "size": "10",
+            "avgPrice": "10",
+            "unrealisedPnl": "0.50",  # Must exceed fee floor for notional=$100
+        }
+
+        result = service._check_quick_profit(
+            bot=bot,
+            symbol="BTCUSDT",
+            last_price=10.0,
+            fast_indicators={"atr_pct": 0.04},
+            position=position,
+        )
+
+        assert result["success"] is True
+        # Close qty should be 10 * 0.30 = 3.0, not 10 * 0.50
+        assert service._create_order_checked.call_args.kwargs["qty"] == 3.0
+    finally:
+        cfg.TRAILING_TP_FIRST_CLOSE_ENABLED = orig_enabled
+        cfg.TRAILING_TP_FIRST_CLOSE_PCT = orig_pct
+
+
+def test_trailing_tp_first_close_failure_does_not_activate_trailing():
+    """If the first close order fails, trailing TP must NOT be activated."""
+    import config.strategy_config as cfg
+    original = cfg.TRAILING_TP_FIRST_CLOSE_ENABLED
+    try:
+        cfg.TRAILING_TP_FIRST_CLOSE_ENABLED = True
+        service = _make_trailing_tp_service(close_success=False)
+        bot = _make_trailing_tp_bot()
+        position = {
+            "symbol": "BTCUSDT",
+            "side": "Buy",
+            "size": "4",
+            "avgPrice": "10",
+            "unrealisedPnl": "0.20",
+        }
+
+        result = service._check_quick_profit(
+            bot=bot,
+            symbol="BTCUSDT",
+            last_price=10.0,
+            fast_indicators={"atr_pct": 0.04},
+            position=position,
+        )
+
+        # Failed close — trailing NOT activated, return None for retry next cycle
+        assert result is None
+        assert bot.get("_trailing_tp_active") is not True
+        assert bot.get("_trailing_tp_peak_pnl") is None
+    finally:
+        cfg.TRAILING_TP_FIRST_CLOSE_ENABLED = original

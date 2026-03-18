@@ -16242,6 +16242,9 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
                     symbol, prev_persisted, current_position_size, divergence_pct * 100,
                 )
 
+        # Capture previous position side before overwrite (needed for auto-reanchor side match)
+        _prev_position_side = str(bot.get("current_position_side") or "").lower()
+
         # Write position to bot dict so dashboard + profit protection see it
         bot["current_position_size"] = current_position_size
         bot["current_position_side"] = current_position_side
@@ -16249,6 +16252,29 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
         # H4 audit: persist actual entry price for leverage-aware stop-loss
         if avg_entry_price > 0:
             bot["actual_entry_price"] = avg_entry_price
+
+        # --- Auto-reanchor: detect position-to-flat transition (covers exchange close, TP/SL fills) ---
+        if (
+            mode in ("long", "short")
+            and range_mode != "fixed"
+            and not bot.get("directional_reanchor_pending")
+            and prev_persisted > 0
+            and current_position_size == 0
+        ):
+            _side_matches_mode = (
+                (mode == "long" and _prev_position_side == "buy")
+                or (mode == "short" and _prev_position_side == "sell")
+            )
+            if _side_matches_mode:
+                from config.strategy_config import DIRECTIONAL_REANCHOR_ON_FLAT_DETECTED_ENABLED
+                if DIRECTIONAL_REANCHOR_ON_FLAT_DETECTED_ENABLED:
+                    bot["directional_reanchor_pending"] = True
+                    bot["directional_reanchor_requested_at"] = now_iso
+                    bot["_reanchor_source"] = "flat_detected"
+                    logger.info(
+                        "[%s] Auto-reanchor: position flat detected (prev=%.6f side=%s), triggering reanchor",
+                        symbol, prev_persisted, _prev_position_side,
+                    )
 
         # --- Directional reanchor: consume pending marker if exchange confirms flat ---
         if bot.get("directional_reanchor_pending") and mode in ("long", "short"):
@@ -21341,15 +21367,120 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
                 return None  # SKIP the fixed close — let profit run
 
         elif unrealized_pnl >= target_profit and flow_confirms_direction and not bot.get("stall_overlay_position_cap_hit"):
-            # Profit hit target AND flow confirms AND position not capped — activate trailing
-            bot["_trailing_tp_active"] = True
-            bot["_trailing_tp_peak_pnl"] = round(unrealized_pnl, 4)
-            bot["_trailing_tp_stop_pnl"] = round(unrealized_pnl - trailing_distance, 4)
+            # Profit hit target AND flow confirms — take first partial close, then trail remainder
+            from config.strategy_config import TRAILING_TP_FIRST_CLOSE_ENABLED, TRAILING_TP_FIRST_CLOSE_PCT
+            if not TRAILING_TP_FIRST_CLOSE_ENABLED:
+                # Legacy behavior: skip close, activate trailing on full position
+                bot["_trailing_tp_active"] = True
+                bot["_trailing_tp_peak_pnl"] = round(unrealized_pnl, 4)
+                bot["_trailing_tp_stop_pnl"] = round(unrealized_pnl - trailing_distance, 4)
+                logger.info(
+                    "[%s] TRAILING TP activated (first-close disabled): upnl=$%.2f trail=$%.4f",
+                    symbol, unrealized_pnl, trailing_distance,
+                )
+                return None
+
+            # --- First partial close before trailing ---
+            trailing_first_close_pct = max(0.05, min(0.80, TRAILING_TP_FIRST_CLOSE_PCT))
+            trailing_close_qty = pos_size * trailing_first_close_pct
+            trailing_close_side = "Sell" if pos_side == "Buy" else "Buy"
+
             logger.info(
-                "[%s] TRAILING TP activated: upnl=$%.2f target=$%.2f trail=$%.4f — letting profit run",
-                symbol, unrealized_pnl, target_profit, trailing_distance,
+                "[%s] TRAILING TP first close: taking %.0f%% profit $%.2f before trailing remainder "
+                "(target=$%.2f trail=$%.4f)",
+                symbol, trailing_first_close_pct * 100, unrealized_pnl, target_profit, trailing_distance,
             )
-            return None  # SKIP the fixed close — trailing takes over
+
+            trailing_order_link_id = self._build_order_link_id(
+                bot_id=bot_id,
+                symbol=symbol,
+                cycle_ts=int(time.time()),
+                seq=0,
+                side=trailing_close_side,
+                intent="close",
+            )
+
+            trailing_close_result = self._create_order_checked(
+                bot=bot,
+                symbol=symbol,
+                side=trailing_close_side,
+                qty=trailing_close_qty,
+                order_type="Market",
+                price=last_price,
+                reduce_only=True,
+                time_in_force="GTC",
+                order_link_id=trailing_order_link_id,
+                full_close_qty=pos_size,
+            )
+
+            if self._is_position_empty_close_result(trailing_close_result):
+                logger.info("[%s] Trailing TP first close: position already flat", symbol)
+                return {
+                    "success": True,
+                    "action": "trailing_tp_first_close",
+                    "already_flat": True,
+                    "close_qty": 0.0,
+                    "unrealized_pnl": unrealized_pnl,
+                    "profit_taken": 0.0,
+                    "target_threshold": target_profit,
+                    "remaining_size": 0.0,
+                    "recenter_needed": False,
+                }
+
+            if trailing_close_result.get("retCode") == 0 or trailing_close_result.get("success"):
+                self._cancel_bot_reduce_only_orders(
+                    bot=bot, symbol=symbol, side=trailing_close_side,
+                )
+
+                normalized_qty = trailing_close_result.get("normalized_qty", trailing_close_qty)
+                profit_taken = unrealized_pnl * trailing_first_close_pct
+
+                bot["last_quick_profit_at"] = datetime.now(timezone.utc).isoformat()
+                bot["quick_profit_count"] = (
+                    int(self._safe_float(bot.get("quick_profit_count"), 0.0)) + 1
+                )
+                bot["quick_profit_total"] = (
+                    self._safe_float(bot.get("quick_profit_total"), 0.0) + profit_taken
+                )
+
+                logger.info(
+                    "[%s] Trailing TP first close SUCCESS: closed %s @ market (profit ~$%.2f), "
+                    "activating trailing on remainder",
+                    symbol, normalized_qty, profit_taken,
+                )
+                self._record_exit_reason(
+                    bot,
+                    symbol=symbol,
+                    mode=bot.get("mode"),
+                    reason="trailing_tp_first_close",
+                    unrealized_pnl=unrealized_pnl,
+                    profit_taken=profit_taken,
+                    close_qty=normalized_qty,
+                    target_threshold=target_profit,
+                )
+
+                # Activate trailing on the remaining position
+                bot["_trailing_tp_active"] = True
+                bot["_trailing_tp_peak_pnl"] = round(unrealized_pnl, 4)
+                bot["_trailing_tp_stop_pnl"] = round(unrealized_pnl - trailing_distance, 4)
+
+                return {
+                    "success": True,
+                    "action": "trailing_tp_first_close",
+                    "close_qty": trailing_close_qty,
+                    "unrealized_pnl": unrealized_pnl,
+                    "profit_taken": profit_taken,
+                    "target_threshold": target_profit,
+                    "remaining_size": pos_size - trailing_close_qty,
+                    "recenter_needed": True,
+                }
+            else:
+                # Close failed — do NOT activate trailing, retry next cycle
+                logger.warning(
+                    "[%s] Trailing TP first close FAILED: %s — trailing NOT activated",
+                    symbol, trailing_close_result.get("error") or "unknown",
+                )
+                return None
 
         # Check if profit meets target threshold (original fixed TP)
         if unrealized_pnl < target_profit:
@@ -21482,7 +21613,7 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
                 bot,
                 symbol,
                 "quick_profit",
-                close_result.get("retMsg", close_result),
+                close_result.get("error") or close_result.get("retMsg") or str(close_result),
             )
             return {
                 "success": False,
@@ -24318,7 +24449,7 @@ class GridBotService(AutoPilotMixin, AutoMarginMixin, PositionMixin):
                 )
                 return True
             else:
-                error_msg = result.get("retMsg", "Unknown error")
+                error_msg = result.get("error") or result.get("retMsg") or "Unknown error"
                 logger.error(f"[{symbol}] Initial entry FAILED - {error_msg}")
                 return False
 

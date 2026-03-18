@@ -315,6 +315,7 @@ def get_dynamic_range_settings(mode: str) -> Dict[str, float]:
 DIRECTIONAL_REANCHOR_ON_MANUAL_CLOSE_ENABLED = True
 DIRECTIONAL_REANCHOR_MAX_PENDING_CYCLES = 5
 DIRECTIONAL_REANCHOR_MAX_PENDING_AGE_SEC = 120  # 2 minutes
+DIRECTIONAL_REANCHOR_ON_FLAT_DETECTED_ENABLED = True  # Auto-reanchor when exchange confirms flat (covers external close, TP/SL fills)
 
 # Volatility bands for ATR%
 LOW_ATR_PCT = 0.01  # 1%
@@ -1471,6 +1472,8 @@ QUICK_PROFIT_ATR_SCALE_FACTOR = 0.60  # 60% of ATR — scalp=0.4, trend=0.8
 # Trailing TP flow confirmation thresholds
 TRAILING_TP_FLOW_THRESHOLD = 15  # Flow score needed to activate trailing
 TRAILING_TP_FLOW_CONFIDENCE = 0.35  # Flow confidence needed to activate trailing
+TRAILING_TP_FIRST_CLOSE_ENABLED = True  # Take first partial close before activating trailing
+TRAILING_TP_FIRST_CLOSE_PCT = 0.50  # Close 50% on first profit, trail the remainder
 # Flow-based loss cut timing
 FLOW_LOSS_CUT_SUSTAINED_SEC = 45  # Seconds of sustained flow opposition before cutting (was 30 — too aggressive, false cuts on noise)
 ADAPTIVE_PROFIT_PROTECTION_SHADOW_TREND_CUT_PCT = 0.0035

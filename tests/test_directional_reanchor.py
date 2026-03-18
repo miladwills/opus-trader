@@ -277,3 +277,115 @@ def test_no_duplicate_reanchor_loop():
     # Simulating the guard check
     should_run = bot.get("directional_reanchor_pending") and bot.get("mode") in ("long", "short")
     assert should_run is False
+
+
+# ---------------------------------------------------------------------------
+# Test: Auto-reanchor on flat detection (exchange-side close / TP/SL fills)
+# ---------------------------------------------------------------------------
+
+def _simulate_auto_reanchor(bot, prev_persisted, current_position_size, mode, range_mode, now_iso):
+    """Simulate the auto-reanchor detection logic from grid_bot_service."""
+    _prev_position_side = str(bot.get("current_position_side") or "").lower()
+    if (
+        mode in ("long", "short")
+        and range_mode != "fixed"
+        and not bot.get("directional_reanchor_pending")
+        and prev_persisted > 0
+        and current_position_size == 0
+    ):
+        _side_matches_mode = (
+            (mode == "long" and _prev_position_side == "buy")
+            or (mode == "short" and _prev_position_side == "sell")
+        )
+        if _side_matches_mode:
+            if strategy_cfg.DIRECTIONAL_REANCHOR_ON_FLAT_DETECTED_ENABLED:
+                bot["directional_reanchor_pending"] = True
+                bot["directional_reanchor_requested_at"] = now_iso
+                bot["_reanchor_source"] = "flat_detected"
+                return True
+    return False
+
+
+def test_auto_reanchor_on_flat_detected():
+    """Position transitions from open to flat — auto-reanchor triggers."""
+    bot = _make_bot(mode="long", range_mode="dynamic", position_size=1.5)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    triggered = _simulate_auto_reanchor(bot, prev_persisted=1.5, current_position_size=0.0,
+                                         mode="long", range_mode="dynamic", now_iso=now_iso)
+    assert triggered is True
+    assert bot["directional_reanchor_pending"] is True
+    assert bot["_reanchor_source"] == "flat_detected"
+    assert bot["directional_reanchor_requested_at"] == now_iso
+
+
+def test_auto_reanchor_on_flat_detected_short():
+    """Short mode: position flat → auto-reanchor triggers."""
+    bot = _make_bot(mode="short", range_mode="trailing", position_size=2.0)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    triggered = _simulate_auto_reanchor(bot, prev_persisted=2.0, current_position_size=0.0,
+                                         mode="short", range_mode="trailing", now_iso=now_iso)
+    assert triggered is True
+    assert bot["directional_reanchor_pending"] is True
+
+
+def test_auto_reanchor_skipped_for_fixed_range():
+    """Fixed range mode — no auto-reanchor."""
+    bot = _make_bot(mode="long", range_mode="fixed", position_size=1.0)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    triggered = _simulate_auto_reanchor(bot, prev_persisted=1.0, current_position_size=0.0,
+                                         mode="long", range_mode="fixed", now_iso=now_iso)
+    assert triggered is False
+    assert bot.get("directional_reanchor_pending") is not True
+
+
+def test_auto_reanchor_skipped_when_already_pending():
+    """If reanchor is already pending (manual close path), don't double-trigger."""
+    bot = _make_bot(mode="long", range_mode="dynamic", position_size=1.0,
+                    directional_reanchor_pending=True)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    triggered = _simulate_auto_reanchor(bot, prev_persisted=1.0, current_position_size=0.0,
+                                         mode="long", range_mode="dynamic", now_iso=now_iso)
+    assert triggered is False
+
+
+def test_auto_reanchor_skipped_for_neutral_mode():
+    """Neutral mode — no auto-reanchor."""
+    bot = _make_bot(mode="neutral", range_mode="dynamic", position_size=1.0)
+    bot["current_position_side"] = "buy"
+    now_iso = datetime.now(timezone.utc).isoformat()
+    triggered = _simulate_auto_reanchor(bot, prev_persisted=1.0, current_position_size=0.0,
+                                         mode="neutral", range_mode="dynamic", now_iso=now_iso)
+    assert triggered is False
+
+
+def test_auto_reanchor_skipped_for_side_mismatch():
+    """Long mode but previous position was sell — no auto-reanchor (mode switch edge case)."""
+    bot = _make_bot(mode="long", range_mode="dynamic", position_size=1.0)
+    bot["current_position_side"] = "sell"  # Wrong side for long mode
+    now_iso = datetime.now(timezone.utc).isoformat()
+    triggered = _simulate_auto_reanchor(bot, prev_persisted=1.0, current_position_size=0.0,
+                                         mode="long", range_mode="dynamic", now_iso=now_iso)
+    assert triggered is False
+
+
+def test_auto_reanchor_disabled_via_config():
+    """Config flag disabled — no auto-reanchor."""
+    bot = _make_bot(mode="long", range_mode="dynamic", position_size=1.0)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    original = strategy_cfg.DIRECTIONAL_REANCHOR_ON_FLAT_DETECTED_ENABLED
+    try:
+        strategy_cfg.DIRECTIONAL_REANCHOR_ON_FLAT_DETECTED_ENABLED = False
+        triggered = _simulate_auto_reanchor(bot, prev_persisted=1.0, current_position_size=0.0,
+                                             mode="long", range_mode="dynamic", now_iso=now_iso)
+        assert triggered is False
+    finally:
+        strategy_cfg.DIRECTIONAL_REANCHOR_ON_FLAT_DETECTED_ENABLED = original
+
+
+def test_auto_reanchor_no_trigger_when_still_has_position():
+    """Position still open — no auto-reanchor (only triggers on transition to flat)."""
+    bot = _make_bot(mode="long", range_mode="dynamic", position_size=1.0)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    triggered = _simulate_auto_reanchor(bot, prev_persisted=1.0, current_position_size=0.5,
+                                         mode="long", range_mode="dynamic", now_iso=now_iso)
+    assert triggered is False
