@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% block title %}Overview{% endblock %}
+{% block content %}
+<!-- Health banner -->
+<div class="mb-6 rounded-lg p-4 border
+    {% if snap and snap.health_status == 'healthy' %}bg-emerald-900/20 border-emerald-700
+    {% elif snap and snap.health_status == 'degraded' %}bg-yellow-900/20 border-yellow-700
+    {% elif snap and snap.health_status == 'unhealthy' %}bg-orange-900/20 border-orange-700
+    {% elif snap and snap.health_status == 'critical' %}bg-red-900/20 border-red-700
+    {% else %}bg-slate-900 border-slate-800{% endif %}">
+    <div class="flex items-center justify-between">
+        <div class="flex items-center gap-4">
+            <div class="text-3xl font-bold
+                {% if snap and snap.health_status == 'healthy' %}text-emerald-400
+                {% elif snap and snap.health_status == 'degraded' %}text-yellow-400
+                {% elif snap and snap.health_status == 'unhealthy' %}text-orange-400
+                {% elif snap and snap.health_status == 'critical' %}text-red-400
+                {% else %}text-gray-500{% endif %}">
+                {% if snap and snap.health_score is not none %}{{ snap.health_score | round(0) | int }}{% else %}--{% endif %}
+            </div>
+            <div>
+                <div class="text-sm font-medium uppercase tracking-wide
+                    {% if snap and snap.health_status == 'healthy' %}text-emerald-400
+                    {% elif snap and snap.health_status == 'degraded' %}text-yellow-400
+                    {% elif snap and snap.health_status == 'unhealthy' %}text-orange-400
+                    {% elif snap and snap.health_status == 'critical' %}text-red-400
+                    {% else %}text-gray-500{% endif %}">
+                    {% if snap %}{{ snap.health_status or 'unknown' }}{% else %}No Data{% endif %}
+                </div>
+                <div class="text-xs text-gray-500">Platform Health (via Watchdog)</div>
+            </div>
+        </div>
+        <div class="text-xs text-gray-500">
+            {% if snap %}Updated {{ time_ago(snap.timestamp) }}{% else %}Waiting for first collection...{% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Status cards -->
+<div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
+    <!-- Runner -->
+    <div class="bg-slate-900 rounded-lg p-3 border border-slate-800">
+        <div class="text-xs text-gray-500 mb-1">Runner</div>
+        {% if snap and snap.runner_active %}
+            <span class="text-emerald-400 text-sm font-medium">Active</span>
+            {% if snap.runner_pid %}<span class="text-xs text-gray-600 ml-1">PID {{ snap.runner_pid }}</span>{% endif %}
+        {% else %}
+            <span class="text-red-400 text-sm font-medium">{{ 'Down' if snap else '--' }}</span>
+        {% endif %}
+    </div>
+    <!-- Bridge -->
+    <div class="bg-slate-900 rounded-lg p-3 border border-slate-800">
+        <div class="text-xs text-gray-500 mb-1">Bridge</div>
+        {% if snap and snap.bridge_producer_alive %}
+            <span class="text-emerald-400 text-sm font-medium">Alive</span>
+            {% if snap.bridge_stale_count is not none %}
+                <span class="text-xs {% if snap.bridge_stale_count > 0 %}text-yellow-400{% else %}text-gray-600{% endif %} ml-1">{{ snap.bridge_stale_count }} stale</span>
+            {% endif %}
+        {% else %}
+            <span class="text-red-400 text-sm font-medium">{{ 'Dead' if snap else '--' }}</span>
+        {% endif %}
+    </div>
+    <!-- Bots -->
+    <div class="bg-slate-900 rounded-lg p-3 border border-slate-800">
+        <div class="text-xs text-gray-500 mb-1">Bots</div>
+        {% if snap and snap.bot_total is not none %}
+            <span class="text-sm font-medium text-gray-200">{{ snap.bot_total }} total</span>
+            {% if snap.bot_status_counts %}
+                <div class="text-[10px] text-gray-500 mt-0.5">
+                    {% for st, cnt in (snap.bot_status_counts or {}).items() %}{{ st }}: {{ cnt }}{% if not loop.last %}, {% endif %}{% endfor %}
+                </div>
+            {% endif %}
+        {% else %}
+            <span class="text-gray-500 text-sm">--</span>
+        {% endif %}
+    </div>
+    <!-- Flash Crash -->
+    <div class="bg-slate-900 rounded-lg p-3 border border-slate-800">
+        <div class="text-xs text-gray-500 mb-1">Flash Crash</div>
+        {% if snap and snap.flash_crash_active %}
+            <span class="text-red-400 text-sm font-bold">ACTIVE</span>
+        {% else %}
+            <span class="text-emerald-400 text-sm">Inactive</span>
+        {% endif %}
+    </div>
+    <!-- Open Triage -->
+    <div class="bg-slate-900 rounded-lg p-3 border border-slate-800">
+        <div class="text-xs text-gray-500 mb-1">Open Triage</div>
+        {% set open_count = (stats.get('open', 0) + stats.get('acknowledged', 0)) %}
+        <span class="text-sm font-medium {% if open_count > 0 %}text-yellow-400{% else %}text-emerald-400{% endif %}">{{ open_count }}</span>
+        <a href="/triage" class="text-xs text-cyan-400 hover:underline ml-2">view</a>
+    </div>
+    <!-- Collector -->
+    <div class="bg-slate-900 rounded-lg p-3 border border-slate-800">
+        <div class="text-xs text-gray-500 mb-1">Collector</div>
+        {% if collector %}
+            <span class="text-emerald-400 text-sm">#{{ collector.collection_count }}</span>
+            {% if collector.source_errors %}
+                <span class="text-xs text-orange-400 ml-1">{{ collector.source_errors | length }} err</span>
+            {% endif %}
+        {% else %}
+            <span class="text-gray-500 text-sm">--</span>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Source health -->
+{% if collector and collector.source_errors %}
+<div class="bg-slate-900 rounded-lg border border-orange-900/50 p-3 mb-6">
+    <div class="text-xs text-orange-400 font-medium mb-2">Source Errors</div>
+    {% for src, err in collector.source_errors.items() %}
+    <div class="text-xs text-gray-400 mb-1"><span class="text-orange-300">{{ src }}:</span> {{ err[:100] }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Health sparkline -->
+{% if health_history and health_history | length > 1 %}
+<div class="bg-slate-900 rounded-lg p-4 border border-slate-800 mb-6">
+    <div class="text-xs text-gray-500 mb-2">Health Score - Last 2 Hours</div>
+    <canvas id="health-chart" height="50"></canvas>
+</div>
+{% endif %}
+
+<!-- Active triage cases -->
+{% if active_cases %}
+<div class="bg-slate-900 rounded-lg border border-slate-800 mb-6">
+    <div class="px-4 py-3 border-b border-slate-800 flex justify-between items-center">
+        <span class="text-sm font-medium text-gray-300">Active Triage Cases</span>
+        <a href="/triage" class="text-xs text-cyan-400 hover:underline">View all</a>
+    </div>
+    <div class="divide-y divide-slate-800">
+        {% for c in active_cases[:5] %}
+        <div class="px-4 py-2 flex items-center gap-3 text-sm">
+            <span class="w-2 h-2 rounded-full flex-shrink-0 bg-{{ severity_color(c.severity) }}-500"></span>
+            <span class="text-xs text-gray-500 w-16 flex-shrink-0">{{ time_ago(c.last_seen_at) }}</span>
+            <span class="text-gray-300 truncate flex-1">{{ c.title }}</span>
+            <span class="text-xs text-gray-500">{{ c.matched_signals }} signals</span>
+            <span class="text-xs text-gray-500">x{{ c.hit_count }}</span>
+            <span class="text-xs px-2 py-0.5 rounded-full
+                {% if c.status == 'open' %}bg-red-900/50 text-red-400{% else %}bg-yellow-900/50 text-yellow-400{% endif %}">
+                {{ c.status }}
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Recent audit -->
+<div class="bg-slate-900 rounded-lg border border-slate-800">
+    <div class="px-4 py-3 border-b border-slate-800 flex justify-between items-center">
+        <span class="text-sm font-medium text-gray-300">Recent Audit</span>
+        <a href="/audit" class="text-xs text-cyan-400 hover:underline">View all</a>
+    </div>
+    {% if recent_audit %}
+    <div class="divide-y divide-slate-800">
+        {% for e in recent_audit %}
+        <div class="px-4 py-2 flex items-center gap-3 text-sm">
+            <span class="text-xs text-gray-500 w-16 flex-shrink-0">{{ time_ago(e.timestamp) }}</span>
+            <span class="text-xs text-cyan-400 w-20 flex-shrink-0">{{ e.actor }}</span>
+            <span class="text-gray-400 truncate flex-1">{{ e.action }}</span>
+            <span class="text-xs text-gray-600">{{ e.target_id }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="px-4 py-6 text-center text-gray-500 text-sm">No audit entries yet</div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const historyData = {{ health_history | tojson }};
+if (historyData.length > 1) {
+    const canvas = document.getElementById('health-chart');
+    if (canvas) {
+        const ctx = canvas.getContext('2d');
+        const W = canvas.parentElement.clientWidth - 32;
+        const H = 50;
+        canvas.width = W;
+        canvas.height = H;
+        const scores = historyData.map(h => h.health_score).filter(s => s != null);
+        if (scores.length > 1) {
+            const minS = Math.max(0, Math.min(...scores) - 5);
+            const maxS = Math.min(100, Math.max(...scores) + 5);
+            const range = maxS - minS || 1;
+            ctx.strokeStyle = '#22d3ee';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            scores.forEach((s, i) => {
+                const x = (i / (scores.length - 1)) * W;
+                const y = H - ((s - minS) / range) * H;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+        }
+    }
+}
+</script>
+{% endblock %}

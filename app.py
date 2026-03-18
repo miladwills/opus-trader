@@ -3502,6 +3502,68 @@ def api_flash_crash_status():
 
 
 # ============================================================
+# AI Ops Boundary Endpoints (read-only, cache-only)
+# ============================================================
+
+
+@app.route("/api/aiops/health-summary")
+@require_basic_auth
+def api_aiops_health_summary():
+    """Lightweight read-only summary for AI Ops service consumption.
+
+    Strictly cache-only: no rebuilds, no exchange calls, no lock-heavy reads.
+    Returns compact JSON with bot counts, bridge freshness, runner state.
+    """
+    snapshot = _runtime_snapshot_bridge_request_snapshot()
+    meta = (snapshot.get("meta") or {}) if snapshot else {}
+    sections = (snapshot.get("sections") or {}) if snapshot else {}
+
+    # Bot counts from bots_runtime_light cached section (no rebuild)
+    light = (sections.get("bots_runtime_light", {}).get("payload") or {})
+    bots = light.get("bots") or []
+    status_counts = {}
+    for b in bots:
+        st = b.get("lifecycle_status") or "unknown"
+        status_counts[st] = status_counts.get(st, 0) + 1
+
+    # Section freshness from cached snapshot (no rebuild)
+    now = time.time()
+    stale_sections = []
+    section_names = ("market", "open_orders", "positions", "bots_runtime_light", "summary")
+    for name in section_names:
+        sec = sections.get(name, {})
+        pub = float(sec.get("published_at") or 0)
+        threshold = runtime_snapshot_bridge.READ_STALE_AGE_SEC.get(name, 10.0)
+        if pub <= 0 or (now - pub) > threshold:
+            stale_sections.append(name)
+
+    # Flash crash: direct file check, no service instantiation
+    flash_active = False
+    fc_path = os.path.join("storage", "flash_crash_state.json")
+    try:
+        if os.path.exists(fc_path):
+            with open(fc_path, "r") as f:
+                fc = json.load(f)
+            flash_active = bool(fc.get("flash_crash_active"))
+    except Exception:
+        pass
+
+    return jsonify({
+        "runner_active": _runner_lock_held() or bool((_runner_process_info() or {}).get("active")),
+        "runner_pid": _runner_pid_from_lock(),
+        "bridge_producer_alive": _pid_is_alive(meta.get("producer_pid"), expected_substring="runner.py"),
+        "bridge_produced_at": meta.get("produced_at"),
+        "bridge_stale_sections": stale_sections,
+        "bridge_stale_count": len(stale_sections),
+        "bridge_total_sections": len(section_names),
+        "bot_status_counts": status_counts,
+        "bot_total": len(bots),
+        "flash_crash_active": flash_active,
+        "stop_flag_exists": os.path.exists(RUNNER_STOP_FLAG),
+    })
+
+
+# ============================================================
 # Position Management APIs
 # ============================================================
 

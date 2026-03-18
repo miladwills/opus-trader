@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Triage{% endblock %}
+{% block content %}
+<!-- Filter bar -->
+<div class="flex items-center gap-3 mb-4">
+    <span class="text-sm text-gray-400">Filter:</span>
+    <a href="/triage" class="text-xs px-2 py-1 rounded {% if not current_filter %}bg-cyan-900/50 text-cyan-400{% else %}bg-slate-800 text-gray-400 hover:text-cyan-400{% endif %}">All</a>
+    <a href="/triage?status=open" class="text-xs px-2 py-1 rounded {% if current_filter == 'open' %}bg-cyan-900/50 text-cyan-400{% else %}bg-slate-800 text-gray-400 hover:text-cyan-400{% endif %}">Open</a>
+    <a href="/triage?status=acknowledged" class="text-xs px-2 py-1 rounded {% if current_filter == 'acknowledged' %}bg-cyan-900/50 text-cyan-400{% else %}bg-slate-800 text-gray-400 hover:text-cyan-400{% endif %}">Acknowledged</a>
+    <a href="/triage?status=auto_resolved" class="text-xs px-2 py-1 rounded {% if current_filter == 'auto_resolved' %}bg-cyan-900/50 text-cyan-400{% else %}bg-slate-800 text-gray-400 hover:text-cyan-400{% endif %}">Auto-Resolved</a>
+    <a href="/triage?status=false_positive" class="text-xs px-2 py-1 rounded {% if current_filter == 'false_positive' %}bg-cyan-900/50 text-cyan-400{% else %}bg-slate-800 text-gray-400 hover:text-cyan-400{% endif %}">False Positive</a>
+    <div class="flex-1"></div>
+    <div class="text-xs text-gray-500">
+        {% for st, cnt in stats.items() %}{{ st }}: {{ cnt }}{% if not loop.last %} | {% endif %}{% endfor %}
+    </div>
+</div>
+
+{% if cases %}
+<div class="space-y-3">
+    {% for c in cases %}
+    <div class="bg-slate-900 rounded-lg border border-slate-800 overflow-hidden" id="case-{{ c.case_id }}">
+        <!-- Case header -->
+        <div class="px-4 py-3 flex items-center gap-3 cursor-pointer" onclick="toggleCase('{{ c.case_id }}')">
+            <span class="w-2 h-2 rounded-full flex-shrink-0 bg-{{ severity_color(c.severity) }}-500"></span>
+            <span class="text-xs font-mono text-gray-500 w-28 flex-shrink-0">{{ c.case_id }}</span>
+            <span class="text-sm text-gray-200 flex-1 truncate">{{ c.title }}</span>
+            <span class="text-xs text-gray-500">{{ c.category }}</span>
+            <span class="text-xs text-gray-500">{{ c.matched_signals }} sig</span>
+            <span class="text-xs text-gray-500">x{{ c.hit_count }}</span>
+            <span class="text-xs text-gray-500">{{ time_ago(c.last_seen_at) }}</span>
+            <span class="text-xs px-2 py-0.5 rounded-full
+                {% if c.status == 'open' %}bg-red-900/50 text-red-400
+                {% elif c.status == 'acknowledged' %}bg-yellow-900/50 text-yellow-400
+                {% elif c.status == 'auto_resolved' %}bg-emerald-900/50 text-emerald-400
+                {% elif c.status == 'false_positive' %}bg-slate-800 text-gray-500
+                {% else %}bg-slate-800 text-gray-500{% endif %}">
+                {{ c.status }}
+            </span>
+            <svg class="w-4 h-4 text-gray-500 transform transition-transform case-chevron" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"/>
+            </svg>
+        </div>
+        <!-- Case detail (hidden by default) -->
+        <div class="case-detail hidden border-t border-slate-800 px-4 py-3 bg-slate-950/50">
+            <div class="grid grid-cols-2 gap-4 mb-3">
+                <div>
+                    <div class="text-xs text-gray-500 mb-1">Diagnosis</div>
+                    <div class="text-sm text-gray-300">{{ c.diagnosis }}</div>
+                </div>
+                <div>
+                    <div class="text-xs text-gray-500 mb-1">Affected Components</div>
+                    <div class="flex gap-1 flex-wrap">
+                        {% for comp in c.affected_components %}
+                        <span class="text-xs px-1.5 py-0.5 bg-slate-800 text-gray-400 rounded">{{ comp }}</span>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            <div class="grid grid-cols-4 gap-3 mb-3 text-xs">
+                <div><span class="text-gray-500">Matched signals:</span> <span class="text-gray-300">{{ c.matched_signals }}</span></div>
+                <div><span class="text-gray-500">Evidence items:</span> <span class="text-gray-300">{{ c.evidence_count }}</span></div>
+                <div><span class="text-gray-500">Window hits:</span> <span class="text-gray-300">{{ c.window_hits }}</span></div>
+                <div><span class="text-gray-500">Persistence:</span> <span class="text-gray-300">{{ c.persistence_sec | round(0) | int }}s</span></div>
+            </div>
+            {% if c.evidence %}
+            <div class="mb-3">
+                <div class="text-xs text-gray-500 mb-1">Evidence</div>
+                {% for ev in c.evidence[:5] %}
+                <div class="text-xs text-gray-400 mb-0.5 pl-2 border-l border-slate-700">
+                    <span class="text-gray-500">[{{ ev.source }}]</span>
+                    {% if ev.excerpt %}{{ ev.excerpt[:150] }}{% elif ev.detail %}{{ ev.detail[:150] }}{% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+            {% if c.suggested_checks %}
+            <div class="mb-3">
+                <div class="text-xs text-gray-500 mb-1">Suggested Checks</div>
+                {% for check in c.suggested_checks %}
+                <div class="text-xs text-gray-400 pl-2">- {{ check }}</div>
+                {% endfor %}
+            </div>
+            {% endif %}
+            {% if c.status in ('open', 'acknowledged') %}
+            <div class="flex gap-2 mt-2">
+                {% if c.status == 'open' %}
+                <button onclick="triageAction('{{ c.case_id }}', 'acknowledge')" class="text-xs px-3 py-1 bg-yellow-900/30 text-yellow-400 rounded hover:bg-yellow-900/50">Acknowledge</button>
+                {% endif %}
+                <button onclick="triageAction('{{ c.case_id }}', 'false-positive')" class="text-xs px-3 py-1 bg-slate-800 text-gray-400 rounded hover:bg-slate-700">False Positive</button>
+            </div>
+            {% endif %}
+            {% if c.resolved_at %}
+            <div class="text-xs text-gray-500 mt-2">Resolved {{ time_ago(c.resolved_at) }}{% if c.resolution_reason %}: {{ c.resolution_reason }}{% endif %}</div>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="bg-slate-900 rounded-lg border border-slate-800 px-4 py-12 text-center text-gray-500">
+    No triage cases{% if current_filter %} with status "{{ current_filter }}"{% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleCase(caseId) {
+    const el = document.getElementById('case-' + caseId);
+    const detail = el.querySelector('.case-detail');
+    const chevron = el.querySelector('.case-chevron');
+    detail.classList.toggle('hidden');
+    chevron.classList.toggle('rotate-180');
+}
+
+function triageAction(caseId, action) {
+    fetch('/api/triage/' + caseId + '/' + action, { method: 'POST' })
+        .then(r => r.json())
+        .then(() => location.reload())
+        .catch(e => console.error(e));
+}
+</script>
+{% endblock %}
